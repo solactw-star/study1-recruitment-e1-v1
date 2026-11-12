@@ -696,20 +696,16 @@ async function formalVerifyPdf_(doc,expected){
  return bytes;
 }
 function formalConsentRender_(){
- const stateData=formalConsent;
- const ready=!!(stateData&&stateData.originalVerified&&
-  (stateData.researcherPresigned||stateData.staffExplained));
+ const x=formalConsent,ready=!!(x&&x.originalVerified&&x.researcherPresigned===true);
  if(el('review'))el('review').disabled=!ready;
  if(el('finish'))el('finish').disabled=!ready||!formalInk||
-  !el('readPdf').checked||!el('agree').checked||
-  !!stateData.signed||state.busy;
+  !el('readPdf').checked||!el('agree').checked||x.signed===true||state.busy;
  if(el('consentStatus'))el('consentStatus').textContent=
-  !stateData?'尚未核對E1本人有效預約。':
-  stateData.signed?'受試者已在線上簽署，請核對完整PDF副本與預約狀態。':
-  !stateData.originalVerified?'正在核對原版PDF完整位元組與SHA。':
-  stateData.researcherPresigned?'研究者已先簽署完整PDF，請閱讀後於網頁手寫本人簽名。':
-  !stateData.staffExplained?'請先確認研究人員必要說明與答疑，再完成線上簽署。':
-  '研究人員已完成解說。請完整閱讀原文並以筆跡簽署。';
+  !x?'尚未核對E1本人有效預約。':
+  x.signed?'已在線上簽署；請核對完整PDF副本與原預約狀態。':
+  !x.researcherPresigned?'研究者預簽PDF未核實，禁止簽署。':
+  !x.originalVerified?'正在核對研究者預簽完整PDF位元組與SHA。':
+  '研究者已先簽署完整PDF，請閱讀後於網頁手寫本人簽名。';
 }
 function formalConsentLoadPdf_(){
  if(!formalConsent)return;
@@ -744,45 +740,26 @@ function formalConsentStatus_(){
  const token=formalConsent.token;
  rpc('study1FormalConsentStatus',token,result=>{
   if(!formalConsent||formalConsent.token!==token)return;
-  if(!result||result.experiment!=='E1'||
+  if(!result||result.experiment!=='E1'||result.researcherPreSigned!==true||
      result.sourceSha256!==formalConsent.documentSha256||
      result.version!==formalConsent.documentVersion){
-   status('原本人預約／同意版本核對不一致，已停用簽署。');
+   status('本人預約／研究者預簽來源核對不一致，已停用簽署。');
    formalConsentReset_();formalConsentRender_();return;
   }
-  formalConsent.researcherPresigned=result.researcherPreSigned===true;
-  formalConsent.staffExplained=result.researcherExplanationCompleted===true;
+  formalConsent.researcherPresigned=true;
   formalConsent.signed=result.signatureAccepted===true;
   formalConsent.confirmed=result.staffConfirmed===true;
-  if(formalConsent.staffExplained&&!formalConsent.researcherPresigned){
-   const explanation=result.explanation;
-   if(!explanation||typeof explanation.answer!=='string'||
-      !explanation.answer.trim()){
-    formalConsent.staffExplained=false;
-    status('研究人員解說事件缺失；不得簽署。');
-   }else{
-    el('officialPdfStatus').textContent='研究人員解說已記錄：'+explanation.answer+
-      '。如仍有疑問，請先向研究團隊詢問再簽署。';
-   }
-  }
-  if(result.copyAvailable===true&&formalConsent.confirmed){
-   formalConsentCopy_();
-  }else{
-   status(formalConsent.signed?(formalConsent.researcherPresigned?'您的簽署PDF已保存；正在核對預約結果與本人副本。':'已保存簽署PDF，待研究人員確認。'):
-    (formalConsent.researcherPresigned||formalConsent.staffExplained)?
-     '請閱讀研究者已簽PDF並本人手寫簽署。':'尚待研究人員說明與回覆疑問。');
-  }
+  if(result.copyAvailable===true&&formalConsent.confirmed)formalConsentCopy_();
+  else status(formalConsent.signed?'完整PDF已保存，正在核對本人副本與原預約結果。':
+   '請閱讀研究者預簽完整PDF並手寫本人簽名。');
   formalConsentRender_();
  });
 }
 async function formalVerifySigned_(copy){
- const preSigned=copy&&copy.researcherPreSigned===true;
- if(!formalConsent||copy.experiment!=='E1'||
-    copy.dualSigned!==true||
+ if(!formalConsent||!copy||copy.researcherPreSigned!==true||
+    copy.experiment!=='E1'||copy.dualSigned!==true||
     !/^[a-f0-9]{64}$/.test(copy.participantSignedPdfSha256||'')||
-    (preSigned?
-     copy.participantSignedPdfSha256!==copy.signedPdfSha256:
-     copy.participantSignedPdfSha256===copy.signedPdfSha256)||
+    copy.participantSignedPdfSha256!==copy.signedPdfSha256||
     copy.participantSignedPdfSha256===copy.sourceSha256||
     copy.version!==formalConsent.documentVersion||
     copy.sourceSha256!==formalConsent.documentSha256||
@@ -793,28 +770,15 @@ async function formalVerifySigned_(copy){
     copy.signedPdfSha256===copy.sourceSha256)
   throw Error('FORMAL_SIGNED_PDF_SOURCE_MISMATCH');
  const instant=new Date(copy.signedAt);
- if(!Number.isFinite(instant.getTime())||
-    instant.toISOString()!==copy.signedAt)
+ if(!Number.isFinite(instant.getTime())||instant.toISOString()!==copy.signedAt)
   throw Error('FORMAL_SIGNED_PDF_TRUSTED_TIME_INVALID');
  const date=Object.fromEntries(new Intl.DateTimeFormat('en-US',{
   timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'
  }).formatToParts(instant).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
  if(copy.taipeiDate!==date.year+'/'+date.month+'/'+date.day)
   throw Error('FORMAL_SIGNED_PDF_TAIPEI_DATE_INVALID');
- if(!preSigned){
-  const staffInstant=new Date(copy.researcherSignedAt);
-  if(!Number.isFinite(staffInstant.getTime())||
-     staffInstant.toISOString()!==copy.researcherSignedAt)
-   throw Error('FORMAL_RESEARCHER_SIGNED_TIME_INVALID');
-  const staffDay=Object.fromEntries(new Intl.DateTimeFormat('en-US',{
-   timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'
-  }).formatToParts(staffInstant).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));
-  if(copy.researcherTaipeiDate!==staffDay.year+'/'+staffDay.month+'/'+staffDay.day)
-   throw Error('FORMAL_RESEARCHER_TAIPEI_DATE_INVALID');
- }
  const raw=atob(copy.base64),bytes=Uint8Array.from(raw,x=>x.charCodeAt(0));
- if(bytes.length!==copy.bytes||
-    String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')
+ if(bytes.length!==copy.bytes||String.fromCharCode(...bytes.slice(0,5))!=='%PDF-')
   throw Error('FORMAL_SIGNED_PDF_BYTES_INVALID');
  const sha=Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)))
   .map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -880,7 +844,7 @@ function formalConsentStart_(reservation){
      typeof result.token!=='string'||
      !/^[a-f0-9-]{70,90}$/i.test(result.token)||
      typeof result.documentSha256!=='string'||
-     !/^[a-f0-9]{64}$/.test(result.documentSha256)){
+     !/^[a-f0-9]{64}$/.test(result.documentSha256)||result.researcherPresigned!==true){
    status('尚無合法本人預約／正式同意邀請；禁止進入PDF簽署。');return;
   }
   formalConsent={token:result.token,reservationId:reservation.reservationId,
@@ -907,7 +871,7 @@ function formalInkInit_(){
     y:(e.clientY-r.top)*canvas.height/r.height};
  };
  canvas.addEventListener('pointerdown',e=>{
-  if(!formalConsent||!(formalConsent.staffExplained||formalConsent.researcherPresigned)||
+  if(!formalConsent||formalConsent.researcherPresigned!==true||
      !formalConsent.originalVerified||formalConsent.signed)return;
   drawing=true;const p=coord(e);ctx.beginPath();ctx.moveTo(p.x,p.y);
   if(canvas.setPointerCapture)canvas.setPointerCapture(e.pointerId);
@@ -976,7 +940,7 @@ function formalConsentWire_(){
  el('review').addEventListener('click',formalConsentStatus_);
  for(const id of ['readPdf','agree'])el(id).addEventListener('change',formalConsentRender_);
  el('finish').addEventListener('click',()=>{
-  if(!formalConsent||!(formalConsent.staffExplained||formalConsent.researcherPresigned)||
+  if(!formalConsent||formalConsent.researcherPresigned!==true||
      !formalConsent.originalVerified||!formalInk||state.busy||
      !el('readPdf').checked||!el('agree').checked)return;
   const canvas=el('visitorSignaturePreview');

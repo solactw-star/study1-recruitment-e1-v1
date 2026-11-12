@@ -238,77 +238,16 @@ test('FORMAL browser: full E1 V05 slot -> WAITLISTED -> V08 claim, never auto-bo
  assert.deepEqual(h.errors,[]);
 });
 
-test('FORMAL consent-last browser synthetic: HELD -> actual PDF SHA -> staff explanation -> ink -> signed PDF -> staff copy -> withdrawal',async()=>{
- const h=simulate(undefined,true);
- h.enter();assert.equal(h.click('hold'),true);
+test('FORMAL rejects non-presigned E1 invitation without reading or signing a private PDF',async()=>{
+ const h=simulate(undefined,true,false);h.enter();h.click('hold');
  h.act('核對本人暫留並進入最後知情同意');
- // Async browser WebCrypto digest must settle before any consent action.
  await new Promise(resolve=>setImmediate(resolve));
- assert.equal(h.node('step-consent').hidden,false);
- assert.equal(h.node('officialPdfDownload').hidden,false);
- assert.equal(h.node('finish').disabled,true);
+ assert.equal(h.calls.some(x=>x.name==='study1FormalConsentOriginalPdf'),false);
  assert.equal(h.calls.some(x=>x.name==='study1EConsentSignPdf'),false);
- const findIn=(root,term)=>{
-  const search=n=>{
-   if(n.kind==='button'&&n.textContent.includes(term))return n;
-   for(const c of n.children){const f=search(c);if(f)return f;}
-   return null;
-  };
-  return search(h.node(root));
- };
- const refresh=findIn('step-consent','更新研究人員說明');
- assert.ok(refresh);
- h.staffExplain();refresh.handlers.get('click')();
- assert.equal(h.node('finish').disabled,true,'no signature/affirmative check yet');
- const canvas=h.node('visitorSignaturePreview');
- canvas.handlers.get('pointerdown')({clientX:20,clientY:20,pointerId:1});
- canvas.handlers.get('pointermove')({clientX:60,clientY:70,pointerId:1});
- canvas.handlers.get('pointerup')({clientX:60,clientY:70,pointerId:1});
- h.node('readPdf').checked=true;
- h.node('readPdf').handlers.get('change')();
- h.node('agree').checked=true;
- h.node('agree').handlers.get('change')();
- assert.equal(h.node('finish').disabled,false);
- assert.equal(h.click('finish'),true);
- assert.ok(h.calls.some(x=>x.name==='study1EConsentSignPdf'));
  assert.equal(h.node('finish').disabled,true);
- h.staffConfirm();refresh.handlers.get('click')();
- // WebCrypto SHA-256 is truly asynchronous in the VM, not guaranteed to
- // settle after a single event-loop turn on a busy CI runner.
- for(let i=0;i<40&&h.node('officialSignedPdfResult').hidden;i++)
-  await new Promise(resolve=>setTimeout(resolve,5));
- assert.equal(h.node('officialSignedPdfResult').hidden,false);
- assert.equal(h.node('officialSignedPdfDownload').hidden,false);
- assert.equal(h.node('officialSignedPdfSha').textContent,h.signedSha);
- assert.equal(h.node('officialPdfSha').textContent,h.pdfSha);
- // §70-S.23: independent read-only Reservations verification never
- // converts an online dual-signed PDF into a fictitious booked seat.
- assert.equal(h.reservations[0].status,'HELD');
- assert.match(h.node('status').textContent,/仍為HELD暫留/);
- assert.ok(h.calls.some(x=>x.name==='study1FormalStatus'));
- // A distinct verified CONFIRMED reservation may be reported as booked.
- h.reservations[0].status='CONFIRMED';
- refresh.handlers.get('click')();
- for(let i=0;i<40&&!/正式預約均已獨立核實/.test(h.node('status').textContent);i++)
-  await new Promise(resolve=>setTimeout(resolve,5));
- assert.match(h.node('status').textContent,/正式預約均已獨立核實/);
- const withdrawal=findIn('step-consent','撤回已確認');
- assert.ok(withdrawal);
- const area=withdrawal;
- // The textarea is a sibling of the withdrawal button, inside its parent box.
- const box=h.node('step-consent').children.find(x=>x.children.some(y=>y===area));
- assert.ok(box);
- const label=box.children.find(x=>x.kind==='label');
- const reason=label.children.find(x=>x.kind==='textarea');
- reason.value='研究參與者希望撤回同意';
- withdrawal.handlers.get('click')();
- assert.equal(h.isWithdrawn(),true);
- assert.equal(h.calls.some(x=>/UnifiedPreview|SIMULATED_SIGN_ONLY/.test(x.name)),false);
- assert.deepEqual(h.errors,[]);
+ assert.match(h.node('status').textContent,/禁止進入PDF簽署|預簽|未核實/);
 });
 
-// Latest operational decision does not eliminate staff Q&A evidence: it only
-// removes the old 15-minute duration as a hard timer for online e-consent.
 test('§70-S.23 consent is online-only without a 15-minute countdown or booking shortcut',()=>{
  assert.match(html,/請閱讀研究者事先完成簽名/);
  assert.match(formal,/researcherPresigned/);
