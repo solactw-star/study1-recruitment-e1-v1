@@ -184,3 +184,11 @@
 - E1 Email OTP：每次頁面會話的核發 requestId 僅建立一次；寄送開始即停用再寄按鈕，不因回覆遺失、節流或 `ALREADY_ISSUED` 自動重送；區別 `ISSUED`、`THROTTLED`、`ALREADY_ISSUED` 和未知結果，不把核發／寄件要求當成信件送達；僅有效 challenge ID 可顯示輸入框，八位碼格式在送出前驗證。
 - 對應既有 `tests/study1-formal-browser-synthetic-e2e.test.cjs` 增量加入離線負測；沿用原 V2 public-readonly CI 自動偵測 `gas/` 更新。沒有變更 server OTP HMAC／MailApp／Sheets／預約或正式簽署核心，也沒有將公開版 RPC 封鎖打開。
 - 本次 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。Google 授權不影響 GitHub 離線建置，但實機 UAT 仍待授權可用時執行。
+
+### 2026-11-12 21:27（Asia/Taipei）｜E1 FORMAL／OTP 離線測試與變更範圍已回讀
+
+- CODE_COMMIT_SHA=`80f63fbeea294305d786df59425d05540212d45f`（其直接父提交 `deb6bd8a2268a9f1993600f4ad0d27ca92153020`）；該 commit 經 GitHub REST 回讀只改 `gas/Study1Visitor.html`、`tests/study1-formal-browser-synthetic-e2e.test.cjs`、原 `docs/V2-MIGRATION-STATUS.md`，沒有動 GAS 服務端 OTP、公開 ACL 或正式資料來源。
+- CI_VERIFIED= [GitHub Actions Run #43227447901](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43227447901)；Job `public-safety` ID `131214184370`；Job 實際日誌 `34 PASS / 0 FAIL / 0 SKIP`，含新增七項 E1 自陳／申請／Email OTP 負向測試與既有公開唯讀安全測試。
+- HEAD_CODE_READBACK=PASS；FORMAL 頁改用單一 OTP 核發請求識別、節流與未確認寄件結果不冒稱已送達、自陳不符不送出個資、格式不符不呼叫後端。公開版遠端 `ANYONE` 不開放申請／寄信／預約／PDF 的原安全閘門仍未修改。
+- SYNC_STATUS=`MAIN_CODE_CI_VERIFIED=true`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。Google 授權阻塞尚未解除，不阻礙離線建置；不得將離線 CI 判為真人營運成功。
+- NEXT_ACTION：繼續既有 E1 五項 MVP 必要後端與 UI 程式整合，尤其 OTP 結果通知、原時段預約與最後 PDF 研究者預簽／參與者簽署之閉環；維持原 GAS、正式 Sheets、REC 不動。
