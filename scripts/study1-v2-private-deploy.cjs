@@ -49,7 +49,23 @@ function checkHead(head){
  core.closedManifest(head.files);core.closedWebsite(head.files);
  return {sha:TARGET,files:32};
 }
-async function makeApi(c,fetcher=fetch){
+// Only GET is idempotent/read-only here. Bounded HTTP 503 / 429 retries are
+// safe; never retry POST, HTTP 401/403, malformed JSON or network exceptions.
+// Google recommends 1s minimum for 503 and 30s for 429 quota responses.
+const GET_RETRY_MAX_ATTEMPTS=3;
+function retryDelayMs(status,attempt,jitter){
+ assert((status===429||status===503)&&attempt>=1&&
+  attempt<GET_RETRY_MAX_ATTEMPTS,'invalid GET retry request');
+ const base=status===429?30000:1000;
+ return base*(2**(attempt-1))+Math.floor(Math.max(0,Math.min(0.999999,jitter))*250);
+}
+function safeApiRoute(sub){
+ // Never print query strings, page tokens, opaque deployment IDs or OAuth.
+ if(/^\/deployments\/[^/?]+$/.test(sub))return '/deployments/:id';
+ const route=sub.split('?')[0];
+ return ['/content','/versions','/deployments'].includes(route)?route:'[V2_API_ROUTE]';
+}
+async function makeApi(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random){
  const params=new URLSearchParams({grant_type:'refresh_token',
   refresh_token:c.refresh_token,client_id:c.client_id,client_secret:c.client_secret});
  const auth=await fetcher('https://oauth2.googleapis.com/token',{
@@ -62,12 +78,26 @@ async function makeApi(c,fetcher=fetch){
  async function req(method,sub,body){
   assert(['GET','POST'].includes(method),'unapproved HTTP method');
   assert(!/\/\/|%2f/i.test(sub),'malformed V2-only relative path');
-  const response=await fetcher(base+sub,{method,headers:{
-   Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},
-   body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});
-  assert(response.ok,method+' V2 Apps Script API '+sub.split('?')[0]+
-   ' HTTP '+response.status+' (check OAuth scopes; no mutation inferred)');
-  return response.json();
+  const route=safeApiRoute(sub);
+  // Single attempt for POST even if its response is ambiguous or HTTP 503.
+  const maxAttempts=method==='GET'?GET_RETRY_MAX_ATTEMPTS:1;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+   const response=await fetcher(base+sub,{method,headers:{
+    Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},
+    body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});
+   if(response.ok)return response.json();
+   const status=response.status;
+   if(method==='GET'&&(status===429||status===503)&&attempt<maxAttempts){
+    const ms=retryDelayMs(status,attempt,random());
+    report('V2_PRIVATE_GET_RETRY_HTTP_STATUS='+status+
+     ' route='+route+' attempt='+attempt+'/'+maxAttempts+' delay_ms='+ms);
+    await sleep(ms);
+    continue;
+   }
+   // All errors fail closed. Do not print Google error bodies or credentials.
+   assert(false,method+' V2 Apps Script API '+route+' HTTP '+status+
+    ' after '+attempt+' attempt(s); no mutation inferred');
+  }
  }
  async function list(resource){
   const all=[],seen=new Set();
@@ -302,6 +332,7 @@ if(require.main===module)main().catch(e=>{
  process.exitCode=1;
 });
 module.exports={SID,REPO,TARGET,CONFIRM,invocation,reviewedLocal,
- checkHead,makeApi,normalizedVersions,normalizedDeployments,
+ checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
+ normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,
  fingerprint,inventory,audit,deploy};
