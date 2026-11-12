@@ -390,6 +390,7 @@ el('otpVerify').addEventListener('click',()=>{
 if(typeof google!=='undefined'&&google.script&&google.script.run){
  google.script.run.withFailureHandler(()=>{
    state.ready=false;el('chooseE1').disabled=true;el('chooseE2').disabled=true;
+   for(const id of ['formalName','formalEmail','formalPhone',...yes])if(el(id))el(id).disabled=true;
    if(note)note.textContent='Study1 研究報名｜目前尚未開放正式報名與簽署';
    if(noticeText)noticeText.textContent='目前不蒐集申請資料、不寄送驗證碼，也不保留研究時段。';
    status('目前尚未開放線上報名。');
@@ -412,6 +413,7 @@ if(typeof google!=='undefined'&&google.script&&google.script.run){
   }).study1ParticipantReadiness();
 }else{
  state.ready=false;el('chooseE1').disabled=true;el('chooseE2').disabled=true;
+   for(const id of ['formalName','formalEmail','formalPhone',...yes])if(el(id))el(id).disabled=true;
  if(note)note.textContent='Study1 研究報名｜目前尚未開放正式報名與簽署';
  if(noticeText)noticeText.textContent='目前不蒐集申請資料、不寄送驗證碼，也不保留研究時段。';
  status('目前尚未開放線上報名。');
