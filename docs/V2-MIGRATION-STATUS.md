@@ -235,3 +235,15 @@
 - 前端原 `gas/Study1Visitor.html`：一筆真 HOLD 回應未知時，僅以相同 requestId 做一次唯讀查核；原有效 HELD 再核對本人狀態，不能宣稱 CONFIRMED；無原列或資料矛盾時鎖定再次提交，禁止自動重播。原額滿及 FIFO 能力仍以原伺服器核定 E1 來源處理，不創建假場次。
 - 原 `tests/study1-formal-v05-v08-original-booking.test.cjs` 與 `tests/study1-formal-v05-v08-browser-e2e.test.cjs` 新增零寫入到期、額滿阻擋、精確 requestId、丟失回應、UNKNOWN 不重送測試；納入既有 V2 CI，不取代原有測試。
 - 無遠端 GAS／Sheet／REC／信件或私人版本 1 操作。Google 授權仍阻礙真 UI；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+
+### 2026-11-12 22:18（Asia/Taipei）｜原 Reservations HOLD／到期／確認／UNKNOWN 交易回查完成、最新 CI 回讀
+
+- TASK_DOMAIN=`Study1_V2_E1_ORIGINAL_BOOKING_CLOSURE`；SOURCE_REPO=`solactw-star/study1-recruitment-e1-v1`；LAST_CODE_MAIN_SHA=`b6b32dd1f6d73d63e83a66080112b8016bc5df18`。
+- LAST_VERIFIED_STEP：Run #43235789329 `completed/success`，Job `public-safety` ID `131242669661`，原始 Job 日誌 `94 PASS / 0 FAIL / 0 SKIP`。前兩次測試中揭露 `requestId` 與原 `WZ_` HMAC 鍵不相同、跨本人／場次只能查 `UNKNOWN` 而非預期 Exception；已修正實際回查算法及合成負測，沒有遮蔽或刪減測試。最新成功 Run 證據：https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43235789329。
+- COMPLETED：原 `gas/Study1FormalBooking.js` 將仍儲存為 HELD 但依原 UTC 已到期的暫留唯讀投影為 EXPIRED，不更動原十欄 Reservations；新增公開版伺服器拒絕的私人 `study1FormalHoldOutcome` RPC，以同一本人 OTP 證據、slotId、requestId、原 PDF 版號/SHA 和既有正式 `WZ_` HMAC 算法，在共同 ScriptLock 與原兩次獨立 Slots／Reservations 快照下核對唯一來源列。無匹配列只回 UNKNOWN，跨本人／場次不揭露他人 ID，來源矛盾 fail-closed；不執行任何追加或補寫。
+- COMPLETED：原 `gas/Study1Visitor.html` 遇 HOLD 回應逾時／未知，保留同一 requestId，只做一次本人唯讀因果回查；結果仍未知時封鎖再次提交，回查 HELD 時仍須再對原本人 Reservations 狀態查詢、核對同一 reservationId 才解鎖；不可把 HELD、已簽 PDF 或未知結果冒稱 CONFIRMED。原額滿拒絕、10 分鐘 HELD 與 2 分鐘 quote 均維持既有**待 PI 核定**工作暫設，不自動改政策。
+- TESTS：增量擴充原 `tests/study1-formal-v05-v08-original-booking.test.cjs`、`tests/study1-formal-v05-v08-browser-e2e.test.cjs` 的額滿零新增、有效 HELD／到期 EXPIRED 無寫入、同 WZ_ HMAC 唯讀回查、本人及場次隔離、寫後回應丟失、UNKNOWN 不重送，以及獨立雙簽 PDF 後原 Reservations 才轉 CONFIRMED；加入既有 `.github/workflows/study1-v2-public-readonly-ci.yml`。
+- BLOCKERS：PI 核定原 E1 Slots、正式場次/HMAC、真人預約與 PDF 政策、Google 授權／實際 UI 尚未確認。最後一次 Slots 只見表頭是歷史證據，本輪沒有重新讀正式 Sheet，不以其推定今日內容。仍須後續 PDF/OWNER 必要整合，不宣稱真人端到端就緒。
+- WRITE_OWNER：唯一新 V2 GitHub `main`；本輪沒有任何舊 Repo／舊 PR／舊 GAS／正式 Sheets／REC／GAS 同步或部署操作。此段寫回後須再回讀 main SHA、commit 路徑及 blob。
+- SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`，`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，`OPEN=false`／`CONSENT_READY=false` 仍為規定關閉狀態。
+- NEXT_ACTION：繼續既有 E1 PDF 研究者預簽、最後階段本人線上簽署、完整雙簽副本與 OWNER 後台的原來源安全整合，離線增量測試；不待 OAuth，亦不碰正式 Sheets 或公開收件。
