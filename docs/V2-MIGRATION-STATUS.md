@@ -84,3 +84,16 @@
 - NO_REMOTE_WRITE: 此次只修改 **V2 GitHub main 的程式／測試／同一路徑進度檔**；沒有執行實際 `audit`、`deploy`、GAS HEAD 更新、原 GAS／正式 Sheets 寫入、正式收件。
 - STATUS: `GAS_SYNC_VERIFIED=true`（前次 32 檔 SHA `73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7`）；`PRIVATE_AUDIT_PARSER_CI_VERIFIED=true`；`REMOTE_DEPLOYMENT_INVENTORY_VERIFIED=false`；`GAS_PRIVATE_DEPLOYED=false`；`UI_VERIFIED=false`；`FORMAL_READY=false`；`LIVE_INTAKE_ENABLED=false`。
 - NEXT_ACTION: 以當下最新 V2 main 完整 commit SHA 重新手動執行 `.github/workflows/study1-v2-private-deploy.yml` 的 `mode=audit`；回讀真實版本／部署數、HEAD 32 檔 SHA、`MYSELF`、`USER_DEPLOYING` 與盤點指紋。audit 未通過前**不得執行 deploy**，也不得修改原系統或真人收件狀態。
+
+
+## 2026-11-12｜V2 PRIVATE MYSELF 唯讀 GET 429／503 有限退避修復
+
+- TASK_DOMAIN: `Study1_E1_V2_PRIVATE_AUDIT_GET_RETRY_FIX`
+- FAILURE_SOURCE: 手動唯讀 audit [Run 43179403869](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43179403869) 於 V2 `GET /deployments` 收到 HTTP 503，未成功產生遠端部署清單或 `V2_PRIVATE_INVENTORY_SHA256`；這不是正式部署成功或失敗的證據。
+- CODE: 同原路徑增量修改 `scripts/study1-v2-private-deploy.cjs`，commit `ff38c27eea74afb09906b9a59eb93636dbf95db9`。僅對 V2 Apps Script API 的 **GET** 429／503 最多 **3 次請求（含初次）**，以指數退避加有限 jitter 重試：503 約 1s、2s；429 約 30s、60s；耗盡則 fail closed。401、403、其他 HTTP 錯誤與網路例外不重試。OAuth refresh POST、`POST /versions`、`POST /deployments` 皆維持單次，沒有自動重試、回滾或重複建立。
+- DIAGNOSTIC: `V2_PRIVATE_GET_RETRY_HTTP_STATUS` 僅記錄狀態碼、白名單化路徑、重試次數與退避毫秒，不記錄 token、頁面游標、部署 ID／網址、完整 Google 錯誤本文或正式研究資料。
+- TEST: 同原路徑更新 `tests/study1-v2-private-deploy.test.cjs`，commit `c0de7b68d625e51086b60e1abc62eb2cce2fc038`；補齊 GET 503 成功重試、429 遲滯與三次截止、401／403／404 與網路例外拒絕重試，以及 POST 版本／部署在 503／429 時僅一次的回歸測試。
+- CI: [Run 43179932558](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43179932558)，`completed/success`，**36 PASS / 0 FAIL / 0 SKIP**；此 CI 無 OAuth Secret，不呼叫實際 GAS 或 Sheets。可證明測試與靜態守門通過，但不等於遠端 API 已恢復。
+- SAFETY: V2 Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f` 固定；先前核實 GAS HEAD SHA-256 `73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7` 的 32 檔配置、`MYSELF`／`USER_DEPLOYING`、收件關閉檢查不變。此輪只寫 V2 GitHub 程式／測試／本進度檔；不執行遠端 audit、deploy，不碰原 GAS／正式 Sheets，不開放真人收件。
+- NEXT_ACTION: 手動用**執行當下最新 main SHA** 觸發 `.github/workflows/study1-v2-private-deploy.yml` 的 `mode=audit`（另外兩欄留空），回讀真實遠端版本／部署、MYSELF、HEAD 32 檔 SHA 及 `V2_PRIVATE_INVENTORY_SHA256`；任何 503 重試耗盡或不安全 ACL 均保留阻塞，不能逕行 deploy。
+- SYNC_STATUS: `MAIN_SYNC_VERIFIED=true`（本檔寫回後以最新 main 回讀為準），`GET_RETRY_CI_VERIFIED=true`，`REMOTE_DEPLOYMENT_INVENTORY_VERIFIED=false`，`GAS_PRIVATE_DEPLOYED=false`，`UI_VERIFIED=false`，`FORMAL_READY=false`，`LIVE_INTAKE_ENABLED=false`。
