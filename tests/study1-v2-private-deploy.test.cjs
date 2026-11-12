@@ -122,7 +122,7 @@ test('read-only audit accepts nonliteral HEAD and correctly counts versioned dep
  assert.equal(result.head.files.length,32);
  assert.equal(result.deploymentCount,1);
  assert.equal(result.versionedDeployments,0);
- assert.equal(result.deps[0].kind,'HEAD');
+ assert.equal(d.normalizedDeployments(result.deps)[0].kind,'HEAD');
  assert.equal(versionContentReads,0);
  assert.match(result.fp,/^[a-f0-9]{64}$/);
  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
