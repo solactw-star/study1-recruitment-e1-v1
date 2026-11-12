@@ -156,10 +156,15 @@ test('Invalid editor JSON fails before invoking backend and does not mutate sett
 
 function routeHarness(active='solac.tw@gmail.com',effective='solac.tw@gmail.com'){
  const h=server(active,effective),htmlCalls=[];
- const html={createHtmlOutputFromFile:name=>{
-  htmlCalls.push(name);
-  return {name,setTitle(){return this},addMetaTag(){return this}};
- }};
+ const output=name=>({name,setTitle(){return this},addMetaTag(){return this}});
+ const html={
+  createHtmlOutputFromFile:name=>{htmlCalls.push(name);return output(name)},
+  createTemplateFromFile:name=>{
+   htmlCalls.push(name);
+   // V2 public home/apply are templates, while private views remain denied.
+   return {evaluate:()=>output(name)};
+  }
+ };
  h.ctx.HtmlService=html;
  const source=fs.readFileSync(path.join(__dirname,'../gas/Website.js'),'utf8');
  vm.runInContext(source,h.ctx,{timeout:1000});
@@ -189,7 +194,7 @@ test('Redacted active email cannot open admin HTML or call its RPCs even if depl
  assert.deepEqual(h.htmlCalls,[]);
  const ui=client(h);
  assert.equal(ui.el('save').disabled,true);
- assert.match(ui.el('status').textContent,/拒絕存取/);
+ assert.match(ui.el('status').textContent,/拒絕存取|STUDY1_V2_PUBLIC_READ_ONLY/);
  assert.equal(h.props.size,0);
 });
 
