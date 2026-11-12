@@ -7,7 +7,7 @@ const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses
 const end=html.indexOf("\n})();\n\n(function(){",start);
 assert.ok(start>0&&end>start,'original single visitor formal branch missing');
 const script=html.slice(start,end+5);
-function simulate(readiness){
+function simulate(readiness,options={}){
  const nodes=new Map(),queries=new Map(),calls=[],rendered=[],errors=[];
  function node(id){
   if(!nodes.has(id))nodes.set(id,{
@@ -67,8 +67,9 @@ function simulate(readiness){
   },
   reset:widget=>{rendered.push({reset:widget})}
  };
- const ctx={document:doc,window:{turnstile,google:{script:{run:runner}}},
-  google:{script:{run:runner}},
+ const connected=options.rpcAvailable!==false;
+ const ctx={document:doc,window:connected?{turnstile,google:{script:{run:runner}}}:{turnstile},
+  ...(connected?{google:{script:{run:runner}}}:{}),
   crypto:{getRandomValues:arr=>crypto.randomFillSync(arr)},Uint8Array,
   Array,Object,String,Boolean,Number,Math,Error};
  vm.runInNewContext(script,ctx,{timeout:4000});
@@ -153,4 +154,18 @@ test('FORMAL readiness service failure remains visibly CLOSED and cannot collect
  assert.equal(s.calls.filter(x=>x.method!=='study1ParticipantReadiness').length,0);
  assert.match(s.queries.get('.noticebar').textContent,/尚未開放正式報名與簽署/);
  assert.match(s.node('siteNoticeText').textContent,/不蒐集申請資料/);
+});
+
+test('FORMAL page without any Google authorization or RPC still displays CLOSED and collects nothing',()=>{
+ const s=simulate(null,{rpcAvailable:false});
+ assert.equal(s.calls.length,0);
+ assert.equal(s.node('chooseE1').disabled,true);
+ assert.equal(s.node('chooseE2').disabled,true);
+ assert.equal(s.node('formalName').disabled,true);
+ assert.equal(s.node('formalEmail').disabled,true);
+ assert.equal(s.node('formalPhone').disabled,true);
+ assert.equal(s.node('formalHumanCheck').hidden,true);
+ assert.equal(s.click('chooseE1'),false);
+ assert.match(s.node('status').textContent,/尚未開放線上報名/);
+ assert.match(s.queries.get('.noticebar').textContent,/目前尚未開放正式報名與簽署/);
 });
