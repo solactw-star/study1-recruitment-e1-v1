@@ -383,16 +383,14 @@ test('P0 official consent PDF: OWNER publication is explicit, SHA-verified, inde
  const publicIndex=h.scope.study1ConsentVersionPublication(pub);
  assert.equal(publicIndex.revision,3);assert.equal(publicIndex.published.E1,id);
  const document=h.scope.study1ConsentPublicRead_('E1');
- assert.equal(document.available,true);
- assert.deepEqual(Object.keys(document).sort(),['available','base64','bytes','experiment','mime','sha256','title','version'].sort());
- assert.equal(Buffer.from(document.base64,'base64').toString('hex'),content.toString('hex'));
- assert.equal(document.sha256,sha);assert.equal(document.version,'v1');
+ assert.equal(document.available,false,'researcher-presigned source cannot leak via the legacy document reader');
+ assert.equal(document.base64,undefined,'no researcher handwriting may be disclosed');
  assert.equal(docs.get(id).sharing,privateAccess);
  const v2=h.scope.study1ConsentVersionUpload(submit('v2',3));
  assert.equal(v2.published.E1,id,'upload must not replace public document');
  const changed=h.scope.study1ConsentVersionSelect({id:v2.documents[1].id,expectedRevision:4});
  assert.equal(changed.published.E1,id,'staff selection remains separate from public document');
- assert.equal(h.scope.study1ConsentPublicRead_('E1').version,'v1');
+ assert.equal(h.scope.study1ConsentPublicRead_('E1').available,false,'old pre-signed source remains private');
  assert.throws(()=>h.scope.study1ConsentVersionPublication({
   experiment:'E1',id:v2.documents[1].id,confirmSha256:v2.documents[1].sha256,expectedRevision:4
  }),/已更新/);

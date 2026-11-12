@@ -444,6 +444,20 @@ test('MVP actual PDF engine accepts only researcher presigned source, adds parti
  const owner=h.scope.study1EConsentOwnerSignedPdfDownload(issued.id);
  assert.equal(owner.signedPdfSha256,copy.signedPdfSha256);
  assert.equal(sha(Buffer.from(owner.base64,'base64')),copy.signedPdfSha256);
+ const stored=h.scope.study1EConsentRegistry_(),altered=JSON.parse(JSON.stringify(stored));
+ altered.records[0].participantSignedPdf.sha='0'.repeat(64);
+ h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(altered));
+ assert.throws(()=>h.scope.study1EConsentOwnerSignedPdfDownload(issued.id),
+  /OWNER_SIGNED_PDF_EVIDENCE_CHANGED|同意|PDF/);
+ h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(stored));
+ const eventBefore=h.scope.study1EConsentEvent_;
+ h.scope.study1EConsentEvent_=(ref,entry,kind)=>{
+  const event=eventBefore(ref,entry,kind);
+  return kind==='SIGNATURE'?{...event,data:{...event.data,taipeiDate:'2000/01/01'}}:event;
+ };
+ assert.throws(()=>h.scope.study1EConsentOwnerSignedPdfDownload(issued.id),
+  /OWNER_SIGNED_PDF_CHRONOLOGY_INVALID/);
+ h.scope.study1EConsentEvent_=eventBefore;
  const viewed=await PDFLib.PDFDocument.load(Buffer.from(copy.base64,'base64'));
  assert.equal(viewed.getPageCount(),5);
  assert.equal(sha(original),h.doc.sha256);

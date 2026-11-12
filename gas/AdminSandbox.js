@@ -643,6 +643,10 @@ function study1ConsentPublicRead_(experiment){
  if(!fileId)return {available:false,experiment};
  const entry=index.documents.find(x=>x.id===fileId&&x.experiment===experiment);
  if(!entry)throw Error('已發布的文件來源不存在');
+ // §70-S.24: the researcher has ALREADY signed this original PDF.
+ // Legacy general-interest document reads must never disclose that signature;
+ // a FORMAL participant obtains it only through the OTP/HELD-bound token.
+ if(entry.researcherPresigned===true)return {available:false,experiment};
  const bytes=study1ConsentDocumentBytes_(entry);
  return {available:true,experiment,title:entry.title,version:entry.version,
   sha256:entry.sha256,bytes:bytes.length,mime:'application/pdf',
@@ -1140,12 +1144,22 @@ function study1EConsentOwnerSignedPdfDownload(consentId){if(typeof study1V2Publi
   throw Error('OWNER_SIGNED_PDF_NOT_READY');
  const signature=study1EConsentEvent_(x.signature,x,'SIGNATURE');
  const confirmed=study1EConsentEvent_(x.confirmation,x,'CONFIRMATION');
- if(signature.data.signedPdfSha256!==x.signedPdf.sha||
+ if(!x.participantSignedPdf||
+    x.participantSignedPdf.id!==x.signedPdf.id||
+    x.participantSignedPdf.sha!==x.signedPdf.sha||
+    signature.data.signedPdfSha256!==x.participantSignedPdf.sha||
+    confirmed.data.participantSignedPdfSha256!==x.participantSignedPdf.sha||
     confirmed.data.mode!=='RESEARCHER_PRESIGNED_SOURCE'||
     confirmed.data.researcherSignedSourceSha256!==x.documentSha||
     confirmed.data.signatureHash!==x.signature.sha||
     confirmed.data.researcherSignedPdfSha256!==x.signedPdf.sha)
   throw Error('OWNER_SIGNED_PDF_EVIDENCE_CHANGED');
+ const participantAt=new Date(signature.data.serverSignedAt);
+ if(!Number.isFinite(participantAt.getTime())||
+    participantAt.toISOString()!==signature.data.serverSignedAt||
+    signature.data.taipeiDate!==study1PdfTaipeiDate_(participantAt))
+  throw Error('OWNER_SIGNED_PDF_CHRONOLOGY_INVALID');
+ study1EConsentSignedPdfRead_(x.participantSignedPdf,x);
  const bytes=study1EConsentSignedPdfRead_(x.signedPdf,x);
  return {experiment:'E1',recordId:x.id,version:x.documentVersion,
   researcherPreSigned:true,sourceSha256:x.documentSha,
