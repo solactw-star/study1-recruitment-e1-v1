@@ -434,9 +434,23 @@ test('E1 original hold outcome is read-only, exact-key and bound to applicant an
  const hold=h.holdSlot(a,h.S1,key),writes=h.mutations.length;
  const r=h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key});
  assert.equal(r.status,'HELD');assert.equal(r.reservationId,hold.reservationId);
- assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:b,slotId:h.S1,requestId:key}),/BINDING_MISMATCH/);
- assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S2,requestId:key}),/BINDING_MISMATCH/);
+ // Original WZ_ HMAC includes applicant and slot. Other identities/slots
+ // derive a DIFFERENT key, yielding UNKNOWN without leaking a reservation ID.
+ const other=h.ctx.study1FormalHoldOutcome({emailProof:b,slotId:h.S1,requestId:key});
+ const wrongSlot=h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S2,requestId:key});
+ for(const x of [other,wrongSlot]){
+  assert.equal(x.resolved,false);assert.equal(x.status,'UNKNOWN');
+  assert.equal(x.reservationId,undefined);
+ }
  assert.equal(h.tables.Reservations.rows.length,1);assert.equal(h.mutations.length,writes);
+ // A corrupted row whose signed HMAC key no longer agrees with its owner
+ // MUST fail closed rather than exposing the original reservation.
+ const original=h.tables.Reservations.rows[0][1];
+ h.tables.Reservations.rows[0][1]=b.applicantId;
+ assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key}),
+  /BINDING_MISMATCH/);
+ h.tables.Reservations.rows[0][1]=original;
+ assert.equal(h.mutations.length,writes);
  h.clock.now+=11*60000;
  assert.equal(h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key}).status,'EXPIRED');
 });
