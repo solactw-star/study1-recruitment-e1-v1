@@ -176,3 +176,11 @@
 - AUTH_BLOCKER：使用者回報目前無法完成 Google 帳號授權。僅阻礙遠端私人／公開網站實際檢查；不阻擋 V2 GitHub 可離線建置與測試。不得將上述合成驗證標為瀏覽器 UAT 成功。
 - SYNC_STATUS：程式先前已提交 main；本輪更新同一進度主檔並回讀 commit／變更清單。不執行 GAS HEAD PUT、不建立或更新版本／部署、不修改私人版本 1／原 GAS／正式 Sheets／REC；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 - NEXT_ACTION：接續 E1 五項 MVP 中尚需程式完善的報名、OTP、時段預約、研究者預簽 PDF 與 OWNER 後台、Email 通知，以現有正式主規格為準做離線增量實作與必要測試，不以 Google 授權為工程工作前置阻塞；正式收件仍關閉。
+
+## 2026-11-12｜E1 FORMAL 自陳報名／Email OTP 錯誤處理增量（GitHub only）
+
+- TASK_DOMAIN=`Study1_V2_E1_FORMAL_SELF_REPORT_EMAIL_OTP`；PRE_MAIN_SHA=`deb6bd8a2268a9f1993600f4ad0d27ca92153020`；依正式主規格 §70-S.18、§70-S.24、§70-S.34 接續，保留既有真實 Applicants／Screenings／Verification 安全邊界，不加入 Demo、證件核身或假資料。
+- 修改 V2 原 `gas/Study1Visitor.html`：五項自陳若未全選只顯示不符資格、未送出個資；姓名/Email/電話格式先在本機檢查，避免無效申請送至後端；後端不明拒絕不冒充資格不符，原申請識別不正確時 fail closed。
+- E1 Email OTP：每次頁面會話的核發 requestId 僅建立一次；寄送開始即停用再寄按鈕，不因回覆遺失、節流或 `ALREADY_ISSUED` 自動重送；區別 `ISSUED`、`THROTTLED`、`ALREADY_ISSUED` 和未知結果，不把核發／寄件要求當成信件送達；僅有效 challenge ID 可顯示輸入框，八位碼格式在送出前驗證。
+- 對應既有 `tests/study1-formal-browser-synthetic-e2e.test.cjs` 增量加入離線負測；沿用原 V2 public-readonly CI 自動偵測 `gas/` 更新。沒有變更 server OTP HMAC／MailApp／Sheets／預約或正式簽署核心，也沒有將公開版 RPC 封鎖打開。
+- 本次 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。Google 授權不影響 GitHub 離線建置，但實機 UAT 仍待授權可用時執行。

@@ -231,7 +231,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,slots:[],chosenDay:null,monthIndex:0,activeBooking:null};
+ emailProof:null,otpRequestId:null,slots:[],chosenDay:null,monthIndex:0,activeBooking:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -339,11 +339,25 @@ el('chooseE1').addEventListener('click',()=>{
 el('screenBack').addEventListener('click',()=>show('choose'));
 el('screenNext').addEventListener('click',()=>{
  if(!state.ready||state.busy)return;
+ // Screening is a self-declaration, not an identity check; ineligible answers
+ // never cross the RPC boundary or create a pending applicant record.
+ if(yes.some(id=>!el(id).checked)){
+  show('ineligible');
+  status('依目前自陳條件無法繼續申請；未送出姓名、健康答案或信箱。');
+  return;
+ }
+ const name=el('formalName').value.trim(),email=el('formalEmail').value.trim(),
+  phone=el('formalPhone').value.trim();
+ if(name.length<2||name.length>80||/[<>\r\n\x00-\x1f]/.test(name)||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||
+    phone.length>30||/[<>\r\n\x00-\x1f]/.test(phone)||
+    /^[=+\-@]/.test(name)||/^[=+\-@]/.test(phone)){
+  status('請檢查姓名、電子郵件及電話格式；資料尚未送出。');return;
+ }
  if(!state.humanToken){status('請先完成人機驗證再送出申請。');return;}
  const payload={experiment:'E1',adult:el('adult').checked,cycu:el('cycu').checked,
   noDx:el('noDx').checked,noTreatment:el('noTreatment').checked,
-  noPractice:el('noPractice').checked,name:el('formalName').value,
-  email:el('formalEmail').value,phone:el('formalPhone').value,
+  noPractice:el('noPractice').checked,name,email,phone,
   requestId:state.requestId||genRequest(),humanToken:state.humanToken};
  state.requestId=payload.requestId;
  state.humanToken='';
@@ -351,28 +365,59 @@ el('screenNext').addEventListener('click',()=>{
   window.turnstile.reset(state.captchaWidget);
  rpc('study1ParticipantBegin',payload,result=>{
   if(!result||result.accepted!==true){
-   show('ineligible');status('目前不符合此研究的報名條件。');return;
+   if(result&&result.reason==='SCREENING_NOT_ELIGIBLE'){
+    show('ineligible');status('目前自陳條件不符合研究報名資格。');
+   }else status('申請是否成立尚未確認；請勿重複送出，聯絡研究團隊核對。');
+   return;
+  }
+  if(typeof result.applicantId!=='string'||!/^APP_[A-Za-z0-9_-]{12,76}$/.test(result.applicantId)||
+     typeof result.screeningId!=='string'||!/^SCR_[A-Za-z0-9_-]{12,76}$/.test(result.screeningId)){
+   status('申請識別資料未能核實；請勿重複送出，聯絡研究團隊。');
+   return;
   }
   state.app={applicantId:result.applicantId,screeningId:result.screeningId,
    experiment:'E1',email:payload.email};
-  show('otp');status('申請已建立待驗證狀態；尚未完成正式資格審查或預約。');
+  show('otp');status('已建立待驗證申請，尚未完成信箱驗證、預約或知情同意。');
  });
 });
 el('otpSend').addEventListener('click',()=>{
- if(!state.ready||state.busy||!state.app)return;
+ if(!state.ready||state.busy||!state.app||state.otpRequestId)return;
+ // MailApp may have accepted a message when the RPC times out. Never create
+ // another challengeId by repeated clicks or falsely claim delivery.
  const payload={...state.app,requestId:genRequest()};
+ state.otpRequestId=payload.requestId;
+ el('otpSend').disabled=true;
  rpc('study1ParticipantSendOtp',payload,result=>{
-  if(!result||result.sent!==true){status('驗證碼已寄送或暫時受節流限制，請稍後重新核對信箱。');return;}
-  state.mail=result.challengeId;
-  el('otpInputWrap').hidden=false;
-  status('請至登記信箱查看驗證碼，郵件可能需要一些時間。');
+  if(!result||typeof result!=='object'){
+   status('驗證碼寄送結果尚未確認；請勿重複要求寄送，聯絡研究團隊核對。');return;
+  }
+  if(result.sent===false&&result.reason==='THROTTLED'){
+   status('驗證碼請求受到安全頻率限制；本次未確認寄出，請稍後聯絡研究團隊。');return;
+  }
+  if(typeof result.challengeId!=='string'||
+     !/^CHL_[A-Za-z0-9_-]{12,76}$/.test(result.challengeId)){
+   status('驗證碼的來源識別尚未核實；請勿重複寄送或輸入。');return;
+  }
+  if(result.sent===true&&result.reason==='ISSUED'){
+   state.mail=result.challengeId;
+   el('otpInputWrap').hidden=false;
+   status('伺服器已接受驗證碼寄送要求，實際送達仍需由信箱確認；八位碼10分鐘內有效。');return;
+  }
+  if(result.sent===false&&result.reason==='ALREADY_ISSUED'){
+   state.mail=result.challengeId;
+   el('otpInputWrap').hidden=false;
+   status('此申請已核發過驗證碼，系統不再寄送；若先前收到郵件，可輸入其中的八位碼。');return;
+  }
+  status('驗證碼寄送結果尚未確認；請勿重複要求寄送，聯絡研究團隊核對。');
  });
 });
 el('otpVerify').addEventListener('click',()=>{
  if(!state.ready||state.busy||!state.app||!state.mail)return;
+ const code=el('otpInput').value.trim();
+ if(!/^[0-9]{8}$/.test(code)){status('請輸入信箱中收到的八位數驗證碼；尚未送出驗證請求。');return;}
  rpc('study1ParticipantVerifyOtp',{...state.app,challengeId:state.mail,
-  code:el('otpInput').value},result=>{
-  if(!result||result.verified!==true){status('驗證碼無效、已使用或逾期，請確認後再操作。');return;}
+  code},result=>{
+  if(!result||result.verified!==true){status('驗證碼尚未通過核實，可能錯誤、逾期或已使用；未建立有效信箱證據。');return;}
   if(!result.emailProof){status('郵件證據回讀未完成，請聯絡研究團隊。');return;}
   rpc('study1ParticipantEmailStatus',result.emailProof,statusResult=>{
    if(!statusResult||statusResult.emailVerified!==true||

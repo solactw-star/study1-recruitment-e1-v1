@@ -43,6 +43,7 @@ function simulate(readiness,options={}){
    reservationState:'NOT_AUTHORIZED',consentState:'NOT_SIGNED'}),
   study1FormalV05Slots:req=>({experiment:'E1',slots:[]})
  };
+ if(options.serverOverrides)Object.assign(server,options.serverOverrides);
  const runner={
   withFailureHandler(cb){this.failure=cb;return this},
   withSuccessHandler(cb){this.success=cb;return this}
@@ -168,4 +169,86 @@ test('FORMAL page without any Google authorization or RPC still displays CLOSED 
  assert.equal(s.click('chooseE1'),false);
  assert.match(s.node('status').textContent,/尚未開放線上報名/);
  assert.match(s.queries.get('.noticebar').textContent,/目前尚未開放正式報名與簽署/);
+});
+
+function mockEligibleE1(s){
+ assert.equal(s.click('chooseE1'),true);
+ for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])
+  s.node(key).checked=true;
+ s.node('formalName').value='合成申請者';
+ s.node('formalEmail').value='synthetic.e1@example.org';
+ s.node('formalPhone').value='';
+ s.rendered[0].options.callback('SYNTHETIC_HUMAN_TOKEN_FOR_E1');
+ assert.equal(s.click('screenNext'),true);
+ assert.equal(s.node('step-otp').hidden,false);
+}
+test('E1 ineligible self-report stops before sending private data or CAPTCHA token',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'});
+ assert.equal(s.click('chooseE1'),true);
+ for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])s.node(key).checked=true;
+ s.node('noTreatment').checked=false;
+ assert.equal(s.click('screenNext'),true);
+ assert.equal(s.node('step-ineligible').hidden,false);
+ assert.equal(s.calls.some(x=>x.method==='study1ParticipantBegin'),false);
+ assert.match(s.node('status').textContent,/未送出姓名/);
+});
+test('E1 malformed contact stays local without calling begin RPC',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'});
+ assert.equal(s.click('chooseE1'),true);
+ for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])s.node(key).checked=true;
+ s.node('formalName').value='X';
+ s.node('formalEmail').value='broken-address';
+ s.rendered[0].options.callback('SYNTHETIC_HUMAN_TOKEN_FOR_E1');
+ assert.equal(s.click('screenNext'),true);
+ assert.equal(s.calls.some(x=>x.method==='study1ParticipantBegin'),false);
+ assert.match(s.node('status').textContent,/資料尚未送出/);
+});
+test('non-screening backend rejection does not falsely report ineligible',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantBegin:()=>({accepted:false,reason:'BACKEND_NOT_READY'})}});
+ assert.equal(s.click('chooseE1'),true);
+ for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])s.node(key).checked=true;
+ s.node('formalName').value='合成申請者';s.node('formalEmail').value='synthetic.e1@example.org';
+ s.rendered[0].options.callback('SYNTHETIC_HUMAN_TOKEN_FOR_E1');
+ assert.equal(s.click('screenNext'),true);
+ assert.equal(s.node('step-ineligible').hidden,true);
+ assert.equal(s.node('step-screen').hidden,false);
+ assert.match(s.node('status').textContent,/請勿重複送出/);
+});
+test('OTP THROTTLED never claims email sent; repeated click cannot issue a second challenge',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantSendOtp:()=>({sent:false,reason:'THROTTLED'})}});
+ mockEligibleE1(s);
+ assert.equal(s.click('otpSend'),true);
+ assert.equal(s.node('otpInputWrap').hidden,true);
+ assert.equal(s.node('otpSend').disabled,true);
+ assert.match(s.node('status').textContent,/頻率限制/);
+ assert.equal(s.click('otpSend'),false);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantSendOtp').length,1);
+});
+test('OTP ALREADY_ISSUED shows existing challenge only; does not imply a new email',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantSendOtp:()=>({sent:false,reason:'ALREADY_ISSUED',challengeId:'CHL_CLOSED_TEST_12345678'})}});
+ mockEligibleE1(s);s.click('otpSend');
+ assert.equal(s.node('otpInputWrap').hidden,false);
+ assert.match(s.node('status').textContent,/不再寄送/);
+ assert.equal(s.click('otpSend'),false);
+});
+test('OTP uncertain server failure is not retried with another requestId',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantSendOtp:()=>{throw Error('OFFLINE_MAIL_UNKNOWN')}}});
+ mockEligibleE1(s);s.click('otpSend');
+ assert.equal(s.node('otpSend').disabled,true);
+ assert.equal(s.node('otpInputWrap').hidden,true);
+ assert.equal(s.click('otpSend'),false);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantSendOtp').length,1);
+ assert.match(s.node('status').textContent,/請勿重複送出/);
+});
+test('OTP incorrect code shape never reaches verification RPC',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'});
+ mockEligibleE1(s);s.click('otpSend');
+ s.node('otpInput').value='12abc';
+ assert.equal(s.click('otpVerify'),true);
+ assert.equal(s.calls.some(x=>x.method==='study1ParticipantVerifyOtp'),false);
+ assert.match(s.node('status').textContent,/八位數驗證碼/);
 });
