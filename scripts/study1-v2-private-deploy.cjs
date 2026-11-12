@@ -302,12 +302,95 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  const description=descriptionBase+env.GITHUB_RUN_ID;
  const deployedVersions=new Set(normalizedDeployments(before.deps)
   .map(x=>x.version).filter(x=>x!==null));
- // Recover only ONE orphan from a prior authorized V2 attempt after
- // independently audited inventory, exact provenance and immutable SHA.
- const orphans=normalizedVersions(before.versions).filter(v=>
-  v.description.startsWith(descriptionBase)&&
-  /^\d+$/.test(v.description.slice(descriptionBase.length))&&
-  !deployedVersions.has(v.version));
+ // Exact verified failure origin: Run 43182160131 created an orphan at
+ // this V2 main SHA, before only the deployment tooling (not GAS) changed.
+ const KNOWN_ORPHAN_SOURCE_SHA='9d6bc139e47818f3fddc1e168f504b54bb57f0e9';
+ const allowedOrigins=new Set([env.GITHUB_SHA,KNOWN_ORPHAN_SOURCE_SHA]);
+ const orphanPattern=new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
+  ' GitHub ([a-f0-9]{40}) Run ([0-9]+)
+ assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
+ let version,createdNew=false;
+ if(orphans.length){
+  version={scriptId:SID,versionNumber:orphans[0].version};
+  checkHead(await api.getVersionContent(version.versionNumber));
+  report('V2_PRIVATE_REUSED_VERIFIED_ORPHAN_VERSION=true');
+ }else{
+  // No suitable orphan: exactly one version POST, never an automatic retry.
+  try{version=await api.createVersion(description);}
+  catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
+  assert(version?.scriptId===SID&&Number.isSafeInteger(version.versionNumber)&&
+   version.versionNumber>0,'version create response ambiguous; stop');
+  createdNew=true;
+  checkHead(await api.getVersionContent(version.versionNumber));
+ }
+ // Following a successful POST, retry GET-only inventory until eventual
+ // consistency is observed. No new endpoint if HEAD or deployments drift.
+ const preDeploy=await settleVersionInventory(
+  api,before,version.versionNumber,createdNew,sleep);
+ assert(core.digest(preDeploy.head.files)===TARGET,'HEAD changed after version verification');
+ assertMain(env);
+ let created;
+ try{created=await api.createDeployment(version.versionNumber,description);}
+ catch(e){throw Error('V2_PRIVATE_DEPLOY_POST_UNKNOWN_NO_RETRY: '+e.message);}
+ assert(created?.deploymentId&&created?.deploymentConfig?.scriptId===SID&&
+  created.deploymentConfig.versionNumber===version.versionNumber,
+  'deployment creation response ambiguous; no retry');
+ const got=await api.getDeployment(created.deploymentId);
+ const after=await settleDeploymentInventory(api,before,created.deploymentId,sleep);
+ assert(got?.deploymentId===created.deploymentId &&
+  got.deploymentConfig?.scriptId===SID &&
+  got.deploymentConfig.versionNumber===version.versionNumber,
+  'deployed ID/version readback failed');
+ // getContent(version) is the immutable security authority for access mode.
+ checkHead(await api.getVersionContent(version.versionNumber));
+ assert(after.deploymentCount===before.deploymentCount+1,
+  'unexpected number of deployments after creation');
+ const old=normalizedDeployments(before.deps),now=normalizedDeployments(after.deps);
+ assert(JSON.stringify(now.filter(x=>x.id!==created.deploymentId))===
+  JSON.stringify(old),'existing deployment changed');
+ assert(after.versionCount===before.versionCount+(createdNew?1:0),'version count drift after deployment');
+ const newDep=now.find(x=>x.id===created.deploymentId);
+ assert(newDep&&newDep.version===version.versionNumber,'new deployment missing from list');
+ assert(!newDep.points.some(x=>x.web?.access&&x.web.access!=='MYSELF'),
+  'new deployment has non-private access');
+ assert(!newDep.points.some(x=>x.web?.executeAs&&x.web.executeAs!=='USER_DEPLOYING'),
+  'new deployment has wrong executeAs');
+ report('V2_PRIVATE_DEPLOY_VERIFIED=true');
+ report('V2_PRIVATE_VERSION='+version.versionNumber);
+ report('V2_PRIVATE_DEPLOY_ID_REDACTED=true');
+ report('V2_PRIVATE_VERSION_SHA256='+TARGET);
+ report('V2_PRIVATE_ACCESS=MYSELF');
+ report('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
+ report('V2_PRIVATE_NO_HEAD_UPDATE=true');
+ report('V2_PRIVATE_NO_SHEET_OPERATIONS=true');
+ report('V2_PRIVATE_LIVE_INTAKE_ENABLED=false');
+ return {id:created.deploymentId,version:version.versionNumber};
+}
+async function main(){
+ const mode=process.argv[2];invocation(process.env,mode);
+ latestMain(process.env);reviewedLocal();
+ assert(process.env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
+ const c=core.credentials(process.env.V2_GAS_CLASPRC_JSON);
+ const api=await makeApi(c);
+ if(mode==='audit')await audit(api);
+ else await deploy(api,process.env);
+}
+if(require.main===module)main().catch(e=>{
+ console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
+ process.exitCode=1;
+});
+module.exports={SID,REPO,TARGET,CONFIRM,invocation,reviewedLocal,
+ checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
+ normalizedVersions,normalizedDeployments,
+ deploymentVersionShape,redactedDeploymentShapes,
+ fingerprint,inventory,audit,deploy,settleVersionInventory,settleDeploymentInventory};
+);
+ // Recover only ONE authorized orphan after an independently audited inventory
+ // and mandatory immutable 32-file SHA verification. Reject other origins.
+ const orphans=normalizedVersions(before.versions).filter(v=>{
+  const m=v.description.match(orphanPattern);
+  return m&&allowedOrigins.has(m[1])&&!deployedVersions.has(v.version);
+ });
  assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
  let version,createdNew=false;
  if(orphans.length){
