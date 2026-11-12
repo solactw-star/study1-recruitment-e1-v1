@@ -148,8 +148,8 @@ test('ambiguous OWNER upload result locks repeated writes until a fresh read',as
 test('OWNER private completed PDF link appears only after SHA and byte readback, invalid bytes fail closed',async()=>{
  const h=fixture();h.fire('e1PdfSignedRead');
  h.el('e1PdfSignedChoose').value=h.recordId;h.fire('e1PdfSignedChoose','change');
- h.fire('e1PdfSignedGet');await new Promise(r=>setImmediate(r));
- assert.equal(h.el('e1PdfSignedLink').hidden,false);
+ h.fire('e1PdfSignedGet');await new Promise(r=>setTimeout(r,40));
+ assert.equal(h.el('e1PdfSignedLink').hidden,false,h.el('e1PdfSignedStatus').textContent);
  assert.match(h.el('e1PdfSignedLink').download,/Study1_E1_E1V2_/);
  const bad=fixture({study1EConsentOwnerSignedPdfDownload:()=>({
   experiment:'E1',recordId:h.recordId,version:'E1V2',researcherPreSigned:true,
