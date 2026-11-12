@@ -274,3 +274,14 @@
 - COMPLETED：原新 V2 gas/ 內已不存在研究員二次簽章函式或隱藏 UI；現存 E1 簽署核心限定 researcherPresigned=true、FORMAL_E1、ISSUED、原本人 OTP/Reservations 綁定與原 PDF SHA，無相容 fallback；本人/OWNER PDF 副本驗證及撤回流程仍存在；公開登入唯讀版本繼續拒絕所有私人 RPC。
 - BLOCKERS/NEXT_ACTION：Google OAuth／正式核定預簽 PDF 與頁碼欄位／PI 原 E1 Slots／實際私人 Drive 與真人 UI 尚未取得新驗收證據；下一輪僅按唯一新 V2 main 接續剩餘正式 OWNER E1 管理、Email/預約與副本狀態整合。新的公開 GAS 同步與部署需獨立授權，現階段不啟用真人收件。
 - WRITE_OWNER=solactw-star/study1-recruitment-e1-v1；SYNC_STATUS：MAIN_CODE_CI_VERIFIED=true；GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false；PUBLIC_DEPLOYED=false；PUBLIC_UI_VERIFIED=false；FORMAL_READY=false；LIVE_INTAKE_ENABLED=false。舊網站 Repo／PR／GAS 一律 LEGACY_FROZEN／READ_ONLY_ARCHIVE，不執行寫入。
+
+## 2026-11-12｜V2 GAS 無依賴舊入口與 E1 非預簽相容路線的安全清理
+
+- TASK_DOMAIN=`Study1_V2_GAS_DEAD_EXECUTABLE_PRUNE`；SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1`，正式規格 §70-S.34–36；PRE_MAIN_SHA=`b231b460df5536de965496f7b8c20840d3b227a5`；LAST_CODE_MAIN_SHA=`309ee5db6a2194e4cd49df11328d203310daeb12`。
+- COMPLETED（`e01f822920f9c291cac9d0b357609bd539b90e65`）：直接移除 `gas/Website.js` 中所有已被前置 deny-all 阻擋、永遠不可達的 `admin/team/preview/demo` HTML 建立分支，只保留研究資訊首頁和 `view=apply`、`flowMode=FORMAL` 的關閉頁；刪除沒有任何功能的原 `gas/程式碼.js` 預設 `myFunction`，一併將原 V2 `scripts/study1-v2-gas-head-only.cjs` 固定來源清單由 32 份改為 31 份，修改既有公版安全/HEAD-only 負測。刪除未使用的 `SITE_RESOURCES_` 伺服器常數；不刪歷史來源定位檔。
+- COMPLETED（`309ee5db6a2194e4cd49df11328d203310daeb12`）：原 `gas/Study1Visitor.html` 正式 E1 同意流程的 `formalConsentRender_`、`formalConsentStatus_`、`formalVerifySigned_`、簽名畫布放行與本人原邀請查核現在嚴格要求 `researcherPresigned/researcherPreSigned===true`；非預簽來源不得讀取私人 PDF、不得簽名或取得以研究員事後加簽路線形成的副本。舊「先由參與者簽署、再由研究者確認」的瀏覽器成功路徑測試替換為非預簽拒絕負測；有效研究者預簽的本人筆跡/完整 PDF 保存與原 Reservations 獨立核對測試保留。
+- PRESERVED_DUE_TO_DEPENDENCIES：`gas/Study1Unified.js`、`gas/Study1Unified.html`、`gas/Study1Team.html`、`gas/Study1FixtureAdapter.js` 與 `Study1Visitor.html` 非正式 Demo 模擬相關區段仍被既有 fixture／Team/UI／測試引用，未達「已確認無依賴」的刪除門檻；`doGet` 已不會公開建立這些管理/測試頁，所有私人 RPC 維持伺服器端拒絕。此為剩餘待專項拆依賴工作，不能稱所有 Demo 原始碼均已清零。
+- LAST_VERIFIED_STEP：GitHub Actions [Run #43249257289](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43249257289)，Job `public-safety` #131290255240，原始 Job log：`216 tests／216 PASS／0 FAIL／0 SKIP`，對應 `309ee5db6a2194e4cd49df11328d203310daeb12`。Run #43247507062 曾有 1 項舊研究員事後確認瀏覽器測試失敗，已更換為非預簽拒絕負測且同新 SHA 通過，沒有關閉或略過安全測試。
+- WRITE_OWNER：本輪只寫新 V2 Repo 現有 GAS 原始碼、V2 HEAD-only 清單、相關測試與本原進度檔；未操作舊 GitHub／舊 GAS、原私人 GAS v1、正式 Sheets／REC／RIF 研究資料、GAS HEAD、部署、真人信件或正式收件。正式 `OPEN=false`／`CONSENT_READY=false`；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+- BLOCKERS：現行 GAS 31 份原始碼清單只在 GitHub 核對，尚未以 OAuth 對**同一 V2 GAS** 完成安全來源同步；原遠端檔案數未於本輪重查，不推定實際 HEAD 一致。非正式 Demo 模擬器仍與舊測試耦合，須先證明與正式 E1 的函式／測試依賴可隔離才可能逐檔清除。
+- NEXT_ACTION：只在唯一 V2 Repo 按實際依賴拆分／移除剩餘 Demo 執行路徑，不任意刪除現有正式 E1 必需的 OTP、原 Slots/Reservations、OWNER PDF／電子同意、撤回與私人事件證據；沿用 V2 CI 負測，待獨立授權與 Google OAuth 後才分開執行 V2 GAS 原始碼同步或唯讀部署。
