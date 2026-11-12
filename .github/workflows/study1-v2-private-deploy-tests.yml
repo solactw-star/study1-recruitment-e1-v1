@@ -1,0 +1,28 @@
+name: Study1 V2 private deployment safety tests (CI only)
+# No OAuth secrets, no Apps Script calls and no deployment mutations.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/study1-v2-private-deploy.yml'
+      - '.github/workflows/study1-v2-private-deploy-tests.yml'
+      - 'scripts/study1-v2-private-deploy.cjs'
+      - 'tests/study1-v2-private-deploy.test.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static syntax and standalone V2 private deployment tests
+        run: |
+          node --check scripts/study1-v2-private-deploy.cjs
+          node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
