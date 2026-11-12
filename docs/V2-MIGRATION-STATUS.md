@@ -210,3 +210,10 @@
 - QUERY_SCOPE：OTP 不明寄信結果僅執行額外一次唯讀後端核對，使用既有高熵 requestId；原 MailApp 不自動重送；驗證已消耗或核驗結果不明時拒絕同一 OTP 重複驗證。讀取原 Verification 不宣稱電子郵件已送達或原 Applicants 已成功更新。
 - READBACK：本段同步與 commit 更新後再回讀 GitHub main、檔案內容及變更清單；`MAIN_SYNC_VERIFIED` 僅在回讀成功時標示，不代替 GAS 同步／實機 UI。
 - BLOCKERS：Google 帳號授權／部署未完成；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。不變更原 GAS、正式 Sheets、REC 或私人 V1。
+
+### 2026-11-12 21:45（Asia/Taipei）｜既有 E1 預約結果通知 outbox 納入同一離線 CI
+
+- SOURCE_MAIN_SHA=`6ef5a36060e9376cf4f2528ba9c2193c874ce34e`；增量更新原 `.github/workflows/study1-v2-public-readonly-ci.yml`，將已存在的 `tests/study1-formal-notifications-outbox.test.cjs` 八項完整加入，不修改出站寄信或通知正式資料程式。
+- VERIFIED_RUN=[GitHub Actions Run #43230248770](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43230248770)，Job `public-safety` ID `131223352229`；實際日誌 `72 PASS / 0 FAIL / 0 SKIP`。既有 outbox 防護涵蓋通知先持久化、同一次預約至多一次 MailApp 呼叫、timeout `UNKNOWN` 不自動重送、未確認預約／信箱／簽章不能寄送。
+- IMPORTANT：`PROVIDER_ACCEPTED` 只代表提供者接受，非真實送達。無真人郵件、真實 GAS 部署、正式 Sheets 寫入或瀏覽器 UAT；公開版 OTP 與管理 RPC 仍維持封鎖。
+- STATUS：`MAIN_SYNC_VERIFIED` 僅以最後 commit 及全文回讀判定；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
