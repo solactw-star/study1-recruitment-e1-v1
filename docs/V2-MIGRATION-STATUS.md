@@ -201,3 +201,12 @@
 - 安全：不新增/修改任何真實 Sheet 欄位或資料；本輪不調用 MailApp、不發真人郵件、不修改原 GAS／REC／私人 V1，不重新部署。不將 OTP 視為學籍/本人身分證明，不將 `PROVIDER_ACCEPTED` 或 challenge 存在視為郵件已送達。
 - 測試：增量擴充原 `tests/study1-participant-intake.test.cjs` 與 `tests/study1-formal-browser-synthetic-e2e.test.cjs`，並沿用既有離線 CI；包含同一 requestId 回查、F:G 一次性、到期、取代、未授權、寄件不明、一次性核驗回應不明等負例。
 - SYNC_STATUS：`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；等待 CI、commit 與回讀確認後才能標明 GitHub 本輪已完成。
+
+### 2026-11-12 21:40（Asia/Taipei）｜E1 OTP 唯讀回查與單次核驗離線 CI／main 回讀
+
+- SOURCE_MAIN_SHA=`cca96aec8c1fda9963a110b3091b56f5e3d35064`；上述功能原始程式提交 `7aaef997635abe41bea0bb369b6451ea94c3130f`，後續兩個小修正僅使寄信未知提示與收件總閘門測試一致，分別為 `2178467ebd3dfb3a676ac4a18e8ef73a2591b421`、`cca96aec8c1fda9963a110b3091b56f5e3d35064`。
+- CI_VERIFIED= [GitHub Actions Run #43229366518](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43229366518)，Job `public-safety` ID `131220592130`，原始日誌：`64 PASS / 0 FAIL / 0 SKIP`。先前 Run #43229135835 的 2 個測試訊息差異已修正並由此成功 Run 取代，沒有跳過失敗測試。
+- WRITES_THIS_TASK=V2 GitHub 原 `gas/Study1ParticipantIntake.js`、`gas/Study1Visitor.html`、原兩份受影響測試、原離線 CI workflow、原 `docs/V2-MIGRATION-STATUS.md`；沒有新正式主檔或新 GAS 腳本。
+- QUERY_SCOPE：OTP 不明寄信結果僅執行額外一次唯讀後端核對，使用既有高熵 requestId；原 MailApp 不自動重送；驗證已消耗或核驗結果不明時拒絕同一 OTP 重複驗證。讀取原 Verification 不宣稱電子郵件已送達或原 Applicants 已成功更新。
+- READBACK：本段同步與 commit 更新後再回讀 GitHub main、檔案內容及變更清單；`MAIN_SYNC_VERIFIED` 僅在回讀成功時標示，不代替 GAS 同步／實機 UI。
+- BLOCKERS：Google 帳號授權／部署未完成；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。不變更原 GAS、正式 Sheets、REC 或私人 V1。
