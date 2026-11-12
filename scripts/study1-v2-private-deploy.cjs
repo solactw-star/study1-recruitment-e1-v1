@@ -306,7 +306,7 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  // independently audited inventory, exact provenance and immutable SHA.
  const orphans=normalizedVersions(before.versions).filter(v=>
   v.description.startsWith(descriptionBase)&&
-  /^\\d+$/.test(v.description.slice(descriptionBase.length))&&
+  /^\d+$/.test(v.description.slice(descriptionBase.length))&&
   !deployedVersions.has(v.version));
  assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
  let version,createdNew=false;
