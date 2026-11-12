@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: '22'
       - name: Static syntax and standalone V2 private deployment tests
+        env:
+          V2_PRIVATE_TEST_MODE: 'true'
         run: |
           node --check scripts/study1-v2-private-deploy.cjs
           node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
