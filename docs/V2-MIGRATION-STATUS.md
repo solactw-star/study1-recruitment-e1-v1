@@ -149,3 +149,11 @@
 - 下一步：核對 V2 main CI，使用原 V2 HEAD-only 安全來源備份/同步，再建立新版本化登入後公開部署。若無適用工具或安全回讀，`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`，不可聲稱公開已完成。
 - 最小 UI smoke：非 OWNER 已登入 Google 帳號能顯示正確招募首頁，FORMAL 頁關閉報名，後台及私人 RPC 被拒絕。未驗收 `PUBLIC_UI_VERIFIED=false`。
 - 未修改 V2 私人版本 1、原 GAS／原網站、正式 Sheets、REC 或真人研究資料。維持 `OPEN=false`、`CONSENT_READY=false`、E2 關閉、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+
+### 2026-11-12 20:35（台灣）｜V2 Google 登入後唯讀公開版安全 CI 已通過
+
+- SOURCE_MAIN_SHA=`bb5e0eb8d413fe01be2ce95fc3304d0c2d43a555`；GitHub Actions [Run #43219267081](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43219267081) `completed/success`；Job `public-safety` ID `131186311202`，**22 PASS／0 FAIL／0 SKIP**，涵蓋 32 GAS 來源、53 個拒絕閘門、Google 登入 ACL、關閉報名、公開頁及後台路由、既有 HEAD-only 安全守門與語法。
+- GitHub SOURCE_READY_FOR_REMOTE_SYNC=true（限 V2 唯讀公開版程式和離線測試）；這項結果**不代表** GAS HEAD 已同步或 ANYONE 部署已建立。
+- REMOTE_GAS_HEAD_SYNC=NOT_RUN；PUBLIC_VERSION=NOT_CREATED；PUBLIC_DEPLOYED=false；PUBLIC_UI_VERIFIED=false；FORMAL_READY=false；LIVE_INTAKE_ENABLED=false。
+- DEPLOYMENT_NEXT: 研究室所有者使用既有 V2 同 Script ID 的 `study1-v2-gas-head-only.yml` 原 workflow（先 mode=audit 取得單次遠端 HEAD SHA，再 mode=apply 進行備份、競寫確認與唯一 PUT），回讀新版 HEAD 及登入後公開 `ANYONE` manifest；再於同 V2 GAS 專案建立新不可變版本與獨立 `ANYONE/USER_DEPLOYING` Web App 部署。不可重用 MYSELF 私人版號 1、覆蓋舊私人部署或手工拼湊部署 URL。
+- 最小 UI smoke：持有一般 Google 帳號但非 OWNER 的瀏覽器開啟**新公開部署**，檢查首頁確為 Study1、FORMAL 報名關閉及 OWNER 路由被拒絕。尚無實際新公開網址及畫面證據，保持 BLOCKED，不填實測 PASS。
