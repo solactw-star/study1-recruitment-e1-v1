@@ -148,7 +148,7 @@ test('successful private deploy creates exactly one version and one V2 deploymen
 test('failed previous run orphan is reused only after audited provenance and immutable source verification',async()=>{
  const f=fakeApi(),e=runEnv();
  const prefix='Study1 V2 PRIVATE MYSELF HEAD '+d.TARGET+
-  ' GitHub '+e.GITHUB_SHA+' Run ';
+  ' GitHub 9d6bc139e47818f3fddc1e168f504b54bb57f0e9 Run ';
  const orphan=await f.api.createVersion(prefix+'43182160131');
  assert.equal(orphan.versionNumber,1);
  const reviewed=await d.audit(f.api);
