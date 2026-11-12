@@ -1,10 +1,39 @@
-# V2 獨立複製紀錄
+# Study1 V2 獨立移植狀態（2026-11-12，Asia/Taipei）
 
-- 來源 Repository：`solactw-star/study1-recruitment-gas`
-- 來源 PR：`#133`，核對 commit `c43401ac6453d9789aa96c8595c9a9edc8fff437`
-- 目標 Repository：`solactw-star/study1-recruitment-e1-v1`（public）
-- 目標 GAS：`Study 1 招募網站 (V2)`；Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f`
-- 安全隔離：不移植原 `.github/workflows/*`；`gas/.clasp.json` 改為新 ID；原來源檔案內的舊系統網址及正式 Sheet ID 仍需正式清理，故不可直接公開部署
-- 驗收：待 GitHub 內容回讀、GAS 原始碼同步、指定部署、真實 UI UAT。真人收件維持關閉
+## 定位
+- TASK_DOMAIN: Study1_E1_V2_CLONE
+- SOURCE_REPO: `solactw-star/study1-recruitment-gas` PR #133
+- SOURCE_HEAD: `c43401ac6453d9789aa96c8595c9a9edc8fff437`
+- DEST_REPO: `solactw-star/study1-recruitment-e1-v1` (public, main)
+- NEW_GAS_NAME: `Study 1 招募網站 (V2)`
+- NEW_GAS_SCRIPT_ID: `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f`
+- ORIGINAL_GAS_SCRIPT_ID: `1hPERspy11hI56dJobIVgCElGNaWYJJTdrDh7CRlORTom9VHti2xyR93Z` (不得覆寫)
 
-**注意：** 這是移植追蹤，不是 REC 核准或正式部署證據。
+## 已核實的複製成果
+- V2 GitHub main 初次提交：`10ef367ec35bdd0d52e7ed124fa5b12815a4e3da`
+- V2 GitHub 完整移植提交：`b355b40ded79bbfdb5be80441cd62cf3b71fad99`
+- GitHub main 完整回讀：154 檔；其中 `gas/` 33、`tests/` 77、`scripts/` 11（含新說明）、`docs/` 29（含新說明）。
+- 與原 PR 指定來源 Git tree 逐檔比對：原 152 個非 workflow 檔案全部有對應；無漏檔。
+- 僅 `README.md` 與 `gas/.clasp.json` 與來源不同（新 V2 說明及新 Script ID）。另新增兩份 V2 說明。
+- 原 9 個 `.github/workflows/*` 刻意不移入；不會因 main push 自動同步或公開部署。
+- 來源 ZIP 的本機 `npm test` 重跑：942 PASS / 0 FAIL / 0 SKIP。此為來源碼的本機測試，不是 V2 GAS 部署測試、CI 或 UAT。
+- 新 GAS 由原 GAS 複製建立，名稱與新 ID 由 Google Drive metadata 回讀，尚未對新 Script 的逐檔原始碼內容做 Apps Script API 驗證。
+
+## 尚未完成／阻塞
+- `GAS_SYNC_VERIFIED=false`：目前連線沒有可直接操作 Google Apps Script content/update 與 deployment 的工具或已授權 V2 專用 OAuth 執行環境。
+- 新 GAS 是原 GAS 的複製快照，不能視為已和 V2 GitHub PR #133 最後 commit 同步。
+- 舊 `scripts/study1-gas-*.cjs` 的來源程式仍含舊系統 ID、網址或部署比對；作為移植參考留存，**不得直接對 V2 執行 apply/push/deploy**。需另行建置 V2 專用同步入口。
+- 原 GAS UI 及真人收件、REC/PI 核准、個資／簽署 PDF／預約整合的實際 V2 UAT 未驗證。
+- `FORMAL_READY=false`，`LIVE_INTAKE_ENABLED=false`。保持 `OPEN=false`、`CONSENT_READY=false`，不得接收真人個資。
+
+## 下一步
+1. 建立與授權 **只指向新 Script ID** 的 V2 專用同步工具（手動觸發；確認目標 ID、新舊環境隔離、完整前置備份及回讀）。
+2. 用新工具把 V2 GitHub `gas/` 最終來源推送至新 GAS HEAD，逐檔 hash 驗證。
+3. 僅建立私人 `MYSELF` 測試部署並實測必要後台／報名流程，不讀寫正式參與者個資。
+4. REC、PI、時段、電子同意、個資、安全、部署與真實 UI 驗收皆完備並另獲正式啟用授權後，才可開放真人收件。
+
+## WRITE_OWNER / SYNC_STATUS
+- V2 GitHub: 已移植、完整性驗證通過
+- V2 GAS: 僅副本建立完成，最新程式同步待驗
+- Original GitHub/GAS: 本移植沒有修改其原始碼、部署或正式 Sheets
+- Context: 本檔為 V2 的獨立進度，不替代原 GitHub 主規格、REC 或研究計畫
