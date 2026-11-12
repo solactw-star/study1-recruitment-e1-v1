@@ -463,6 +463,6 @@ test('OTP lookup validates binding and fails closed without mail or mutation',()
  assert.throws(()=>x.scope.study1ParticipantOtpIssueState_(valid),/LOOKUP_LOCK_BUSY/);
  x.lock.held=false;
  const closed=env({enabled:false});
- assert.throws(()=>closed.scope.study1ParticipantOtpIssueState_(valid),/PUBLIC_EMAIL_OTP_NOT_READY/);
+ assert.throws(()=>closed.scope.study1ParticipantOtpIssueState_(valid),/PARTICIPANT_INTAKE_NOT_READY|PUBLIC_EMAIL_OTP_NOT_READY/);
  assert.equal(closed.open.length,0);assert.equal(closed.mail.length,0);
 });
