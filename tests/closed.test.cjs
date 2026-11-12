@@ -61,7 +61,7 @@ test('GAS manifest restricts access to the deploying account',()=>{
   assert.equal(manifest.runtimeVersion,'V8');
   assert.equal(manifest.webapp.access,'MYSELF');
   assert.equal(manifest.webapp.executeAs,'USER_DEPLOYING');
-  assert.equal(clasp.scriptId,'1hPERspy11hI56dJobIVgCElGNaWYJJTdrDh7CRlORTom9VHti2xyR93Z');
+  assert.equal(clasp.scriptId,'1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f');
 });
 test('Original source manifest is preserved for remote drift detection',()=>{
   const data=JSON.parse(fs.readFileSync(path.join(__dirname,'..','docs','remote-baseline-20261029.json'),'utf8'));
