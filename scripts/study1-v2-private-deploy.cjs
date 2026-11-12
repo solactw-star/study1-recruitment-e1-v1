@@ -106,20 +106,48 @@ function normalizedVersions(v){
    created:String(x.createTime||''),description:String(x.description||'')};
  }).sort((a,b)=>a.version-b.version);
 }
+// Google creates exactly one HEAD (development) deployment. The REST
+// DeploymentConfig.versionNumber is an integer when versioned; a HEAD
+// deployment can omit it or return zero, independent of deploymentId.
+function deploymentVersionShape(v){
+ if(v===undefined||v===0)return {kind:'HEAD',version:null};
+ assert(Number.isSafeInteger(v)&&v>0,'unexpected deployment version shape');
+ return {kind:'VERSIONED',version:v};
+}
+// Safe public CI diagnostic: never log deployment IDs, web URLs or secrets.
+function redactedDeploymentShapes(deps){
+ assert(Array.isArray(deps),'deployment inventory is not an array');
+ return deps.map((d,index)=>{
+  const v=d?.deploymentConfig?.versionNumber;
+  return {index:index+1,idIsLiteralHEAD:d?.deploymentId==='HEAD',
+   versionShape:v===undefined?'omitted':v===0?'zero':
+    Number.isSafeInteger(v)&&v>0?'positive_integer':'invalid',
+   manifestPresent:typeof d?.deploymentConfig?.manifestFileName==='string',
+   webAccess:(Array.isArray(d?.entryPoints)?d.entryPoints:[])
+    .filter(e=>e?.webApp).map(e=>({
+     access:e.webApp.entryPointConfig?.access??e.webApp.access??'omitted',
+     executeAs:e.webApp.entryPointConfig?.executeAs??e.webApp.executeAs??'omitted'
+    }))};
+ });
+}
 function normalizedDeployments(d){
  assert(Array.isArray(d),'deployments must be an array');
  const seen=new Set();
+ let headCount=0;
  return d.map(x=>{
   const id=x?.deploymentId, config=x?.deploymentConfig;
   assert(typeof id==='string'&&id.length>0&&!seen.has(id),
    'duplicate/missing deployment ID');
   seen.add(id);
   assert(config?.scriptId===SID,'deployment belongs to a foreign Script ID');
-  const version=config.versionNumber;
-  assert((Number.isSafeInteger(version)&&version>0) ||
-   (id==='HEAD'&&(version===undefined||version===0)),
-   'unexpected deployment version');
-  assert(config.manifestFileName==='appsscript' || id==='HEAD',
+  const {kind,version}=deploymentVersionShape(config.versionNumber);
+  if(kind==='HEAD'){
+   headCount++;
+   assert(headCount<=1,'multiple unversioned/HEAD deployments');
+  }
+  assert(config.manifestFileName==='appsscript' ||
+   (kind==='HEAD'&&
+    (config.manifestFileName===undefined||config.manifestFileName==='')),
    'deployment manifest file is not appsscript');
   const points=(x.entryPoints||[]).map(e=>({
    type:e.entryPointType||'',
@@ -139,7 +167,7 @@ function normalizedDeployments(d){
      'unexpected existing web app execution identity');
    }
   }
-  return {id,version:version||null,manifest:config.manifestFileName||'',
+  return {id,kind,version,manifest:config.manifestFileName||'',
    description:String(config.description||''),updateTime:String(x.updateTime||''),
    points:points.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))};
  }).sort((a,b)=>a.id.localeCompare(b.id,'en'));
@@ -153,6 +181,9 @@ async function inventory(api){
   api.getHead(),api.getVersions(),api.getDeployments()
  ]);
  checkHead(head);
+ // Print only enum/presence diagnostics, never deployment IDs, URLs or OAuth.
+ report('V2_PRIVATE_DEPLOY_VERSION_SHAPES_JSON='+
+  JSON.stringify(redactedDeploymentShapes(deps)));
  const vn=normalizedVersions(versions),dn=normalizedDeployments(deps);
  for(const dep of dn){
   const obj=dep.version===null?head:await api.getVersionContent(dep.version);
@@ -272,4 +303,5 @@ if(require.main===module)main().catch(e=>{
 });
 module.exports={SID,REPO,TARGET,CONFIRM,invocation,reviewedLocal,
  checkHead,makeApi,normalizedVersions,normalizedDeployments,
+ deploymentVersionShape,redactedDeploymentShapes,
  fingerprint,inventory,audit,deploy};
