@@ -28,7 +28,7 @@ function simulate(readiness){
   createElement:kind=>({kind,src:'',async:false,onload:null,onerror:null})
  };
  const server={
-  study1ParticipantReadiness:()=>readiness,
+  study1ParticipantReadiness:()=>typeof readiness==='function'?readiness():readiness,
   study1ParticipantBegin:req=>({
    accepted:true,created:true,applicantId:'APP_CLOSED_TEST_12345678',
    screeningId:'SCR_CLOSED_TEST_12345678',phase:'PENDING_EMAIL'}),
@@ -144,6 +144,7 @@ test('Synthetic browser: Turnstile token expires and cannot be implicitly reused
 
 test('FORMAL readiness service failure remains visibly CLOSED and cannot collect PII',()=>{
  const s=simulate(()=>{throw Error('OFFLINE_READINESS_FAILURE')});
+ assert.equal(s.errors.length,1,'readiness network failure must be exercised');
  assert.equal(s.node('chooseE1').disabled,true);
  assert.equal(s.node('chooseE2').disabled,true);
  assert.equal(s.node('formalName').disabled,true);
