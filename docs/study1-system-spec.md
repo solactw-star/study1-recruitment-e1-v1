@@ -1658,5 +1658,5 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 
 - 唯一 E1 PDF 路線：研究者**網站外先簽完整原 PDF 及日期** → 原 OWNER 後台逐頁人工核對，使用原私人 Drive 與原同意版本索引上傳、選用、明確指定正式受保護來源（均按 SHA/版號/revision） → E1 本人資格自陳、OTP、原 Slots/Reservations HELD → 本人**最後階段**閱讀完整受保護預簽 PDF、在核准參與者欄位線上手寫簽署 → 保全唯一完整雙方簽署 PDF、事件/來源/SHA/臺灣日期、本人副本及 OWNER 授權下載 → 獨立核對原 Reservations CONFIRMED/UNKNOWN。
 - **必須從 V2 現行程式直接刪除**舊研究員事後逐筆第二次簽章的後台區塊與前端處理器、獨立研究員簽章欄位配置/第二次 PDF 合成、研究者二次簽章 RPC/待簽索引；舊 OWNER 手動邀請、逐筆問答/說明事件、單獨 PNG 同意與確認、非完整 PDF 回執不再作為可執行路線。刪掉舊式路線而非加上隱藏標記或只擋公開路由；現有撤回及資料處置程序仍須保留。
-- 現存 E1 簽署 RPC 必須拒絕非 \`FORMAL_E1\`、沒有本人 OTP/HELD 可信綁定、\`researcherPresigned!==true\`、非 \`ISSUED\`、錯誤原 SHA、舊 \`EXPLAINED\` 狀態或重送。完整雙簽 PDF 本人/OWNER 下載只能採**同一研究者預簽原文加一次參與者筆跡**的 SHA/事件鏈，不再包含第二個研究員即時簽署時間、額外第二次合成或任何歷史 fallback。現行有效研究程序與研究者告知/答疑責任仍由 PI／研究行政核對，工程刪除舊程式不代表 REC 義務被撤銷。
-- 僅更新新 \`solactw-star/study1-recruitment-e1-v1\` 的原 \`gas/\`、\`tests/\`、既有 CI、原主規格及進度；對已淘汰功能的測試改成「不存在／不得呼叫」及正式流程負測，不以刪除安全測試冒充成功。GAS 同步、版本部署、正式 Sheets、REC、舊系統與真人收件均不授權；\`OPEN=false\`、\`CONSENT_READY=false\`、\`FORMAL_READY=false\`、\`LIVE_INTAKE_ENABLED=false\`。
+- 現存 E1 簽署 RPC 必須拒絕非 `FORMAL_E1`、沒有本人 OTP/HELD 可信綁定、`researcherPresigned!==true`、非 `ISSUED`、錯誤原 SHA、舊 `EXPLAINED` 狀態或重送。完整雙簽 PDF 本人/OWNER 下載只能採**同一研究者預簽原文加一次參與者筆跡**的 SHA/事件鏈，不再包含第二個研究員即時簽署時間、額外第二次合成或任何歷史 fallback。現行有效研究程序與研究者告知/答疑責任仍由 PI／研究行政核對，工程刪除舊程式不代表 REC 義務被撤銷。
+- 僅更新新 `solactw-star/study1-recruitment-e1-v1` 的原 `gas/`、`tests/`、既有 CI、原主規格及進度；對已淘汰功能的測試改成「不存在／不得呼叫」及正式流程負測，不以刪除安全測試冒充成功。GAS 同步、版本部署、正式 Sheets、REC、舊系統與真人收件均不授權；`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。

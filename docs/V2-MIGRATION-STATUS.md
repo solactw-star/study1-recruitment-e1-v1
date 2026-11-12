@@ -263,8 +263,14 @@
 - NEXT_ACTION：依最新新 V2 main 接續 OWNER E1 報名／原 Reservations／Email OTP 與 outbox／PDF 私人副本的必要後台狀態整合與離線負測；只有獨立授權後才分開執行 GAS 同步、公開唯讀部署與三項最小真實 UI smoke，真人收件仍需 PI/REC 審查與另行授權。
 
 ## 2026-11-12｜V2 E1 舊研究員第二次簽署程式清除（使用者最新明確決策）
-- TASK_DOMAIN=\`Study1_V2_REMOVE_OBSOLETE_SECOND_SIGNATURE\`；SOURCE_PATH=\`solactw-star/study1-recruitment-e1-v1\`／\`docs/study1-system-spec.md\` 最新 §70-S.36；PRE_MAIN_SHA=\`899ff1532ebb76019853096eb73af9983cad7fce\`。
+- TASK_DOMAIN=`Study1_V2_REMOVE_OBSOLETE_SECOND_SIGNATURE`；SOURCE_PATH=`solactw-star/study1-recruitment-e1-v1`／`docs/study1-system-spec.md` 最新 §70-S.36；PRE_MAIN_SHA=`899ff1532ebb76019853096eb73af9983cad7fce`。
 - DECISION：網站尚未正式上線，不再保留舊研究員逐筆二次加簽、舊式邀請、單獨 PNG 簽署或事件確認的程式相容層；既有需要合法處置的撤回流程保留。本次僅清除**新 V2 Repo** 已淘汰來源，絕不寫舊 Repo／GAS／正式 Sheet／REC。
-- CODE_DIFF：原 OWNER \`AdminConsole.html\` 完全移除隱藏二次簽名區與 \`staffPdfSetup_\`，獨立保留撤回後處置讀取；原 \`AdminSandbox.js\` 移除 \`study1EConsentConfirmPdf\`、二簽待辦及舊式手動邀請／研究員逐筆說明／單獨 PNG/事件確認/回執 RPC，並讓 \`study1EConsentSignPdf\` 唯一接受 \`FORMAL_E1\`、已預簽、本人可信綁定、\`ISSUED\` 原憑證；本人 \`study1EConsentSignedPdfCopy\` 僅放行原預簽加一次本人簽署的完整 SHA/日期事件鏈；原 PDF stamp 刪除研究員二次簽名的座標讀取與合成引擎。原 \`Study1FormalConsent.js\` 的原版 PDF/狀態只接受正式預簽流程。
+- CODE_DIFF：原 OWNER `AdminConsole.html` 完全移除隱藏二次簽名區與 `staffPdfSetup_`，獨立保留撤回後處置讀取；原 `AdminSandbox.js` 移除 `study1EConsentConfirmPdf`、二簽待辦及舊式手動邀請／研究員逐筆說明／單獨 PNG/事件確認/回執 RPC，並讓 `study1EConsentSignPdf` 唯一接受 `FORMAL_E1`、已預簽、本人可信綁定、`ISSUED` 原憑證；本人 `study1EConsentSignedPdfCopy` 僅放行原預簽加一次本人簽署的完整 SHA/日期事件鏈；原 PDF stamp 刪除研究員二次簽名的座標讀取與合成引擎。原 `Study1FormalConsent.js` 的原版 PDF/狀態只接受正式預簽流程。
 - TESTS：刪除對已不存在功能做成功路徑的舊合成測試，替代為「舊 RPC 完全不存在」、非正式本人/非預簽/重送不得簽、完整副本 SHA/日期/ACL、原 OWNER UI 二次簽章區不存在且撤回仍可查等負測；納入既有 V2 安全 CI 及 REC 源流程檢查。
-- WRITE_OWNER：僅新 V2 GitHub \`main\`；未進行 GAS HEAD PUT/部署、正式資料或郵件存取、真人收件啟用。同步狀態必須以下一 commit／CI 實際結果回讀為準，未回讀不得宣稱完成。原 \`OPEN=false\`／\`CONSENT_READY=false\`、\`FORMAL_READY=false\`、\`LIVE_INTAKE_ENABLED=false\`。
+- WRITE_OWNER：僅新 V2 GitHub `main`；未進行 GAS HEAD PUT/部署、正式資料或郵件存取、真人收件啟用。同步狀態必須以下一 commit／CI 實際結果回讀為準，未回讀不得宣稱完成。原 `OPEN=false`／`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+
+- SOURCE_VERSION/SHA：最新已通過 CI 的程式 main = 157977bd8fe60d3e6233e891c731967bc0d41423；核心移除提交 e74ae53b4ecb77eb1da5fd1286227480ead3b75a，測試修正提交 157977bd8fe60d3e6233e891c731967bc0d41423。原功能與測試檔案共計 14 個路徑受增量修改，舊 Repo／GAS 來源完全未觸及。
+- LAST_VERIFIED_STEP：GitHub Actions Run #43244927252（job 131274911667），原始 Job 日誌已回讀：216 tests／216 PASS／0 FAIL／0 SKIP；已用相同 SHA 核對現行 main、正式規格 §70-S.36、原進度檔、受影響 code path 與完整 commit changed files list。
+- COMPLETED：原新 V2 gas/ 內已不存在研究員二次簽章函式或隱藏 UI；現存 E1 簽署核心限定 researcherPresigned=true、FORMAL_E1、ISSUED、原本人 OTP/Reservations 綁定與原 PDF SHA，無相容 fallback；本人/OWNER PDF 副本驗證及撤回流程仍存在；公開登入唯讀版本繼續拒絕所有私人 RPC。
+- BLOCKERS/NEXT_ACTION：Google OAuth／正式核定預簽 PDF 與頁碼欄位／PI 原 E1 Slots／實際私人 Drive 與真人 UI 尚未取得新驗收證據；下一輪僅按唯一新 V2 main 接續剩餘正式 OWNER E1 管理、Email/預約與副本狀態整合。新的公開 GAS 同步與部署需獨立授權，現階段不啟用真人收件。
+- WRITE_OWNER=solactw-star/study1-recruitment-e1-v1；SYNC_STATUS：MAIN_CODE_CI_VERIFIED=true；GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false；PUBLIC_DEPLOYED=false；PUBLIC_UI_VERIFIED=false；FORMAL_READY=false；LIVE_INTAKE_ENABLED=false。舊網站 Repo／PR／GAS 一律 LEGACY_FROZEN／READ_ONLY_ARCHIVE，不執行寫入。
