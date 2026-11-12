@@ -59,6 +59,74 @@ test('version and deployment inventory normalized and hashed deterministically',
  assert.throws(()=>d.normalizedVersions([v[0],v[0]]),/invalid/);
  assert.throws(()=>d.normalizedVersions([{scriptId:'old',versionNumber:1}]),/invalid/);
 });
+test('Google automatic HEAD deployment parses omitted or zero version independent of ID',()=>{
+ const head=(versionNumber,id='V2-opaque-development-id')=>({
+  deploymentId:id,deploymentConfig:{
+   scriptId:d.SID,manifestFileName:'appsscript',
+   ...(versionNumber===undefined?{}:{versionNumber})
+  },entryPoints:[{entryPointType:'WEB_APP',webApp:{
+   entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'},
+   url:'https://script.google.com/macros/s/private/development'
+  }}]
+ });
+ for(const raw of [head(undefined),head(0)]){
+  const result=d.normalizedDeployments([raw]);
+  assert.equal(result.length,1);assert.equal(result[0].kind,'HEAD');
+  assert.equal(result[0].version,null);
+  assert.equal(result[0].id,'V2-opaque-development-id');
+  const diag=d.redactedDeploymentShapes([raw]);
+  assert.equal(diag[0].versionShape,raw.deploymentConfig.versionNumber===undefined?'omitted':'zero');
+  assert.ok(!JSON.stringify(diag).includes(raw.deploymentId));
+  assert.ok(!JSON.stringify(diag).includes('/private/development'));
+ }
+ const positive=d.normalizedDeployments([head(2,'V2-versioned-id')])[0];
+ assert.equal(positive.kind,'VERSIONED');assert.equal(positive.version,2);
+ assert.deepEqual(d.deploymentVersionShape(undefined),{kind:'HEAD',version:null});
+ assert.deepEqual(d.deploymentVersionShape(0),{kind:'HEAD',version:null});
+ assert.throws(()=>d.deploymentVersionShape(null),/unexpected deployment version/);
+ assert.throws(()=>d.deploymentVersionShape('0'),/unexpected deployment version/);
+ assert.throws(()=>d.deploymentVersionShape(-1),/unexpected deployment version/);
+ assert.throws(()=>d.deploymentVersionShape(1.5),/unexpected deployment version/);
+});
+test('HEAD is unique; foreign project and unsafe public or user execution still blocked',()=>{
+ const raw={
+  deploymentId:'V2-opaque-head-one',
+  deploymentConfig:{scriptId:d.SID},
+  entryPoints:[{webApp:{entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'}}}]
+ };
+ const second={...raw,deploymentId:'V2-opaque-head-two',
+  deploymentConfig:{...raw.deploymentConfig,versionNumber:0}};
+ assert.throws(()=>d.normalizedDeployments([raw,second]),/multiple unversioned\/HEAD/);
+ assert.throws(()=>d.normalizedDeployments([{...raw,
+  deploymentConfig:{scriptId:'original-gas-should-block'}}]),/foreign Script ID/);
+ assert.throws(()=>d.normalizedDeployments([{...raw,
+  entryPoints:[{webApp:{entryPointConfig:{access:'ANYONE_ANONYMOUS',
+   executeAs:'USER_DEPLOYING'}}}]}]),/publicly accessible/);
+ assert.throws(()=>d.normalizedDeployments([{...raw,
+  entryPoints:[{webApp:{entryPointConfig:{access:'MYSELF',
+   executeAs:'USER_ACCESSING'}}}]}]),/execution identity/);
+ assert.throws(()=>d.normalizedDeployments([{...raw,
+  deploymentConfig:{scriptId:d.SID,manifestFileName:'other'}}]),/manifest file/);
+});
+test('read-only audit accepts nonliteral HEAD and correctly counts versioned deployments',async()=>{
+ const f=fakeApi();
+ let versionContentReads=0;
+ f.api.getDeployments=async()=>[{
+  deploymentId:'auto-v2-head-id-not-literal-HEAD',
+  deploymentConfig:{scriptId:d.SID,versionNumber:0,manifestFileName:'appsscript'},
+  entryPoints:[{entryPointType:'WEB_APP',webApp:{
+   entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'}}}]
+ }];
+ f.api.getVersionContent=async()=>{versionContentReads++;return gas();};
+ const result=await d.audit(f.api);
+ assert.equal(result.head.files.length,32);
+ assert.equal(result.deploymentCount,1);
+ assert.equal(result.versionedDeployments,0);
+ assert.equal(result.deps[0].kind,'HEAD');
+ assert.equal(versionContentReads,0);
+ assert.match(result.fp,/^[a-f0-9]{64}$/);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+});
 test('public or wrong-execution deployment is rejected before any mutations',async()=>{
  const f=fakeApi(),b=await d.audit(f.api);
  assert.equal(b.head.files.length,32);
