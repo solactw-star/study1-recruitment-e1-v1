@@ -53,7 +53,17 @@ function publicRpcSurface(files){
  const regex=/\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g;
  const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
  let total=0;
- for(const f of files.filter(x=>x.type==='SERVER_JS'))for(const m of f.source.matchAll(regex)){
+ for(const f of files.filter(x=>x.type==='SERVER_JS')){
+  // pdf-lib is a minified UMD bundle; its inner functions are not GAS RPCs.
+  // Pin the entire vendor blob, and reject any unreviewed change instead of
+  // misclassifying minifier-local names as remotely callable functions.
+  if(f.name==='Study1PdfLib'){
+   const blob=crypto.createHash('sha1').update('blob '+Buffer.byteLength(f.source)+'\\0'+f.source).digest('hex');
+   require_(blob==='f0916cac6bcfa54425c819a16e6ca11360a8d7c5',
+    'reviewed minified PDF bundle changed');
+   continue;
+  }
+  for(const m of f.source.matchAll(regex)){
   // Nested helper declarations are indented and are not callable via google.script.run.
   // Top-level declarations are flush-left, or follow another top-level declaration on one line.
   const prefix=f.source.slice(f.source.lastIndexOf('\n',m.index)+1,m.index);
@@ -62,6 +72,7 @@ function publicRpcSurface(files){
   require_(f.source.slice(m.index+m[0].length).startsWith(gate),
    'unguarded public RPC '+f.name+'.'+m[1]);
   total++;
+  }
  }
  require_(total>=35,'exposed RPC inventory unexpectedly reduced');
  const intake=files.find(f=>f.name==='Study1ParticipantIntake'&&f.type==='SERVER_JS')?.source||'';
