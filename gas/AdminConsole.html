@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Study 1｜研究室測試後台</title><base target="_top">
+<title>Study 1｜OWNER 後台（正式 E1 文件與隔離測試分區）</title><base target="_top">
 <style>
 :root{color-scheme:light}body{margin:0;font:16px/1.6 system-ui,"Microsoft JhengHei",sans-serif;background:#f4f8f7;color:#143d44}
 header{background:#fff;border-bottom:1px solid #c6d9d6;padding:20px max(20px,calc((100vw - 900px)/2))}
@@ -37,8 +37,8 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 .booking-table button{margin:0;padding:6px 10px;font-size:.9rem}
 @media(max-width:560px){.booking-table th,.booking-table td{padding:8px;font-size:.85rem}}
 </style></head><body>
-<header><h1>研究室設定後台（隔離測試）</h1><p>Study 1 — 目前不接受真人報名、預約或電子簽署。</p></header>
-<main><div class="notice" role="note"><strong>僅供研究室測試</strong><p>這些設定不會更新正式研究文件、報名名單、真實時段或通知。若管理帳號無法辨識，系統會拒絕讀寫。</p></div>
+<header><h1>Study 1｜研究室 OWNER 後台</h1><p>正式 E1 文件與隔離測試分區；目前不接受真人報名、預約或電子簽署。</p></header>
+<main><div class="notice" role="note"><strong>隔離測試與正式文件分區</strong><p>測試設定不會修改正式研究資料；獨立的 E1 OWNER PDF 區將使用原私人 Drive 與同意書版本索引，但不開放真人收件。所有正式操作仍須通過伺服器端 OWNER 身分驗證。</p></div>
 <section><h2>測試研究內容</h2>
 <label for="title">測試標題</label><input id="title" maxlength="100" autocomplete="off">
 <label for="intro">研究介紹（測試）</label><textarea id="intro" maxlength="1500"></textarea>
@@ -135,8 +135,36 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <p><small>即使全部列比對一致，也不等於 REC 網站適用、電子同意已核准、實際 GAS 部署或 UI 驗收。未完成正式安全條件，系統必須維持 OPEN=false、CONSENT_READY=false、MYSELF。</small></p>
 </section>
 
-<section aria-labelledby="staffPdfTitle" id="staffPdfDualSignature">
- <h2 id="staffPdfTitle">FORMAL E1｜研究人員本人第二次 PDF 簽章（OWNER）</h2>
+
+<section id="e1OwnerPresign" aria-labelledby="e1OwnerPresignTitle">
+<h2 id="e1OwnerPresignTitle">E1 正式同意書｜研究者預簽 PDF（OWNER）</h2>
+<p>研究者先在完整 PDF 的研究者欄位完成簽名及日期，再由 OWNER 逐頁核對、上傳原私人 Drive、選用版號與原 SHA。此區不開放真人報名或簽署，也不代表 REC 遠端程序已核准。</p>
+<button type="button" class="secondary" id="e1PdfRead">唯讀載入原私人 PDF 版本目錄</button>
+<p id="e1PdfStatus" role="status" aria-live="polite">尚未核對 OWNER 正式文件來源。</p>
+<label for="e1PdfFile">完整研究者已簽 PDF（不超過 3 MB）</label>
+<input id="e1PdfFile" type="file" accept=".pdf,application/pdf">
+<label for="e1PdfTitle">文件名稱</label><input id="e1PdfTitle" maxlength="100" autocomplete="off">
+<label for="e1PdfVersion">獨立版號</label><input id="e1PdfVersion" maxlength="33" autocomplete="off">
+<label><input type="checkbox" id="e1PdfUploadAttest"> 我已逐頁檢查原 PDF 的研究者簽名與日期（OWNER 人工確認，不宣稱程式能識別簽名真偽）。</label>
+<button id="e1PdfUpload" type="button" disabled>上傳研究者已簽 PDF（結果未知不可重送）</button>
+<label for="e1PdfChoose">選擇既有預簽文件版號與 SHA</label>
+<select id="e1PdfChoose" disabled><option value="">尚未載入私人目錄</option></select>
+<a id="e1PdfReview" hidden target="_blank" rel="noopener noreferrer">以 OWNER 權限開啟原私人 Drive PDF 複核</a>
+<label><input type="checkbox" id="e1PdfChooseAttest"> 我已核對所選原 PDF 的研究者簽名、完整內容、版號與 SHA。</label>
+<button id="e1PdfSelect" type="button" disabled>SHA 核對並選用正式 E1 PDF</button>
+<button id="e1PdfSource" type="button" disabled>明確設定受保護的 E1 簽署來源（不開放真人收件）</button>
+<p><small>上傳、選用及設定簽署來源是三項獨立操作；研究者已簽 PDF 不會透過舊版公開文件閱讀端點提供。真正參與者仍須通過本人 OTP、原 Reservations 與核准電子同意門檻。</small></p>
+<h3>已完成簽署的完整 PDF｜OWNER 私人副本</h3>
+<button type="button" class="secondary" id="e1PdfSignedRead">唯讀查詢 E1 已簽 PDF 索引</button>
+<label for="e1PdfSignedChoose">選擇同意紀錄及其已核實 SHA</label>
+<select id="e1PdfSignedChoose" disabled><option value="">尚未查核</option></select>
+<button id="e1PdfSignedGet" type="button" disabled>比對完整 PDF SHA 並準備下載</button>
+<a id="e1PdfSignedLink" hidden download="">下載已核實的雙簽完整 PDF</a>
+<p id="e1PdfSignedStatus" role="status" aria-live="polite">尚未查核 OWNER 完整 PDF 索引；簽署成功不代表預約已 CONFIRMED。</p>
+</section>
+
+<section aria-labelledby="staffPdfTitle" id="staffPdfDualSignature" hidden>
+ <h2 id="staffPdfTitle">歷史相容｜研究人員逐筆第二次 PDF 簽章（非本階段 E1 MVP）</h2>
  <p>僅對已經本人簽署的完整原版 PDF 做第二次簽章；必須有獨立有效 REC 遠端程序與研究員欄位頁碼／座標核定、原 HELD／OTP 綁定，以及私有保存查核。尚未核准時必須拒絕，不能以確認按鈕代替研究人員筆跡。</p>
  <button type="button" class="secondary" id="staffPdfPendingLoad">唯讀查詢待研究員本人簽署的 E1 紀錄</button>
  <label for="staffPdfPending">選定原同意紀錄與參與者簽署版 SHA</label>
@@ -813,6 +841,219 @@ function staffPdfSetup_(){
  });
 }
 staffPdfSetup_();
+
+
+function e1OwnerPresignSetup_(){
+ const ids=['e1PdfRead','e1PdfStatus','e1PdfFile','e1PdfTitle','e1PdfVersion',
+  'e1PdfUploadAttest','e1PdfUpload','e1PdfChoose','e1PdfReview','e1PdfChooseAttest',
+  'e1PdfSelect','e1PdfSource','e1PdfSignedRead','e1PdfSignedChoose',
+  'e1PdfSignedGet','e1PdfSignedLink','e1PdfSignedStatus'];
+ const nodes=ids.map($);if(nodes.some(x=>!x))return;
+ const [read,msg,file,title,version,uploadAck,upload,choice,review,
+  selectAck,select,source,signedRead,signedChoice,signedGet,link,copyMsg]=nodes;
+ let index=null,busy=false,unknown=false,signed=[],objectUrl=null;
+ const shaOk=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+ const entry=()=>index&&index.documents.find(x=>x.id===choice.value&&
+  x.experiment==='E1'&&x.researcherPresigned===true);
+ const resetLink=()=>{
+  link.hidden=true;if(link.removeAttribute)link.removeAttribute('href');
+  if(objectUrl&&URL&&URL.revokeObjectURL)URL.revokeObjectURL(objectUrl);
+  objectUrl=null;
+ };
+ const controls=()=>{
+  const okay=!!index&&!busy&&!unknown,e=entry();
+  choice.disabled=!okay;
+  upload.disabled=!okay||!uploadAck.checked||!file.files||!file.files.length||
+   !title.value.trim()||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,32}$/.test(version.value);
+  select.disabled=!okay||!e||!selectAck.checked||index.current.E1===e.id;
+  source.disabled=!okay||!e||!selectAck.checked||
+   index.current.E1!==e.id||index.published.E1===e.id;
+ };
+ const validIndex=x=>{
+  if(!x||x.schemaVersion!==1||!Number.isSafeInteger(x.revision)||x.revision<0||
+   !Array.isArray(x.documents)||!x.current||!x.published||
+   ![x.current.E1,x.published.E1].every(y=>y===null||typeof y==='string'))
+   throw Error('E1_PDF_INDEX_INVALID');
+  for(const d of x.documents)
+   if(!d||!['E1','E2'].includes(d.experiment)||typeof d.id!=='string'||
+    !/^[A-Za-z0-9_-]{15,100}$/.test(d.id)||!shaOk(d.sha256)||
+    !Number.isSafeInteger(d.bytes)||d.bytes<100||d.bytes>3000000||
+    typeof d.version!=='string'||typeof d.title!=='string')
+    throw Error('E1_PDF_ENTRY_INVALID');
+  return x;
+ };
+ const showReview=()=>{
+  const d=entry();review.hidden=true;if(review.removeAttribute)review.removeAttribute('href');
+  if(d&&typeof d.url==='string'&&/^https:\/\/drive\.google\.com\//.test(d.url)){
+   review.href=d.url;review.hidden=false;
+  }
+ };
+ const render=x=>{
+  index=validIndex(x);
+  while(choice.firstChild)choice.removeChild(choice.firstChild);
+  const first=document.createElement('option');first.value='';
+  first.textContent='請選取已簽署研究者原PDF';choice.appendChild(first);
+  for(const d of index.documents.filter(x=>x.experiment==='E1'&&x.researcherPresigned===true)){
+   const o=document.createElement('option');o.value=d.id;
+   o.textContent=d.version+'｜'+d.title+'｜SHA '+d.sha256.slice(0,16)+'…';
+   choice.appendChild(o);
+  }
+  choice.value=index.current.E1||'';
+  selectAck.checked=false;showReview();controls();
+  msg.textContent='原 E1 文件索引 revision '+index.revision+
+   '；已選用 '+(index.documents.find(x=>x.id===index.current.E1)?.version||'無')+
+   '；受保護簽署來源 '+(index.published.E1===index.current.E1&&index.current.E1?
+   '已與選用版本一致（仍不開放收件）':'尚未一致')+'。';
+ };
+ const failWrite=(e,label)=>{
+  busy=false;unknown=true;msg.textContent=label+'結果未知；請唯讀查核原文件目錄，不得重送：'+String(e&&e.message||e);
+  controls();
+ };
+ const rpc=(method,value,success,failure)=>{
+  if(typeof google==='undefined'||!google.script||!google.script.run){
+   failure(Error('GOOGLE_RPC_NOT_AVAILABLE'));return;
+  }
+  const runner=google.script.run.withFailureHandler(failure).withSuccessHandler(success);
+  if(typeof runner[method]!=='function'){failure(Error('GAS_RPC_MISSING'));return;}
+  if(value===undefined)runner[method]();else runner[method](value);
+ };
+ const digest=async bytes=>{
+  if(!window.crypto||!window.crypto.subtle)throw Error('SHA256_UNAVAILABLE');
+  return Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)))
+   .map(x=>x.toString(16).padStart(2,'0')).join('');
+ };
+ const asBase64=bytes=>{
+  const parts=[];for(let i=0;i<bytes.length;i+=32768)
+   parts.push(String.fromCharCode(...bytes.subarray(i,i+32768)));
+  return btoa(parts.join(''));
+ };
+ read.addEventListener('click',()=>{
+  if(busy)return;busy=true;read.disabled=true;index=null;controls();
+  rpc('study1ConsentVersionList',undefined,x=>{
+   busy=false;read.disabled=false;
+   try{unknown=false;render(x);}
+   catch(e){index=null;msg.textContent='原文件來源無效，全部寫入保持關閉：'+e.message;controls();}
+  },e=>{busy=false;read.disabled=false;index=null;controls();
+   msg.textContent='OWNER 私人目錄讀取失敗，不可操作：'+String(e&&e.message||e);});
+ });
+ for(const n of [file,title,version,uploadAck])
+  n.addEventListener(n===file?'change':'input',controls);
+ choice.addEventListener('change',()=>{selectAck.checked=false;showReview();controls();});
+ selectAck.addEventListener('change',controls);
+ upload.addEventListener('click',async()=>{
+  if(upload.disabled||busy||unknown||!index)return;
+  const f=file.files&&file.files[0];
+  if(!f||f.size<100||f.size>3000000){
+   msg.textContent='PDF 必須為完整且不超過3MB的檔案，未上傳。';return;
+  }
+  busy=true;controls();const old=index.revision,ver=version.value,display=title.value.trim();
+  try{
+   const raw=new Uint8Array(await f.arrayBuffer());
+   if(raw.length!==f.size||String.fromCharCode(...raw.slice(0,5))!=='%PDF-')
+    throw Error('INVALID_COMPLETE_PDF');
+   const sha=await digest(raw);
+   rpc('study1ConsentVersionUpload',{experiment:'E1',researcherPresigned:true,
+    title:display,version:ver,expectedRevision:old,base64:asBase64(raw)},x=>{
+     busy=false;
+     try{
+      const result=validIndex(x);
+      if(result.revision!==old+1||!result.documents.some(y=>y.experiment==='E1'&&
+       y.version===ver&&y.sha256===sha&&y.bytes===raw.length&&y.researcherPresigned===true))
+       throw Error('UPLOAD_SHA_READBACK_INVALID');
+      unknown=false;render(result);file.value='';uploadAck.checked=false;controls();
+      msg.textContent='原私人PDF上傳及SHA回讀完成：'+sha+
+       '；尚未選用或啟用報名。研究者簽名由 OWNER 人工確認。';
+     }catch(e){failWrite(e,'PDF 上傳');}
+    },e=>failWrite(e,'PDF 上傳'));
+  }catch(e){busy=false;controls();msg.textContent='PDF本機核對失敗，未呼叫GAS：'+e.message;}
+ });
+ select.addEventListener('click',()=>{
+  if(select.disabled||busy||!index)return;
+  const d=entry(),old=index.revision;busy=true;controls();
+  rpc('study1ConsentVersionSelect',{id:d.id,expectedRevision:old},x=>{
+   busy=false;
+   try{
+    const r=validIndex(x);
+    if(r.revision!==old+1||r.current.E1!==d.id||
+       !r.documents.some(v=>v.id===d.id&&v.sha256===d.sha256))
+     throw Error('SELECT_ORIGINAL_SHA_NOT_VERIFIED');
+    unknown=false;render(r);
+    msg.textContent='E1 預簽 PDF 已選用：'+d.version+'；SHA '+d.sha256+
+     '。仍須明確設定受保護來源；不代表REC或真人收件核准。';
+   }catch(e){failWrite(e,'E1 版本選用');}
+  },e=>failWrite(e,'E1 版本選用'));
+ });
+ source.addEventListener('click',()=>{
+  if(source.disabled||busy||!index)return;
+  const d=entry(),old=index.revision;busy=true;controls();
+  rpc('study1ConsentVersionPublication',{experiment:'E1',id:d.id,
+   expectedRevision:old,confirmSha256:d.sha256},x=>{
+    busy=false;
+    try{
+     const r=validIndex(x);
+     if(r.revision!==old+1||r.current.E1!==d.id||r.published.E1!==d.id)
+      throw Error('E1_SOURCE_READBACK_NOT_VERIFIED');
+     unknown=false;render(r);
+     msg.textContent='E1受保護正式PDF來源已核對：'+d.version+'；SHA '+d.sha256+
+      '。OPEN、CONSENT_READY 與真人收件仍維持關閉。';
+    }catch(e){failWrite(e,'受保護PDF來源設定');}
+   },e=>failWrite(e,'受保護PDF來源設定'));
+ });
+ signedRead.addEventListener('click',()=>{
+  if(busy)return;resetLink();signed=[];signedRead.disabled=true;
+  signedChoice.disabled=true;signedGet.disabled=true;
+  rpc('study1EConsentOwnerList',undefined,x=>{
+   signedRead.disabled=false;
+   if(!x||!Number.isSafeInteger(x.revision)||!Array.isArray(x.records)){
+    copyMsg.textContent='OWNER 已簽PDF索引無效，不提供下載。';return;
+   }
+   signed=x.records.filter(r=>r&&r.experiment==='E1'&&r.researcherPresigned===true&&
+    r.state==='CONFIRMED'&&/^[-a-f0-9]{30,40}$/i.test(r.id||'')&&shaOk(r.signedPdfSha256));
+   while(signedChoice.firstChild)signedChoice.removeChild(signedChoice.firstChild);
+   const first=document.createElement('option');first.value='';first.textContent='請選擇已簽PDF';
+   signedChoice.appendChild(first);
+   for(const r of signed){
+    const o=document.createElement('option');o.value=r.id;
+    o.textContent=r.version+'｜'+r.id+'｜SHA '+r.signedPdfSha256.slice(0,16)+'…';
+    signedChoice.appendChild(o);
+   }
+   signedChoice.value='';signedChoice.disabled=!signed.length;
+   copyMsg.textContent='OWNER 已核對 '+signed.length+
+    ' 筆 E1 完整預簽雙方PDF；原 Reservations 是否確認須另行核對。';
+  },e=>{signedRead.disabled=false;copyMsg.textContent='私人副本索引查詢失敗：'+String(e&&e.message||e);});
+ });
+ signedChoice.addEventListener('change',()=>{
+  resetLink();signedGet.disabled=!signed.some(x=>x.id===signedChoice.value);
+ });
+ signedGet.addEventListener('click',()=>{
+  if(signedGet.disabled||busy)return;
+  const rec=signed.find(x=>x.id===signedChoice.value);if(!rec)return;
+  resetLink();busy=true;signedGet.disabled=true;
+  rpc('study1EConsentOwnerSignedPdfDownload',rec.id,async x=>{
+   try{
+    if(!x||x.experiment!=='E1'||x.recordId!==rec.id||x.researcherPreSigned!==true||
+       x.signedPdfSha256!==rec.signedPdfSha256||!shaOk(x.sourceSha256)||
+       x.mime!=='application/pdf'||!Number.isSafeInteger(x.bytes)||
+       x.bytes<100||x.bytes>6000000||typeof x.base64!=='string'||x.base64.length>8400000)
+     throw Error('PRIVATE_SIGNED_PDF_SOURCE_INVALID');
+    const bytes=Uint8Array.from(atob(x.base64),c=>c.charCodeAt(0));
+    if(bytes.length!==x.bytes||String.fromCharCode(...bytes.slice(0,5))!=='%PDF-'||
+       await digest(bytes)!==x.signedPdfSha256)
+     throw Error('PRIVATE_SIGNED_PDF_SHA_MISMATCH');
+    objectUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
+    link.href=objectUrl;link.download='Study1_E1_'+String(x.version).replace(/[^A-Za-z0-9._-]/g,'_')+
+     '_'+x.signedPdfSha256.slice(0,12)+'_signed.pdf';
+    link.hidden=false;
+    copyMsg.textContent='已核對雙方完整PDF SHA：'+x.signedPdfSha256+
+     '；可取得私人副本，但預約CONFIRMED仍需獨立核查。';
+   }catch(e){resetLink();copyMsg.textContent='來源或SHA驗證未通過，禁止下載：'+e.message;}
+   finally{busy=false;signedGet.disabled=false;}
+  },e=>{busy=false;signedGet.disabled=false;resetLink();
+   copyMsg.textContent='OWNER完整PDF取得失敗，不提供下載：'+String(e&&e.message||e);});
+ });
+ controls();
+}
+e1OwnerPresignSetup_();
 
 function staffWithdrawalSetup_(){
  const button=$('staffWithdrawalLoad'),out=$('staffWithdrawalResults');
