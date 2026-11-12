@@ -307,7 +307,13 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  const KNOWN_ORPHAN_SOURCE_SHA='9d6bc139e47818f3fddc1e168f504b54bb57f0e9';
  const allowedOrigins=new Set([env.GITHUB_SHA,KNOWN_ORPHAN_SOURCE_SHA]);
  const orphanPattern=new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
-  ' GitHub ([a-f0-9]{40}) Run ([0-9]+)
+  ' GitHub ([a-f0-9]{40}) Run ([0-9]+)$');
+ // Recover only ONE authorized orphan after an independently audited inventory
+ // and mandatory immutable 32-file SHA verification. Reject other origins.
+ const orphans=normalizedVersions(before.versions).filter(v=>{
+  const m=v.description.match(orphanPattern);
+  return m&&allowedOrigins.has(m[1])&&!deployedVersions.has(v.version);
+ });
  assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
  let version,createdNew=false;
  if(orphans.length){
