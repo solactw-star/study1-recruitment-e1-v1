@@ -269,7 +269,7 @@
 - TESTS：刪除對已不存在功能做成功路徑的舊合成測試，替代為「舊 RPC 完全不存在」、非正式本人/非預簽/重送不得簽、完整副本 SHA/日期/ACL、原 OWNER UI 二次簽章區不存在且撤回仍可查等負測；納入既有 V2 安全 CI 及 REC 源流程檢查。
 - WRITE_OWNER：僅新 V2 GitHub `main`；未進行 GAS HEAD PUT/部署、正式資料或郵件存取、真人收件啟用。同步狀態必須以下一 commit／CI 實際結果回讀為準，未回讀不得宣稱完成。原 `OPEN=false`／`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 
-- SOURCE_VERSION/SHA：最新已通過 CI 的程式 main = 157977bd8fe60d3e6233e891c731967bc0d41423；核心移除提交 e74ae53b4ecb77eb1da5fd1286227480ead3b75a，測試修正提交 157977bd8fe60d3e6233e891c731967bc0d41423。原功能與測試檔案共計 14 個路徑受增量修改，舊 Repo／GAS 來源完全未觸及。
+- SOURCE_VERSION/SHA：最新已通過 CI 的程式 main = 157977bd8fe60d3e6233e891c731967bc0d41423；核心移除提交 e74ae53b4ecb77eb1da5fd1286227480ead3b75a，測試修正提交 157977bd8fe60d3e6233e891c731967bc0d41423。原功能與測試檔案共計 13 個不同路徑受增量修改，舊 Repo／GAS 來源完全未觸及。
 - LAST_VERIFIED_STEP：GitHub Actions Run #43244927252（job 131274911667），原始 Job 日誌已回讀：216 tests／216 PASS／0 FAIL／0 SKIP；已用相同 SHA 核對現行 main、正式規格 §70-S.36、原進度檔、受影響 code path 與完整 commit changed files list。
 - COMPLETED：原新 V2 gas/ 內已不存在研究員二次簽章函式或隱藏 UI；現存 E1 簽署核心限定 researcherPresigned=true、FORMAL_E1、ISSUED、原本人 OTP/Reservations 綁定與原 PDF SHA，無相容 fallback；本人/OWNER PDF 副本驗證及撤回流程仍存在；公開登入唯讀版本繼續拒絕所有私人 RPC。
 - BLOCKERS/NEXT_ACTION：Google OAuth／正式核定預簽 PDF 與頁碼欄位／PI 原 E1 Slots／實際私人 Drive 與真人 UI 尚未取得新驗收證據；下一輪僅按唯一新 V2 main 接續剩餘正式 OWNER E1 管理、Email/預約與副本狀態整合。新的公開 GAS 同步與部署需獨立授權，現階段不啟用真人收件。
