@@ -1635,3 +1635,19 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 - 發布前必須先跑 V2 GitHub 公開安全 CI，確認全部對外 RPC 已封鎖、E1 Readiness 強制拒收，再依原 V2 Script ID 審核來源、備份、競寫、HEAD 同步與回讀，建立新不可變公開版。任何尚未完成的階段不得宣稱已部署。
 - 最小人工 UI 驗收限三項：一般已登入 Google 帳號開啟正確 Study1 首頁、E1 報名顯示關閉、公開訪客被後台路由及私人 RPC 拒絕。E2 未開放；`OPEN=false`、`CONSENT_READY=false`、原 GAS、正式 Sheets、REC 及真人研究資料均不變。
 - 公開唯讀不是正式真人營運核准，`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，未核實 REC/PI/安全及真人 UI 前不得開放 E1 收件。
+
+### 70-S.35｜2026-11-12 最新核定：新 V2 為唯一網站開發主線，舊網站與舊 GitHub 全面停止更新
+
+**來源治理（優先於先前 §70-S.24–34 涉及舊系統寫入的歷史條文）**：即日起網站功能、程式、測試、介面、正式規格、UAT、工作進度與網站每小時建置排程，**唯一可寫入的網站來源**為 GitHub `solactw-star/study1-recruitment-e1-v1` 的現有 `main`／同路徑檔案；唯一持續建置的 GAS 為 Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f`。本檔 `docs/study1-system-spec.md` 是新 V2 唯一完整網站規格主檔；原 `docs/V2-MIGRATION-STATUS.md` 為網站工作進度與接續點。現行來源更新採原路徑最小增量與 SHA/commit 回讀，不建立另一套平行正式規格或 Repo。
+
+**舊系統封存**：原 Repo `solactw-star/study1-recruitment-gas`、Draft PR #133、原 GAS Script ID `1hPERspy11hI56dJobIVgCElGNaWYJJTdrDh7CRlORTom9VHti2xyR93Z`、原公開/私人部署、原閱讀副本，均列 `LEGACY_FROZEN / READ_ONLY_ARCHIVE`；**不得再更新、合併、同步、部署、變更開關或把舊 PR 當成目前施工來源**。只有相容與原始歷史查證需求時才可有限唯讀參考。新 V2 如有原正式個資／營運 Sheets 等依賴，僅沿用原 ID 作合規依賴，不能擅自寫入或替換；禁止動 REC、正式研究資料及其他 RIF 資源。原系統歷史 §70-S.24–33 的產品要求可作 V2 適用的研究功能背景，但不再授權寫入舊系統。
+
+**排程**：沿用網站每小時建置唯一既有 Automation ID `6ae2e4049ac48191b4e5ae8972bf5cc3`，名稱「Study1 V2 每小時網站建置」、保持啟用及每小時頻率；其最新 prompt 以新 Repo／新 GAS／本主檔與原進度檔為唯一寫入導航，明確禁止任何舊網站、舊 Repo、舊 PR、舊 GAS 寫入。研究 RIF 其他排程維持原獨立職責，並非本次更新對象。
+
+**本對話至 2026-11-12 的 V2 程式接續**：GitHub 新 V2 已先建立私人 version 1（`MYSELF/USER_DEPLOYING`）並以遠端唯讀 Audit 確認存在；使用者要求 Google 登入後唯讀公開瀏覽（`ANYONE/USER_DEPLOYING`、非匿名），目前在 GitHub manifest 與公開 RPC 伺服器防護中已實作，**新公開部署尚未完成**。Google OAuth 未驗證／帳號授權使真實 UI/UAT 受阻時，應先持續新 Repo 的程式工程，不再為此重複長篇部署 inventory／SHA 採證或卡住所有工程。公開版只允許研究介紹首頁與關閉的 E1 FORMAL 畫面，後台／資料／OTP／預約／PDF RPC 必須由伺服器端拒絕；私人 version 1 保留不變。
+
+**已完成的程式階段，不冒充真實營運**：E1 報名自陳與資料格式、OTP 使用原 requestId 的唯讀挑戰回查、MailApp 結果未知不自動重送、F:G 一次性 OTP、Verified Applicants 回讀及 E1 通知 outbox 至多一次送信與 `UNKNOWN` 狀態，均已有新 V2 GitHub 原始碼及 CI 依據。最後一次本輪受影響 CI Run #43230248770 = `72 PASS / 0 FAIL / 0 SKIP`，對應 GitHub 程式 SHA `6ef5a36060e9376cf4f2528ba9c2193c874ce34e`；本次 §70-S.35 是純文件增量，不冒稱新增 GAS 部署或新的程式測試。
+
+**持續施工優先序**：以唯一新 V2 E1 五項 MVP 為主——招募／本人資格自陳／聯絡資料及 OTP、研究者先簽完整 PDF 與參與者最後簽署及安全副本、PI 核定的 Slots/Reservations 預約及 `HELD/CONFIRMED/UNKNOWN`、Email 通知的持久化／未知結果及防重送、OWNER 必要後台。下一輪優先受影響的預約閉環、PDF／OWNER 界面整合；不得自行捏造 PI 場次、真實資料、Demo 代替交付或新增非MVP。REC 正式適用性由 PI／研究行政作成結論，工程不每輪主動重查，但正式開放仍必須有核准證據。
+
+**驗證及正式上線限制**：GitHub 程式/規格 commit、合成/離線 CI、main 回讀、GAS 同 Script ID 安全同步、GAS 新版本部署、實際 UI/UAT、REC/PI/正式真人收件批准各自獨立。GAS 寫入／新部署需另外明確授權及寫前備份、競寫、同 ID 回讀，不得自動執行。公開登入後唯讀部署如完成，其最小 UI smoke 只核對：非 OWNER Google 帳號正確首頁、E1 報名仍關閉、非 OWNER 後台拒絕。無證據時 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；真人申請、寄信、簽署仍禁止，`OPEN=false`、`CONSENT_READY=false`，E2 至少 2027 前禁止且不自動解禁。

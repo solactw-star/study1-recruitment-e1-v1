@@ -217,3 +217,13 @@
 - VERIFIED_RUN=[GitHub Actions Run #43230248770](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43230248770)，Job `public-safety` ID `131223352229`；實際日誌 `72 PASS / 0 FAIL / 0 SKIP`。既有 outbox 防護涵蓋通知先持久化、同一次預約至多一次 MailApp 呼叫、timeout `UNKNOWN` 不自動重送、未確認預約／信箱／簽章不能寄送。
 - IMPORTANT：`PROVIDER_ACCEPTED` 只代表提供者接受，非真實送達。無真人郵件、真實 GAS 部署、正式 Sheets 寫入或瀏覽器 UAT；公開版 OTP 與管理 RPC 仍維持封鎖。
 - STATUS：`MAIN_SYNC_VERIFIED` 僅以最後 commit 及全文回讀判定；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+
+## 2026-11-12｜使用者最新來源決策：唯一新 V2，舊網站／舊 Github 永久停止建置
+
+- TASK_DOMAIN=`Study1_V2_SINGLE_ACTIVE_SOURCE`；PRE_MAIN_SHA=`771b2dd39d9460467d99f0f6c6257dd422737818`；最新明確使用者決策：只持續處理 `solactw-star/study1-recruitment-e1-v1`，以新 V2 Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f` 為唯一網站施工 GAS。原Repo `solactw-star/study1-recruitment-gas`、PR #133、原GAS與舊部署列 `LEGACY_FROZEN/READ_ONLY_ARCHIVE`，明確停止所有寫入／合併／同步／部署。原正式 Sheets/REC/RIF 資源未獲授權不修改。
+- SPEC_DECISION_SYNC：在本 Repo 原 `docs/study1-system-spec.md` 增量 §70-S.35；覆蓋先前指向舊 Repo 或舊部署的施工路線（原功能歷史要求保留供閱讀），仍以本 Repo 原 `docs/V2-MIGRATION-STATUS.md` 為唯一網站接續點，不建立平行正式規格。
+- AUTOMATION_SYNC_VERIFIED：原網站每小時 Automation ID `6ae2e4049ac48191b4e5ae8972bf5cc3` 已於 2026-11-12 更新成「Study1 V2 每小時網站建置」，沿用原 `FREQ=HOURLY`、`Asia/Taipei`、啟用狀態；工具回讀確認 prompt 指向新Repo、新Script ID、本規格／進度檔，並具 `LEGACY_FROZEN / READ_ONLY_ARCHIVE`、禁止更新舊Repo等明確條文。RIF 排程不受影響。
+- SOURCE_SNAPSHOT：更新前新 V2 main=`771b2dd39d9460467d99f0f6c6257dd422737818`；本輪最近新 V2 程式安全 CI Run #43230248770（來源程式SHA `6ef5a36060e9376cf4f2528ba9c2193c874ce34e`）為 `72 PASS / 0 FAIL / 0 SKIP`；§70-S.35 僅更新新Repo文件，不執行 GAS／CI/正式資料修改；下輪均須讀當時最新main而不是固定舊SHA。
+- ACTIVE_ENGINEERING：E1 五項MVP：報名/自陳/Email OTP、研究者預簽與本人最後簽PDF/副本、PI核定Slots/Reservations、Email結果通知outbox、OWNER必要後台；下一輪應接續預約狀態與PDF/OWNER整合。帳號授權與真實 UI 仍阻塞，**不阻擋新Repo離線程式建置**，不得以合成CI替代實機。
+- CURRENT_STATE：`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；`OPEN=false`、`CONSENT_READY=false`、私人 V1 不變；不寄真人Email、不收件、不更動原個資/營運 Sheets、REC 或原研究系統。
+- PROJECT_INSTRUCTION_UPDATE：已準備將原研究專案指令 V2.6 之§2.3、§3.3、§4.3–4.4、§5.1、§6、§7 以新 V2 唯一來源及本次決策取代；ChatGPT Project 設定中的指令需另由有設定權限者貼入／確認，不能以本 Repo 寫入冒稱該設定已同步。
