@@ -247,3 +247,17 @@
 - WRITE_OWNER：唯一新 V2 GitHub `main`；本輪沒有任何舊 Repo／舊 PR／舊 GAS／正式 Sheets／REC／GAS 同步或部署操作。此段寫回後須再回讀 main SHA、commit 路徑及 blob。
 - SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`，`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，`OPEN=false`／`CONSENT_READY=false` 仍為規定關閉狀態。
 - NEXT_ACTION：繼續既有 E1 PDF 研究者預簽、最後階段本人線上簽署、完整雙簽副本與 OWNER 後台的原來源安全整合，離線增量測試；不待 OAuth，亦不碰正式 Sheets 或公開收件。
+
+## 2026-11-12 22:55（Asia/Taipei）｜E1 OWNER 預簽完整 PDF、參與者簽署與私人副本整合建置
+
+- TASK_DOMAIN=`Study1_V2_E1_PRESIGNED_PDF_OWNER`；SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1`／`docs/study1-system-spec.md` §70-S.24、§70-S.33–35；PRE_MAIN_SHA=`63c7ace4ed8e5b259362af24d31b03e82a8fa925`；LAST_CODE_MAIN_SHA=`7a28fac2c3121a4b672b1535f8ea83c3038285e3`。
+- COMPLETED：在原 `gas/AdminConsole.html` 新增獨立 E1 OWNER 正式文件操作區，而非另建 Demo：先由研究者於網站外簽署**完整原 PDF**並確認日期，再由 OWNER 從瀏覽器選取完整 PDF，核對本地 SHA／原版號、逐頁人工確認預簽、用原 `study1ConsentVersionUpload` 上傳至原私人 Drive；上傳、`study1ConsentVersionSelect` 選用與 `study1ConsentVersionPublication` 設定受保護的正式簽署來源分開執行，均採原 revision 與伺服器 SHA 回讀；未知回覆鎖住重新寫入，僅能先唯讀核對，不盲目重送。既有舊逐筆研究人員第二次 PDF 簽名區保留程式但在現階段 E1 MVP 後台隱藏，避免誤用舊工作路線。
+- COMPLETED：同一 OWNER 區以原 `study1EConsentOwnerList` 查詢已完成的預簽 E1 PDF 記錄，使用原 `study1EConsentOwnerSignedPdfDownload` 取得 PRIVATE 完整 PDF 位元組；瀏覽器獨立核對 recordId、PDF magic、長度及 SHA256 後才建立本機下載連結，不開放資料來源的公共 Drive URL。研究同意 `CONFIRMED` 仍不等於原 Reservations `CONFIRMED`。
+- COMPLETED：原 `gas/AdminSandbox.js` 補強：(1) `study1ConsentPublicRead_` 不再把含研究者預簽筆跡與日期的 E1 原 PDF 經舊一般公開文件閱讀路徑洩出；正式參與者仍只能透過原本人資格／Email OTP／Reservations HELD／同意憑證授權閱讀。(2) OWNER 完整雙簽 PDF 下載除原 PRIVATE 檔案 SHA 外，獨立核對同一 participantSignedPdf ID/SHA、原簽署與確認事件，以及簽署 UTC／Asia/Taipei 日期一致性，篡改一律拒絕。
+- EXISTING_PRESERVED：原 `study1EConsentSignPdf` 的參與者最後階段手寫 PNG、伺服器臺灣日期、完整原版 PDF 加簽、私人索引／事件／檔案持久化及一次性 CAS；原 `study1EConsentSignedPdfCopy` 本人完整副本、SHA 及雙簽來源核驗均保留，不重建已測試核心，不把合成資料當成正式收件成果。OWNER 對研究者預簽的真人簽章真偽仍需實際逐頁人工審查，程式無法僅從 PDF SHA 辨認簽名真偽。
+- CHANGED_PATHS：`gas/AdminSandbox.js`、`gas/AdminConsole.html`、`tests/study1-admin-sandbox.test.cjs`、`tests/study1-signed-pdf-record.test.cjs`、`tests/study1-owner-presigned-pdf-ui.test.cjs`（新增同一 Repo 內的測試）、`tests/study1-admin-console-interaction.test.cjs`、`.github/workflows/study1-v2-public-readonly-ci.yml`、本原進度檔。舊 Repo／PR #133／舊 GAS 依 `LEGACY_FROZEN / READ_ONLY_ARCHIVE` 永不寫入。
+- CI_VERIFIED：新 V2 GitHub Actions [Run #43241964623](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43241964623)；Job `public-safety` ID `131264496895`，核對 Job 日誌 `214 PASS / 0 FAIL / 0 SKIP`，來源 SHA `7a28fac2c3121a4b672b1535f8ea83c3038285e3`；含公開版後台與私人 RPC 封鎖、PDF 上傳／選用／受保護來源各自 revision 驗證、資料不明不得盲目重送、完整 SHA 下載正負例、本人 OTP／HELD 同意綁定、PDF Stamp 全頁／臺灣日期、私人 registry 及 OWNER 原預約一致性測試。舊測試原假設 owner 可在 V2 公開版開 admin／preview，已改成符合最新唯讀拒絕規則，未刪減測試或放寬路由。
+- BLOCKERS：Google 帳號授權／同一 V2 GAS 實際同步與公開版 UI 尚無新證據；研究者實際預簽正式 PDF 檔與簽章、PI／研究行政的適用 REC 結論、PI 核定原 E1 Slots/政策、正式原 Drive/Sheet 權限和 UAT 皆未核實。本輪只建置 GitHub 程式／離線測試；沒有實際開啟來源或產生正式簽署。
+- WRITE_OWNER：唯一新 V2 GitHub。除指定程式、測試與進度外，未寫原 GAS/私人 V1、正式 Sheets、REC、舊 Repo、RIF Context 或真實研究資料；未寄信、未同步 GAS HEAD、未部署或開啟真人收件。
+- SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`，但 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；規定仍為 `OPEN=false`、`CONSENT_READY=false`。
+- NEXT_ACTION：依最新新 V2 main 接續 OWNER E1 報名／原 Reservations／Email OTP 與 outbox／PDF 私人副本的必要後台狀態整合與離線負測；只有獨立授權後才分開執行 GAS 同步、公開唯讀部署與三項最小真實 UI smoke，真人收件仍需 PI/REC 審查與另行授權。
