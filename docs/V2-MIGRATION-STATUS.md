@@ -261,3 +261,10 @@
 - WRITE_OWNER：唯一新 V2 GitHub。除指定程式、測試與進度外，未寫原 GAS/私人 V1、正式 Sheets、REC、舊 Repo、RIF Context 或真實研究資料；未寄信、未同步 GAS HEAD、未部署或開啟真人收件。
 - SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`，但 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；規定仍為 `OPEN=false`、`CONSENT_READY=false`。
 - NEXT_ACTION：依最新新 V2 main 接續 OWNER E1 報名／原 Reservations／Email OTP 與 outbox／PDF 私人副本的必要後台狀態整合與離線負測；只有獨立授權後才分開執行 GAS 同步、公開唯讀部署與三項最小真實 UI smoke，真人收件仍需 PI/REC 審查與另行授權。
+
+## 2026-11-12｜V2 E1 舊研究員第二次簽署程式清除（使用者最新明確決策）
+- TASK_DOMAIN=\`Study1_V2_REMOVE_OBSOLETE_SECOND_SIGNATURE\`；SOURCE_PATH=\`solactw-star/study1-recruitment-e1-v1\`／\`docs/study1-system-spec.md\` 最新 §70-S.36；PRE_MAIN_SHA=\`899ff1532ebb76019853096eb73af9983cad7fce\`。
+- DECISION：網站尚未正式上線，不再保留舊研究員逐筆二次加簽、舊式邀請、單獨 PNG 簽署或事件確認的程式相容層；既有需要合法處置的撤回流程保留。本次僅清除**新 V2 Repo** 已淘汰來源，絕不寫舊 Repo／GAS／正式 Sheet／REC。
+- CODE_DIFF：原 OWNER \`AdminConsole.html\` 完全移除隱藏二次簽名區與 \`staffPdfSetup_\`，獨立保留撤回後處置讀取；原 \`AdminSandbox.js\` 移除 \`study1EConsentConfirmPdf\`、二簽待辦及舊式手動邀請／研究員逐筆說明／單獨 PNG/事件確認/回執 RPC，並讓 \`study1EConsentSignPdf\` 唯一接受 \`FORMAL_E1\`、已預簽、本人可信綁定、\`ISSUED\` 原憑證；本人 \`study1EConsentSignedPdfCopy\` 僅放行原預簽加一次本人簽署的完整 SHA/日期事件鏈；原 PDF stamp 刪除研究員二次簽名的座標讀取與合成引擎。原 \`Study1FormalConsent.js\` 的原版 PDF/狀態只接受正式預簽流程。
+- TESTS：刪除對已不存在功能做成功路徑的舊合成測試，替代為「舊 RPC 完全不存在」、非正式本人/非預簽/重送不得簽、完整副本 SHA/日期/ACL、原 OWNER UI 二次簽章區不存在且撤回仍可查等負測；納入既有 V2 安全 CI 及 REC 源流程檢查。
+- WRITE_OWNER：僅新 V2 GitHub \`main\`；未進行 GAS HEAD PUT/部署、正式資料或郵件存取、真人收件啟用。同步狀態必須以下一 commit／CI 實際結果回讀為準，未回讀不得宣稱完成。原 \`OPEN=false\`／\`CONSENT_READY=false\`、\`FORMAL_READY=false\`、\`LIVE_INTAKE_ENABLED=false\`。

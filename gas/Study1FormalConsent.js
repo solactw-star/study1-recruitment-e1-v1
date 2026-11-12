@@ -154,7 +154,7 @@ function study1FormalConsentOriginalPdf(token){if(typeof study1V2PublicRpcDeny_=
  study1FormalConsentGate_();
  const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
  if(entry.channel!=='FORMAL_E1'||entry.experiment!=='E1'||!entry.binding||
-    !['ISSUED','EXPLAINED'].includes(entry.state))
+    entry.state!=='ISSUED')
   throw Error('FORMAL_ORIGINAL_PDF_NOT_AUTHORIZED');
  const lock=LockService.getScriptLock();
  if(!lock||lock.tryLock(10000)!==true)throw Error('FORMAL_ORIGINAL_PDF_LOCK_BUSY');
@@ -164,7 +164,7 @@ function study1FormalConsentOriginalPdf(token){if(typeof study1V2PublicRpcDeny_=
   const latest=study1EConsentEntry_(token,study1EConsentRegistry_());
   if(latest.id!==entry.id||!latest.binding||
      latest.binding.digest!==entry.binding.digest||
-     !['ISSUED','EXPLAINED'].includes(latest.state))
+     latest.state!=='ISSUED')
    throw Error('FORMAL_ORIGINAL_PDF_SESSION_CHANGED');
   const doc=study1EConsentReadyDocument_('E1'),
    policy=study1FormalConsentRecScope_();
@@ -197,22 +197,19 @@ function study1FormalConsentStatus(token){if(typeof study1V2PublicRpcDeny_==='fu
  // remain enforced; unconfirmed invitations still need every live gate.
  if(!['CONFIRMED','WITHDRAWN'].includes(entry.state))study1FormalConsentGate_();
  if(entry.channel!=='FORMAL_E1'||!entry.binding||
-    entry.experiment!=='E1')
+    entry.experiment!=='E1'||entry.researcherPresigned!==true)
   throw Error('FORMAL_CONSENT_SESSION_NOT_BOUND');
- const info=study1EConsentSession(token);
  const dualConfirmed=['CONFIRMED','WITHDRAWN'].includes(entry.state)&&
   !!entry.signedPdf&&!!entry.participantSignedPdf&&!!entry.confirmation;
- const isPresigned=entry.researcherPresigned===true;
  return {experiment:'E1',state:entry.state,version:entry.documentVersion,
   sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),
-  researcherPreSigned:isPresigned,
-  researcherExplanationCompleted:!!(entry.explanation&&
-   ['EXPLAINED','SIGNED','CONFIRMED','WITHDRAWN'].includes(entry.state)),
+  researcherPreSigned:true,
+  researcherExplanationCompleted:false,
   signatureAccepted:!!entry.signature,
   staffConfirmed:dualConfirmed,
   copyAvailable:dualConfirmed,
   withdrawn:entry.state==='WITHDRAWN',
   dataDispositionState:entry.state==='WITHDRAWN'?
    (entry.disposition?'OWNER_EVIDENCE_RECORDED_PI_REVIEW':'PENDING_RESEARCH_TEAM_ACTION'):null,
-  explanation:info.explanation||null};
+  explanation:null};
 }

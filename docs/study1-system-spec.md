@@ -1651,3 +1651,12 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 **持續施工優先序**：以唯一新 V2 E1 五項 MVP 為主——招募／本人資格自陳／聯絡資料及 OTP、研究者先簽完整 PDF 與參與者最後簽署及安全副本、PI 核定的 Slots/Reservations 預約及 `HELD/CONFIRMED/UNKNOWN`、Email 通知的持久化／未知結果及防重送、OWNER 必要後台。下一輪優先受影響的預約閉環、PDF／OWNER 界面整合；不得自行捏造 PI 場次、真實資料、Demo 代替交付或新增非MVP。REC 正式適用性由 PI／研究行政作成結論，工程不每輪主動重查，但正式開放仍必須有核准證據。
 
 **驗證及正式上線限制**：GitHub 程式/規格 commit、合成/離線 CI、main 回讀、GAS 同 Script ID 安全同步、GAS 新版本部署、實際 UI/UAT、REC/PI/正式真人收件批准各自獨立。GAS 寫入／新部署需另外明確授權及寫前備份、競寫、同 ID 回讀，不得自動執行。公開登入後唯讀部署如完成，其最小 UI smoke 只核對：非 OWNER Google 帳號正確首頁、E1 報名仍關閉、非 OWNER 後台拒絕。無證據時 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；真人申請、寄信、簽署仍禁止，`OPEN=false`、`CONSENT_READY=false`，E2 至少 2027 前禁止且不自動解禁。
+
+### 70-S.36｜2026-11-12 最新決策：尚未正式上線，不保留已淘汰的研究員第二簽或舊式邀請程式
+
+**適用優先序**：使用者明確指示「就程式就直接刪除，不需要保留，現在都還沒正式上線，所以不用考慮歷史相容的問題」。本節取代 §70-S.33「舊邀請／逐筆說明／第二簽介面保留程式供歷史相容」及所有更早與之衝突的 E1 路線；不授權修改、刪除或同步舊 Repo、舊 GAS 或正式研究資料。
+
+- 唯一 E1 PDF 路線：研究者**網站外先簽完整原 PDF 及日期** → 原 OWNER 後台逐頁人工核對，使用原私人 Drive 與原同意版本索引上傳、選用、明確指定正式受保護來源（均按 SHA/版號/revision） → E1 本人資格自陳、OTP、原 Slots/Reservations HELD → 本人**最後階段**閱讀完整受保護預簽 PDF、在核准參與者欄位線上手寫簽署 → 保全唯一完整雙方簽署 PDF、事件/來源/SHA/臺灣日期、本人副本及 OWNER 授權下載 → 獨立核對原 Reservations CONFIRMED/UNKNOWN。
+- **必須從 V2 現行程式直接刪除**舊研究員事後逐筆第二次簽章的後台區塊與前端處理器、獨立研究員簽章欄位配置/第二次 PDF 合成、研究者二次簽章 RPC/待簽索引；舊 OWNER 手動邀請、逐筆問答/說明事件、單獨 PNG 同意與確認、非完整 PDF 回執不再作為可執行路線。刪掉舊式路線而非加上隱藏標記或只擋公開路由；現有撤回及資料處置程序仍須保留。
+- 現存 E1 簽署 RPC 必須拒絕非 \`FORMAL_E1\`、沒有本人 OTP/HELD 可信綁定、\`researcherPresigned!==true\`、非 \`ISSUED\`、錯誤原 SHA、舊 \`EXPLAINED\` 狀態或重送。完整雙簽 PDF 本人/OWNER 下載只能採**同一研究者預簽原文加一次參與者筆跡**的 SHA/事件鏈，不再包含第二個研究員即時簽署時間、額外第二次合成或任何歷史 fallback。現行有效研究程序與研究者告知/答疑責任仍由 PI／研究行政核對，工程刪除舊程式不代表 REC 義務被撤銷。
+- 僅更新新 \`solactw-star/study1-recruitment-e1-v1\` 的原 \`gas/\`、\`tests/\`、既有 CI、原主規格及進度；對已淘汰功能的測試改成「不存在／不得呼叫」及正式流程負測，不以刪除安全測試冒充成功。GAS 同步、版本部署、正式 Sheets、REC、舊系統與真人收件均不授權；\`OPEN=false\`、\`CONSENT_READY=false\`、\`FORMAL_READY=false\`、\`LIVE_INTAKE_ENABLED=false\`。

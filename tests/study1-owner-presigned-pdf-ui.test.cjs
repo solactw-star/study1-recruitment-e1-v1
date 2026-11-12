@@ -91,9 +91,10 @@ function fixture(opts={}){
  const file={size:pdf.length,arrayBuffer:async()=>Uint8Array.from(pdf).buffer};
  return {el,fire,calls,errors,pdf,sha,recordId,file,get revoked(){return revoked}};
 }
-test('existing OWNER page provides actual E1 presigned controls; hides legacy per-record researcher signing',()=>{
+test('OWNER page provides only E1 presigned workflow and completely deletes researcher second-sign UI',()=>{
  assert.match(html,/id="e1OwnerPresign"/);
- assert.match(html,/id="staffPdfDualSignature" hidden/);
+ assert.doesNotMatch(html,/staffPdfDualSignature|staffPdfConfirm|staffPdfSetup_/);
+ assert.match(html,/id="staffWithdrawal"/,'withdrawal remains a separate required section');
  assert.match(html,/id="e1PdfUpload" type="button" disabled/);
  assert.match(html,/id="e1PdfSource" type="button" disabled/);
 });

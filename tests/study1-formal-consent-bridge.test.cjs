@@ -50,7 +50,6 @@ function harness(){
   study1FormalSlot_:(ctx,slotId)=>{seen.slot++;if(slotId!==id||slots[0][0]!==slotId)throw Error('untrusted slot');return slots[0];},
   study1EConsentReadyDocument_:(experiment)=>{if(experiment!=='E1')throw Error('E2 blocked');return doc;},
   study1PdfLayoutRead_:()=>({verified:true}),
-  study1PdfResearcherLayoutRead_:()=>({verified:true}),
   study1ConsentDocumentBytes_:()=>[...Buffer.from('%PDF-'+('SYNTHETIC REC ORIGINAL '.repeat(10)))],
   study1BindingRecheck_:(_binding,_doc,_adapter,_now,lockObj)=>{
    if(lockObj!==lock||!held||rows[0][3]!=='HELD'||Date.parse(rows[0][4])<=Date.now())
@@ -78,8 +77,6 @@ function harness(){
    seen.writes++;registry.revision=after.revision;registry.records=after.records;
   },
   study1EConsentEntry_:()=>{if(!registry.records.length)throw Error('TOKEN_INVALID');return registry.records[0];},
-  study1EConsentSession_:()=>({state:'ISSUED'}),
-  study1EConsentSession:()=>({explanation:null}),
   LockService:{getScriptLock:()=>lock},
   Utilities:{getUuid:(()=>{let i=0;return ()=>('aaaaaa'+String(++i).padStart(2,'0')+'-bbbb-4ccc-8ddd-000000000001');})(),
    base64Encode:bytes=>Buffer.from(bytes).toString('base64')},

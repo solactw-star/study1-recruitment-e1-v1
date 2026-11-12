@@ -947,150 +947,6 @@ function study1EConsentChange_(id,fn){
   }
  }finally{lock.releaseLock();}
 }
-/** Authenticated OWNER creates a fixed-document one-person invitation. */
-function study1EConsentIssue(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- if(!study1EConsentEnabled_())throw Error('尚未開放有效電子簽署');
- if(!input||Object.keys(input).join(',')!=='experiment'||
-  !['E1','E2'].includes(input.experiment))throw Error('實驗選擇不合法');
- const doc=study1EConsentReadyDocument_(input.experiment);
- // Owner-only experiment-only invitations lack all human and slot provenance.
- // Retain solely for synthetic legacy TEST fixtures; not a live path.
- if(PropertiesService.getScriptProperties()
-    .getProperty('STUDY1_ECONSENT_LEGACY_SYNTHETIC_ONLY')!=='true')
-  throw Error('BINDING_REQUIRED：正式邀請必須綁定本人身分、OTP及預約');
- const lock=LockService.getScriptLock();
- if(!lock.tryLock(10000))throw Error('電子同意作業忙碌');
- try{
-  study1AdminOwnerRequired_();study1EConsentReadyDocument_(input.experiment);
-  const r=study1EConsentRegistry_();
-  if(r.records.length>=STUDY1_ECONSENT_MAX_RECORDS_)throw Error('正式同意收件容量不足，禁止發出新憑證');
-  const token=Utilities.getUuid()+'-'+Utilities.getUuid();
-  const entry={id:Utilities.getUuid(),tokenHash:study1EConsentHash_(token),
-   experiment:input.experiment,documentSha:doc.sha256,documentVersion:doc.version,
-   expires:Date.now()+86400000,state:'ISSUED',
-   explanation:null,signature:null,confirmation:null,withdrawal:null};
-  if(r.records.some(x=>x.id===entry.id||x.tokenHash===entry.tokenHash))
-   throw Error('電子同意憑證重複，拒絕發出');
-  study1EConsentWrite_(r,{...r,revision:r.revision+1,records:r.records.concat([entry])});
-  return {id:entry.id,token,experiment:entry.experiment,
-   version:entry.documentVersion,sha256:entry.documentSha,expires:entry.expires};
- }finally{lock.releaseLock();}
-}
-/** OWNER documents researcher explanation and specific questions before signing. */
-function study1EConsentExplain(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- if(!input||Object.keys(input).sort().join(',')!=='answer,id,question,resolved'||
-  typeof input.id!=='string'||typeof input.question!=='string'||
-  typeof input.answer!=='string'||input.question.length>1600||
-  !input.answer.trim()||input.answer.length>2400||/[<>]/.test(input.question+input.answer)||
-  input.resolved!==true)throw Error('必須完整記錄說明、疑問與研究人員答覆');
- return study1EConsentChange_(input.id,x=>{
-  study1AdminOwnerRequired_();
-  if(x.state!=='ISSUED'||x.expires<Date.now())throw Error('不能修改已處理或過期邀請');
-  const proof=study1EConsentFile_('EXPLANATION',x,{
-   question:input.question,answer:input.answer,staff:'OWNER',
-   questionsResolved:true});
-  return {...x,state:'EXPLAINED',explanation:proof};
- });
-}
-/** Bearer proof is required even to read the attested explanation. */
-function study1EConsentSession(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- const r=study1EConsentRegistry_(),entry=study1EConsentEntry_(token,r);
- if(!study1EConsentEnabled_()&&entry.state!=='CONFIRMED'&&entry.state!=='WITHDRAWN')
-  throw Error('電子同意目前不開放');
- const explanation=entry.explanation?
-  study1EConsentEvent_(entry.explanation,entry,'EXPLANATION').data:null;
- return {experiment:entry.experiment,version:entry.documentVersion,
-  sha256:entry.documentSha,state:entry.state,expires:entry.expires,
-  explanation:explanation&&{question:explanation.question,answer:explanation.answer}};
-}
-/** Browser supplied signature is accepted once, bound to owner-verified invite. */
-function study1EConsentSign(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- if(!study1EConsentEnabled_())throw Error('尚未開放有效電子簽署');
- // Legacy isolated synthetic event is preserved solely for existing TEST regression.
- // It must NEVER serve as an operational signed consent or replace a signed PDF.
- if(PropertiesService.getScriptProperties().getProperty('STUDY1_ECONSENT_LEGACY_SYNTHETIC_ONLY')!=='true')
-  throw Error('正式電子簽署必須產生完整簽名PDF，舊獨立PNG簽名路徑已關閉');
- if(!input||Object.keys(input).sort().join(',')!=='agree,answerAcknowledged,documentSha,name,read,signature,token'||
-  input.agree!==true||input.answerAcknowledged!==true||input.read!==true||
-  typeof input.name!=='string'||!input.name.trim()||input.name.length>80||
-  /[<>\u0000-\u001f]/.test(input.name)||
-  typeof input.documentSha!=='string'||!/^[a-f0-9]{64}$/.test(input.documentSha)||
-  typeof input.signature!=='string'||input.signature.length>125000||
-  !/^[A-Za-z0-9+/]+={0,2}$/.test(input.signature))
-  throw Error('必須完成全文閱讀、說明確認、姓名與本人簽名');
- const bytes=Utilities.base64Decode(input.signature);
- if(bytes.length<100||bytes.length>90000||
-  bytes.slice(0,8).map(b=>b&255).join(',')!=='137,80,78,71,13,10,26,10')
-  throw Error('電子簽名必須是完整PNG筆跡');
- const token=input.token,r=study1EConsentRegistry_(),entry=study1EConsentEntry_(token,r);
- return study1EConsentChange_(entry.id,x=>{
-  if(!study1EConsentEnabled_()||x.state!=='EXPLAINED'||x.expires<Date.now()||
-   x.documentSha!==input.documentSha)throw Error('同意書邀請、版本或說明已失效');
-  study1EConsentEvent_(x.explanation,x,'EXPLANATION');
-  const original=study1ConsentVersionRead_().documents.find(d=>
-   d.experiment===x.experiment&&d.sha256===x.documentSha&&d.version===x.documentVersion);
-  if(!original)throw Error('原版同意書已不存在');
-  study1ConsentDocumentBytes_(original);
-  const file=study1EConsentFile_('SIGNATURE',x,{name:input.name.trim(),
-   signaturePngBase64:input.signature,read:true,answerAcknowledged:true,
-   agreed:true,explanationHash:x.explanation.sha});
-  return {...x,state:'SIGNED',signature:file};
- }).state==='SIGNED'?{state:'SIGNED',message:'已記錄固定版本的本人簽名，待研究人員確認'}:
- {state:'UNVERIFIED'};
-}
-/** Staff confirmation is another independently stored event, not an overwrite. */
-function study1EConsentConfirm(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- if(!input||Object.keys(input).sort().join(',')!=='id,identityVerified,notes'||
-  input.identityVerified!==true||typeof input.id!=='string'||
-  typeof input.notes!=='string'||!input.notes.trim()||input.notes.length>1000||
-  /[<>]/.test(input.notes))throw Error('請記錄身分核對與研究人員確認');
- return study1EConsentChange_(input.id,x=>{
-  study1AdminOwnerRequired_();
-  if(x.channel==='FORMAL_E1')throw Error('RESEARCHER_PDF_SIGNATURE_REQUIRED');
-  if(x.state!=='SIGNED')throw Error('只有已簽署紀錄能被研究人員確認');
-  if(!x.signedPdf&&PropertiesService.getScriptProperties()
-     .getProperty('STUDY1_ECONSENT_LEGACY_SYNTHETIC_ONLY')!=='true')
-   throw Error('沒有完整已簽署PDF，不得標記研究人員確認');
-  if(x.signedPdf)study1EConsentSignedPdfRead_(x.signedPdf,x);
-  study1EConsentEvent_(x.signature,x,'SIGNATURE');
-  const file=study1EConsentFile_('CONFIRMATION',x,{
-   researcher:'OWNER',reviewerEmail:Session.getActiveUser().getEmail(),
-   identityVerified:true,notes:input.notes,
-   signatureHash:x.signature.sha,explanationHash:x.explanation.sha});
-  return {...x,state:'CONFIRMED',confirmation:file};
- });
-}
-/** Participant can retrieve their own document-bound evidence with bearer code. */
-function study1EConsentCopy(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
- if(!['CONFIRMED','WITHDRAWN'].includes(entry.state))
-  throw Error('尚未完成雙方確認，不提供有效簽署副本');
- if(!entry.signedPdf&&PropertiesService.getScriptProperties()
-   .getProperty('STUDY1_ECONSENT_LEGACY_SYNTHETIC_ONLY')!=='true')
-  throw Error('正式電子同意必須提供完整已簽署PDF，不能只提供PNG和收據');
- const signed=study1EConsentEvent_(entry.signature,entry,'SIGNATURE');
- const confirmed=study1EConsentEvent_(entry.confirmation,entry,'CONFIRMATION');
- const withdrawn=entry.withdrawal?
-  study1EConsentEvent_(entry.withdrawal,entry,'WITHDRAWAL'):null;
- // The participant's own existing consent-copy workflow must contain the
- // FULL stamped PDF, not only a receipt with detached PNG. Keep legacy
- // synthetic-only tests untouched while the actual enrollment provider is OFF.
- const complete=entry.signedPdf?study1EConsentSignedPdfCopy(token):null;
- return {state:entry.state,experiment:entry.experiment,version:entry.documentVersion,
-  documentSha256:entry.documentSha,signatureEvidenceSha256:entry.signature.sha,
-  confirmationEvidenceSha256:entry.confirmation.sha,participant:signed.data.name,
-  signaturePngBase64:signed.data.signaturePngBase64,
-  signedAt:complete?complete.signedAt:signed.recordedAt,
-  taipeiDate:complete?.taipeiDate||null,
-  signedPdfSha256:complete?.signedPdfSha256||null,
-  signedPdfBase64:complete?.base64||null,
-  signedPdfMime:complete?.mime||null,
-  reviewer:confirmed.data.reviewerEmail,confirmedAt:confirmed.recordedAt,
-  withdrawalAt:withdrawn?.recordedAt||null,withdrawalEvidenceSha256:entry.withdrawal?.sha||null};
-}
 /** Withdrawal is a new private event, never deletion/edit of original consent. */
 function study1EConsentWithdraw(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const keys=input&&typeof input==='object'&&!Array.isArray(input)?
@@ -1116,7 +972,10 @@ function study1EConsentWithdraw(input){if(typeof study1V2PublicRpcDeny_==='funct
 function study1EConsentOwnerList(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const r=study1EConsentRegistry_();
- return {revision:r.revision,records:r.records.map(x=>({id:x.id,
+ return {revision:r.revision,records:r.records
+  .filter(x=>x.channel==='FORMAL_E1'&&x.experiment==='E1'&&
+    x.researcherPresigned===true)
+  .map(x=>({id:x.id,
   experiment:x.experiment,version:x.documentVersion,sha256:x.documentSha,
   state:x.state,expires:x.expires,
   researcherPresigned:x.researcherPresigned===true,
@@ -1260,14 +1119,7 @@ function study1EConsentSignedPdfRead_(ref,entry){
  return bytes;
 }
 async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- // Important: this endpoint is intentionally UNAVAILABLE until a real
- // registration-bound identity provider and approved PDF evidence provider
- // are installed. No owner-only TEST fixture can set these live gates.
- if(!study1EConsentEnabled_())
-  throw Error('尚未開放有效電子簽署');
- // The approved research protocol must not be globally vetoed by an
- // assumed REC prohibition. This path still requires independent technical
- // PDF-provider, wizard-binding, identity, booking, consent and storage gates.
+ if(!study1EConsentEnabled_())throw Error('尚未開放有效電子簽署');
  const p=PropertiesService.getScriptProperties();
  if(p.getProperty('STUDY1_ECONSENT_PDF_PROVIDER_VERIFIED')!=='true'||
     p.getProperty('STUDY1_ECONSENT_WIZARD_LINK_VERIFIED')!=='true')
@@ -1285,308 +1137,141 @@ async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='
   pngBytes.slice(0,8).map(b=>b&255).join(',')!=='137,80,78,71,13,10,26,10')
   throw Error('本人手寫簽名必須是完整PNG');
  const prior=study1EConsentEntry_(input.token,study1EConsentRegistry_());
- // A bearer token and staff manual invitation are never sufficient proof.
- // This must be re-read from approved server-only sources, not from the browser.
- if(!prior.binding)throw Error('BINDING_REQUIRED：此邀請未綁定身分／OTP／預約');
- if(prior.channel==='FORMAL_E1'){
-  study1FormalConsentGate_();study1FormalConsentCopyExpiry_();
- }
- const preSigned=prior.channel==='FORMAL_E1'&&prior.researcherPresigned===true;
- const bindingAdapter=study1EConsentBindingAdapter_(prior.channel==='FORMAL_E1'?'PUBLIC_E1':undefined);
- if((prior.state!=='EXPLAINED'&&!(preSigned&&prior.state==='ISSUED'))||
-   prior.documentSha!==input.documentSha||prior.expires<=Date.now())
+ // The ONLY V2 E1 signing path: original applicant/OTP/HELD-bound invitation
+ // over an immutable PDF already signed and dated by the researcher.
+ if(!prior.binding||prior.channel!=='FORMAL_E1'||prior.experiment!=='E1'||
+    prior.researcherPresigned!==true||prior.state!=='ISSUED')
+  throw Error('E1_PRESIGNED_FORMAL_ONLY');
+ study1FormalConsentGate_();
+ study1FormalConsentCopyExpiry_();
+ if(prior.documentSha!==input.documentSha||prior.expires<=Date.now())
   throw Error('此固定文件已失效，無法簽署');
- if(!preSigned)study1EConsentEvent_(prior.explanation,prior,'EXPLANATION');
- const doc=study1EConsentReadyDocument_(prior.experiment);
- if(preSigned&&doc.researcherPresigned!==true)
+ const doc=study1EConsentReadyDocument_('E1');
+ if(doc.researcherPresigned!==true||doc.version!==prior.documentVersion||
+    doc.sha256!==prior.documentSha)
   throw Error('RESEARCHER_PRESIGNED_SOURCE_CHANGED');
- if(doc.version!==prior.documentVersion||doc.sha256!==prior.documentSha)
-  throw Error('已選用的核准文件不是原先說明並同意的版本');
+ const bindingAdapter=study1EConsentBindingAdapter_('PUBLIC_E1');
  study1BindingRecheckWithLock_(prior.binding,doc,bindingAdapter);
- const layout=study1PdfLayoutRead_(prior.experiment,doc);
- const verifiedOriginal=study1ConsentDocumentBytes_(doc);
- // Trusted server time is created here, never accepted from the browser.
- const signedAt=new Date();
- const stamped=await study1PdfComposeSigned_(verifiedOriginal,pngBytes,layout,
-  {experiment:prior.experiment,sha256:prior.documentSha,
-   version:prior.documentVersion},signedAt);
- let savedPdf=null,verifiedContactEmail=null;
+ const layout=study1PdfLayoutRead_('E1',doc);
+ const original=study1ConsentDocumentBytes_(doc);
+ const stamped=await study1PdfComposeSigned_(original,pngBytes,layout,
+  {experiment:'E1',sha256:prior.documentSha,version:prior.documentVersion},new Date());
+ let savedPdf=null,contactEmail=null;
  try{
-  const changed=study1EConsentChange_(prior.id,(x,r,heldLock)=>{
+  const changed=study1EConsentChange_(prior.id,(x,_,heldLock)=>{
    if(!study1EConsentEnabled_()||
       p.getProperty('STUDY1_ECONSENT_PDF_PROVIDER_VERIFIED')!=='true'||
       p.getProperty('STUDY1_ECONSENT_WIZARD_LINK_VERIFIED')!=='true'||
-      (x.state!=='EXPLAINED'&&!(preSigned&&x.state==='ISSUED'&&x.researcherPresigned===true))||
-      x.expires<=Date.now()||
-      x.documentSha!==prior.documentSha||
-      x.documentVersion!==prior.documentVersion)
-    throw Error('同意書版本、身分連結或簽署狀態在處理時已改變');
-   if(!preSigned)study1EConsentEvent_(x.explanation,x,'EXPLANATION');
-   const reloaded=study1EConsentReadyDocument_(x.experiment);
-   if(preSigned&&reloaded.researcherPresigned!==true)
+      x.channel!=='FORMAL_E1'||x.experiment!=='E1'||
+      x.researcherPresigned!==true||x.state!=='ISSUED'||
+      x.expires<=Date.now()||x.documentSha!==doc.sha256||
+      x.documentVersion!==doc.version)
+    throw Error('同意書版本、本人身分或簽署狀態在提交前已變更');
+   if(!heldLock||heldLock.hasLock()!==true||!x.binding||
+      x.binding.digest!==prior.binding.digest)
+    throw Error('PDF_SIGN_FINAL_CAS_LOCK_OR_BINDING_INVALID');
+   study1FormalConsentGate_();
+   const current=study1EConsentReadyDocument_('E1');
+   if(current.researcherPresigned!==true||current.sha256!==stamped.sourceSha256||
+      current.version!==doc.version||current.id!==doc.id)
     throw Error('RESEARCHER_PRESIGNED_SOURCE_CHANGED');
-   study1PdfLayoutRead_(x.experiment,reloaded);
-   if(reloaded.sha256!==stamped.sourceSha256)throw Error('核准原PDF變動');
-   // Revalidate the same identity, consumed OTP, active slot and hold while
-   // holding the very script lock protecting the signature event CAS.
-   if(!x.binding||x.binding.digest!==prior.binding.digest)
-    throw Error('簽署邀請的本人身分連結發生變動');
-   if(!heldLock||heldLock.hasLock()!==true)
-    throw Error('PDF_SIGN_FINAL_CAS_LOCK_REQUIRED');
-   study1BindingRecheck_(x.binding,reloaded,bindingAdapter,new Date().toISOString(),heldLock);
-   // The typed self-declared signing name must match the original applicant
-   // row. Email OTP is mailbox control, never documentary identity checking.
-   if(x.channel==='FORMAL_E1'){
-    const expected={applicantId:x.binding.applicantId,
-     screeningId:x.binding.screeningId,challengeId:x.binding.challengeId,
-     experiment:'E1',reservationId:x.binding.reservationId,
-     slotId:x.binding.slotId,documentSha:x.binding.documentSha,
-     documentVersion:x.binding.documentVersion};
-    const source=bindingAdapter.readTrustedSnapshot(expected,heldLock);
-    const originalName=source&&source.applicants&&source.applicants.rows&&
-     source.applicants.rows[0]&&source.applicants.rows[0][1];
-    if(typeof originalName!=='string'||originalName.trim()!==input.name.trim())
-     throw Error('FORMAL_CONSENT_NAME_NOT_SAME_APPLICATION');
-    // E-mail is read only from the original verified applicant, not browser input.
-    if(preSigned)verifiedContactEmail=study1BindingEmail_(source.applicants.rows[0][2]);
-   }
-   const accessExpires=x.channel==='FORMAL_E1'?
-    study1FormalConsentCopyExpiry_():x.expires;
+   study1PdfLayoutRead_('E1',current);
+   study1BindingRecheck_(x.binding,current,bindingAdapter,new Date().toISOString(),heldLock);
+   const expected={applicantId:x.binding.applicantId,
+    screeningId:x.binding.screeningId,challengeId:x.binding.challengeId,
+    experiment:'E1',reservationId:x.binding.reservationId,
+    slotId:x.binding.slotId,documentSha:x.binding.documentSha,
+    documentVersion:x.binding.documentVersion};
+   const trusted=bindingAdapter.readTrustedSnapshot(expected,heldLock);
+   const applicant=trusted&&trusted.applicants&&trusted.applicants.rows&&
+      trusted.applicants.rows[0];
+   if(!applicant||typeof applicant[1]!=='string'||
+      applicant[1].trim()!==input.name.trim())
+    throw Error('FORMAL_CONSENT_NAME_NOT_SAME_APPLICATION');
+   contactEmail=study1BindingEmail_(applicant[2]);
    savedPdf=study1EConsentSignedPdfStore_(stamped,x);
-   const event=study1EConsentFile_('SIGNATURE',x,{
+   const signature=study1EConsentFile_('SIGNATURE',x,{
     name:input.name.trim(),signaturePngBase64:input.signature,
     read:true,answerAcknowledged:true,agreed:true,
     signedPdfSha256:savedPdf.sha,serverSignedAt:stamped.serverSignedAt,
-    taipeiDate:stamped.taipeiDate,
-    explanationHash:x.explanation?x.explanation.sha:null});
-   // Researcher signed the immutable uploaded source before enrollment.
-   // Never request or forge a second researcher signature after participant.
-   const confirmation=preSigned?study1EConsentFile_('CONFIRMATION',x,{
-    mode:'RESEARCHER_PRESIGNED_SOURCE',researcherSignedSourceSha256:x.documentSha,
-    signatureHash:event.sha,participantSignedPdfSha256:savedPdf.sha,
-    researcherSignedPdfSha256:savedPdf.sha,recordedAtUtc:new Date().toISOString()}):null;
-   return {...x,state:preSigned?'CONFIRMED':'SIGNED',signature:event,
-    signedPdf:savedPdf,participantSignedPdf:preSigned?savedPdf:null,
-    confirmation:preSigned?confirmation:x.confirmation,
-    expires:accessExpires};
+    taipeiDate:stamped.taipeiDate});
+   // Researcher ink/date already exist INSIDE the exact original private PDF.
+   // No second handwritten researcher signature or after-the-fact attestation.
+   const confirmation=study1EConsentFile_('CONFIRMATION',x,{
+    mode:'RESEARCHER_PRESIGNED_SOURCE',
+    researcherSignedSourceSha256:x.documentSha,
+    signatureHash:signature.sha,participantSignedPdfSha256:savedPdf.sha,
+    researcherSignedPdfSha256:savedPdf.sha,recordedAtUtc:new Date().toISOString()});
+   return {...x,state:'CONFIRMED',signature,confirmation,
+    signedPdf:savedPdf,participantSignedPdf:savedPdf,
+    expires:study1FormalConsentCopyExpiry_()};
   });
-  if(changed.state!==(preSigned?'CONFIRMED':'SIGNED')||!changed.signedPdf||
+  if(changed.state!=='CONFIRMED'||!changed.signedPdf||
      changed.signedPdf.sha!==stamped.signedSha256)
-   throw Error('簽署PDF寫後索引核對未通過');
+   throw Error('SIGNED_PDF_COMMIT_UNKNOWN');
+  // This is an independent original Reservations transaction. Never claim
+  // booking confirmed based merely on the PDF commit or notification attempt.
   let originalBookingConfirmed=false;
-  if(preSigned){
+  try{
+   const result=study1FormalFinalizeSignedE1Booking_(changed.id,input.token);
+   originalBookingConfirmed=result.bookingConfirmed===true&&
+      result.bookingStatus==='CONFIRMED';
+  }catch(_){/* preserve signed PDF for read-only OWNER reconciliation */}
+  let emailNotificationStatus=originalBookingConfirmed?'NOT_SENT':'BOOKING_NOT_CONFIRMED';
+  if(originalBookingConfirmed&&contactEmail){
    try{
-    const result=study1FormalFinalizeSignedE1Booking_(changed.id,input.token);
-    originalBookingConfirmed=result.bookingConfirmed===true&&result.bookingStatus==='CONFIRMED';
-   }catch(_){/* PDF is immutable; original booking requires reconciliation. */}
+    const notice=study1ParticipantBookingNotice_(contactEmail,changed.id);
+    emailNotificationStatus=notice.status==='PROVIDER_ACCEPTED'?
+     'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW';
+   }catch(_){emailNotificationStatus='UNKNOWN_REQUIRES_STAFF_REVIEW';}
   }
-  let emailNotificationStatus='NOT_APPLICABLE';
-  if(preSigned){
-   emailNotificationStatus=originalBookingConfirmed?'NOT_SENT':'BOOKING_NOT_CONFIRMED';
-   if(originalBookingConfirmed&&verifiedContactEmail){
-    try{
-     const notice=study1ParticipantBookingNotice_(verifiedContactEmail,changed.id);
-     emailNotificationStatus=notice.status==='PROVIDER_ACCEPTED'?
-      'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW';
-    }catch(_){emailNotificationStatus='UNKNOWN_REQUIRES_STAFF_REVIEW';}
-   }
-  }
-  return {state:preSigned?'CONFIRMED':'SIGNED',experiment:prior.experiment,
-   researcherPreSigned:preSigned,originalBookingConfirmed,emailNotificationStatus,
-   documentSha256:stamped.sourceSha256,
-   signedPdfSha256:stamped.signedSha256,
+  return {state:'CONFIRMED',experiment:'E1',researcherPreSigned:true,
+   originalBookingConfirmed,emailNotificationStatus,
+   documentSha256:stamped.sourceSha256,signedPdfSha256:stamped.signedSha256,
    signedAt:stamped.serverSignedAt,taipeiDate:stamped.taipeiDate,
-   message:preSigned?'研究者已先簽署PDF，本人線上簽名版已保存；請核對預約狀態及下載副本':
-    '完整簽署PDF已保存，待研究人員確認並交付本人副本'};
+   message:'研究者預簽完整PDF已核實，本人手寫簽名版已保存；請另核對預約狀態及完整副本'};
  }catch(error){
   if(savedPdf){
    let referenced=false;
    try{referenced=study1EConsentRegistry_().records.some(x=>x.id===prior.id&&
-       x.signedPdf?.id===savedPdf.id&&x.signedPdf.sha===savedPdf.sha);}
-   catch(_){referenced=true;} // ambiguous state: never delete possible evidence
+      x.signedPdf?.id===savedPdf.id&&x.signedPdf.sha===savedPdf.sha);}
+   catch(_){referenced=true;}
    if(!referenced)try{DriveApp.getFileById(savedPdf.id).setTrashed(true);}catch(_){}
   }
   throw error;
  }
 }
 
-/** OWNER handwritten second signature in the REC-pinned researcher PDF box.
- * Original PDF and participant-signed PDF remain immutable and traceable.
+/** Full E1 PDF copy, from the one presigned researcher source plus
+ * the participant's single signed PDF. No old second-sign branch exists.
  */
-async function study1EConsentConfirmPdf(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- if(!input||Array.isArray(input)||typeof input!=='object'||
-  Object.keys(input).sort().join(',')!=='id,notes,participantSignedSha256,researcherSignature'||
-  !/^[-a-f0-9]{30,40}$/i.test(input.id||'')||
-  typeof input.notes!=='string'||!input.notes.trim()||input.notes.length>1000||
-  /[<>]/.test(input.notes)||!/^[a-f0-9]{64}$/.test(input.participantSignedSha256||'')||
-  typeof input.researcherSignature!=='string'||input.researcherSignature.length>125000||
-  !/^[A-Za-z0-9+/]+={0,2}$/.test(input.researcherSignature))
-  throw Error('RESEARCHER_PDF_REQUEST_INVALID');
- const png=Utilities.base64Decode(input.researcherSignature);
- if(png.length<100||png.length>90000||
-  png.slice(0,8).map(b=>b&255).join(',')!=='137,80,78,71,13,10,26,10')
-  throw Error('RESEARCHER_PDF_PNG_INVALID');
- study1FormalConsentGate_();
- const active=Session.getActiveUser().getEmail(),
-   effective=Session.getEffectiveUser().getEmail();
- if(!active||active!==effective)throw Error('RESEARCHER_SESSION_MISMATCH');
- const registry=study1EConsentRegistry_(),
-  before=registry.records.find(x=>x.id===input.id);
- if(!before||before.channel!=='FORMAL_E1'||before.experiment!=='E1'||
-  before.state!=='SIGNED'||!before.binding||!before.signedPdf||
-  before.signedPdf.sha!==input.participantSignedSha256)
-  throw Error('RESEARCHER_PDF_UNBOUND_OR_STALE');
- const signedEvent=study1EConsentEvent_(before.signature,before,'SIGNATURE');
- study1EConsentEvent_(before.explanation,before,'EXPLANATION');
- if(signedEvent.data.signedPdfSha256!==before.signedPdf.sha)
-  throw Error('RESEARCHER_PDF_PARTICIPANT_HASH_MISMATCH');
- const doc=study1EConsentReadyDocument_('E1');
- if(doc.sha256!==before.documentSha||doc.version!==before.documentVersion)
-  throw Error('RESEARCHER_PDF_SOURCE_CHANGED');
- const adapter=study1EConsentBindingAdapter_('PUBLIC_E1');
- study1BindingRecheckWithLock_(before.binding,doc,adapter);
- const layout=study1PdfResearcherLayoutRead_('E1',doc);
- const bytes=study1EConsentSignedPdfRead_(before.signedPdf,before);
- const expected={experiment:'E1',sha256:before.documentSha,
-  version:before.documentVersion,participantSignedSha256:before.signedPdf.sha};
- const stamped=await study1PdfComposeResearcherSigned_(bytes,png,layout,expected,new Date());
- let saved=null;
- try{
-  const changed=study1EConsentChange_(before.id,(x,_,heldLock)=>{
-   study1AdminOwnerRequired_();study1FormalConsentGate_();
-   if(Session.getActiveUser().getEmail()!==active||
-    Session.getEffectiveUser().getEmail()!==effective)
-    throw Error('RESEARCHER_OWNER_CHANGED');
-   if(!heldLock||heldLock.hasLock()!==true||x.state!=='SIGNED'||
-    x.channel!=='FORMAL_E1'||!x.binding||x.binding.digest!==before.binding.digest||
-    !x.signedPdf||x.signedPdf.id!==before.signedPdf.id||
-    x.signedPdf.sha!==before.signedPdf.sha||
-    x.documentSha!==doc.sha256||x.documentVersion!==doc.version)
-    throw Error('RESEARCHER_PDF_CAS_CHANGED');
-   const current=study1EConsentReadyDocument_('E1');
-   if(current.sha256!==doc.sha256||
-     JSON.stringify(study1PdfResearcherLayoutRead_('E1',current))!==JSON.stringify(layout))
-    throw Error('RESEARCHER_PDF_LAYOUT_CHANGED');
-   study1BindingRecheck_(x.binding,current,adapter,new Date().toISOString(),heldLock);
-   study1EConsentEvent_(x.signature,x,'SIGNATURE');
-   study1EConsentEvent_(x.explanation,x,'EXPLANATION');
-   study1EConsentSignedPdfRead_(x.signedPdf,x);
-   saved=study1EConsentSignedPdfStore_(stamped,x);
-   const confirmation=study1EConsentFile_('CONFIRMATION',x,{
-    researcher:'OWNER',reviewerEmail:active,
-    identityEvidenceSource:'PARTICIPANT_SELF_REPORT_EMAIL_OTP',
-    notes:input.notes,signatureHash:x.signature.sha,
-    explanationHash:x.explanation.sha,
-    participantSignedPdfSha256:x.signedPdf.sha,
-    researcherSignedPdfSha256:saved.sha,
-    researcherSignedAt:stamped.researcherSignedAt,
-    researcherTaipeiDate:stamped.researcherTaipeiDate,
-    researcherSignaturePngSha256:study1PdfDigest_(png)});
-   return {...x,state:'CONFIRMED',confirmation,
-    participantSignedPdf:x.signedPdf,signedPdf:saved};
-  });
-  if(changed.state!=='CONFIRMED'||changed.signedPdf.sha!==stamped.signedSha256)
-   throw Error('RESEARCHER_PDF_COMMIT_UNKNOWN');
-  // The consent event and original Reservations are separate data stores.
-  // NEVER move a booking before the dual PDF is fully committed. The second
-  // OWNER-only transaction is independently locked, source-verified and CAS
-  // read back; if it fails, preserve the genuine PDF and report PENDING.
-  let originalBookingConfirmed=false;
-  try{
-   if(typeof study1FormalFinalizeSignedE1Booking_==='function'){
-    const booking=study1FormalFinalizeSignedE1Booking_(before.id);
-    originalBookingConfirmed=booking.bookingConfirmed===true&&
-      booking.bookingStatus==='CONFIRMED';
-   }
-  }catch(_){/* No claim of booking success or automatic unsafe replay. */}
-  return {state:'CONFIRMED',experiment:'E1',
-   participantSignedPdfSha256:before.signedPdf.sha,
-   signedPdfSha256:stamped.signedSha256,
-   researcherSignedAt:stamped.researcherSignedAt,
-   researcherTaipeiDate:stamped.researcherTaipeiDate,participantCopyAvailable:true,
-   originalBookingConfirmed,
-   originalBookingStatus:originalBookingConfirmed?'CONFIRMED':'OWNER_RECONCILIATION_REQUIRED'};
- }catch(error){
-  if(saved){
-   let referenced=true;
-   try{referenced=study1EConsentRegistry_().records.some(x=>
-    x.id===before.id&&x.signedPdf&&x.signedPdf.id===saved.id);}
-   catch(_){referenced=true;}
-   if(!referenced)try{DriveApp.getFileById(saved.id).setTrashed(true);}catch(_){}
-  }
-  throw error;
- }
-}
-function study1EConsentOwnerPendingPdfConfirmations(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- return {readOnly:true,records:study1EConsentRegistry_().records
-  .filter(x=>x.channel==='FORMAL_E1'&&x.state==='SIGNED'&&x.signedPdf)
-  .map(x=>({id:x.id,experiment:'E1',version:x.documentVersion,
-   sourceSha256:x.documentSha,participantSignedPdfSha256:x.signedPdf.sha}))};
-}
-
-/** Only the one fixed document's signed-PDF bytes, after staff confirmation. */
 function study1EConsentSignedPdfCopy(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
- if(!['CONFIRMED','WITHDRAWN'].includes(entry.state)||!entry.signedPdf)
-  throw Error('未取得雙方確認的完整版簽署PDF，禁止以原PDF加HTML收據取代');
- const event=study1EConsentEvent_(entry.signature,entry,'SIGNATURE');
- const confirmation=study1EConsentEvent_(entry.confirmation,entry,'CONFIRMATION');
- if(confirmation.data.signatureHash!==entry.signature.sha)
-  throw Error('PDF、本人簽名及研究人員確認事件未能一致核對');
- const researcherPreSigned=entry.channel==='FORMAL_E1'&&entry.researcherPresigned===true;
- if(entry.channel==='FORMAL_E1'){
-  if(!entry.participantSignedPdf||
-     entry.participantSignedPdf.sha!==event.data.signedPdfSha256||
-     confirmation.data.participantSignedPdfSha256!==entry.participantSignedPdf.sha||
-     confirmation.data.researcherSignedPdfSha256!==entry.signedPdf.sha)
-   throw Error('FORMAL_DUAL_PDF_EVIDENCE_MISMATCH');
-  if(researcherPreSigned){
-   // The researcher's actual signature is ALREADY in the immutable uploaded
-   // source PDF; a second researcher timestamp or online signature is false.
-   if(entry.participantSignedPdf.id!==entry.signedPdf.id||
-      confirmation.data.mode!=='RESEARCHER_PRESIGNED_SOURCE'||
-      confirmation.data.researcherSignedSourceSha256!==entry.documentSha)
-    throw Error('FORMAL_PRESIGNED_PDF_SOURCE_EVIDENCE_INVALID');
-  }else if(typeof confirmation.data.researcherSignedAt!=='string'||
-     confirmation.data.researcherTaipeiDate!==study1PdfTaipeiDate_(
-      new Date(confirmation.data.researcherSignedAt))||
-     !/^[a-f0-9]{64}$/.test(confirmation.data.researcherSignaturePngSha256||''))
-    throw Error('FORMAL_DUAL_PDF_EVIDENCE_MISMATCH');
-  study1EConsentSignedPdfRead_(entry.participantSignedPdf,entry);
- }else if(event.data.signedPdfSha256!==entry.signedPdf.sha)
-  throw Error('舊簽署PDF來源與研究員確認未一致');
-
- // Re-evaluate BOTH independent server dates and their chronological order
- // before releasing a purportedly dual-signed copy. The PDF SHA alone cannot
- // detect a corrupted or re-linked timestamp evidence record.
- if(entry.channel==='FORMAL_E1'){
-  const participantAt=new Date(event.data.serverSignedAt);
-  if(!Number.isFinite(participantAt.getTime())||
-     participantAt.toISOString()!==event.data.serverSignedAt||
-     event.data.taipeiDate!==study1PdfTaipeiDate_(participantAt))
-   throw Error('FORMAL_DUAL_PDF_CHRONOLOGY_INVALID');
-  if(!researcherPreSigned){
-   const researcherAt=new Date(confirmation.data.researcherSignedAt);
-   if(!Number.isFinite(researcherAt.getTime())||
-      researcherAt.toISOString()!==confirmation.data.researcherSignedAt||
-      researcherAt.getTime()<participantAt.getTime()||
-      confirmation.data.researcherTaipeiDate!==study1PdfTaipeiDate_(researcherAt))
-    throw Error('FORMAL_DUAL_PDF_CHRONOLOGY_INVALID');
-  }
- }
- const bytes=study1EConsentSignedPdfRead_(entry.signedPdf,entry);
- return {experiment:entry.experiment,version:entry.documentVersion,
-  sourceSha256:entry.documentSha,signedPdfSha256:entry.signedPdf.sha,
-  signedAt:event.data.serverSignedAt,taipeiDate:event.data.taipeiDate,
-  researcherSignedAt:entry.channel==='FORMAL_E1'&&!researcherPreSigned?
-   confirmation.data.researcherSignedAt:null,
-  researcherTaipeiDate:entry.channel==='FORMAL_E1'&&!researcherPreSigned?
-   confirmation.data.researcherTaipeiDate:null,
-  researcherPreSigned,
-  participantSignedPdfSha256:entry.channel==='FORMAL_E1'?entry.participantSignedPdf.sha:null,
-  dualSigned:entry.channel==='FORMAL_E1',
-  base64:Utilities.base64Encode(bytes),mime:'application/pdf',
-  bytes:bytes.length};
+ const x=study1EConsentEntry_(token,study1EConsentRegistry_());
+ if(x.channel!=='FORMAL_E1'||x.experiment!=='E1'||x.researcherPresigned!==true||
+   !['CONFIRMED','WITHDRAWN'].includes(x.state)||!x.signedPdf||
+   !x.participantSignedPdf||!x.signature||!x.confirmation)
+  throw Error('E1_PRESIGNED_SIGNED_PDF_COPY_NOT_READY');
+ const signature=study1EConsentEvent_(x.signature,x,'SIGNATURE');
+ const confirmation=study1EConsentEvent_(x.confirmation,x,'CONFIRMATION');
+ if(x.signedPdf.id!==x.participantSignedPdf.id||
+    x.signedPdf.sha!==x.participantSignedPdf.sha||
+    signature.data.signedPdfSha256!==x.signedPdf.sha||
+    confirmation.data.signatureHash!==x.signature.sha||
+    confirmation.data.mode!=='RESEARCHER_PRESIGNED_SOURCE'||
+    confirmation.data.researcherSignedSourceSha256!==x.documentSha||
+    confirmation.data.participantSignedPdfSha256!==x.signedPdf.sha||
+    confirmation.data.researcherSignedPdfSha256!==x.signedPdf.sha)
+  throw Error('FORMAL_PRESIGNED_PDF_EVIDENCE_MISMATCH');
+ const when=new Date(signature.data.serverSignedAt);
+ if(!Number.isFinite(when.getTime())||
+    when.toISOString()!==signature.data.serverSignedAt||
+    signature.data.taipeiDate!==study1PdfTaipeiDate_(when))
+  throw Error('FORMAL_PRESIGNED_PDF_CHRONOLOGY_INVALID');
+ const bytes=study1EConsentSignedPdfRead_(x.signedPdf,x);
+ return {experiment:'E1',version:x.documentVersion,
+  sourceSha256:x.documentSha,signedPdfSha256:x.signedPdf.sha,
+  signedAt:signature.data.serverSignedAt,taipeiDate:signature.data.taipeiDate,
+  researcherSignedAt:null,researcherTaipeiDate:null,researcherPreSigned:true,
+  participantSignedPdfSha256:x.signedPdf.sha,dualSigned:true,
+  base64:Utilities.base64Encode(bytes),mime:'application/pdf',bytes:bytes.length};
 }

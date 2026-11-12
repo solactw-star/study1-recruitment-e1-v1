@@ -63,18 +63,16 @@ test('PDF signing checks form input and independent source gates, not a blanket 
  }),/必須完成正式文件全文閱讀/);
  assert.equal(h.externalIO,0);
 });
-test('Legacy PNG route retains format and synthetic flag checks; no automatic live enablement',()=>{
+test('Old standalone PNG and second-signature RPCs are absent; no extra REC bypass path',()=>{
  const h=isolated();
- assert.throws(()=>h.scope.study1EConsentSign({
-  name:'TEST PERSON',token:'TEST',signature:'NOT_BASE64',
-  documentSha:'a'.repeat(64),agree:true,read:true,answerAcknowledged:true
- }),/必須完成全文閱讀、說明確認/);
+ for(const fn of ['study1EConsentSign','study1EConsentConfirm','study1EConsentConfirmPdf',
+  'study1EConsentIssue','study1EConsentExplain','study1EConsentCopy'])
+  assert.equal(typeof h.scope[fn],'undefined');
  assert.equal(h.externalIO,0);
 });
-test('CLOSED website still rejects both PDF and legacy signature paths',async()=>{
+test('CLOSED website rejects the sole real PDF signing path',async()=>{
  const h=isolated();
  h.scope.study1EConsentEnabled_=()=>false;
- assert.throws(()=>h.scope.study1EConsentSign({}),/尚未開放有效電子簽署/);
  await assert.rejects(h.scope.study1EConsentSignPdf({}),/尚未開放有效電子簽署/);
  assert.equal(h.externalIO,0);
 });

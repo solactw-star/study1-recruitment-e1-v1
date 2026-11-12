@@ -167,50 +167,47 @@ function syntheticBindingEvidence(doc){
  };
  return {request:req,adapter:{readTrustedSnapshot:()=>snapshot},snapshot};
 }
-test('§70-S E1 full PDF writes a new private signed file, SHA-verifies readback and issues a correct participant copy',async()=>{
+
+
+test('Retired researcher second-signature and synthetic consent RPCs are deleted from V2',async()=>{
+ const h=buildHarness(await createBlank());
+ for(const fn of ['study1EConsentIssue','study1EConsentExplain','study1EConsentSession',
+  'study1EConsentSign','study1EConsentConfirm','study1EConsentCopy',
+  'study1EConsentConfirmPdf','study1EConsentOwnerPendingPdfConfirmations',
+  'study1PdfResearcherLayoutRead_','study1PdfComposeResearcherSigned_']){
+  assert.equal(typeof h.scope[fn],'undefined',fn+' must not exist');
+ }
+ assert.equal(h.files.size,1,'deleting obsolete RPCs cannot create evidence');
+});
+test('Only the FORMAL_E1 ISSUED and researcher-presigned original may be signed',async()=>{
  const original=await createBlank(),h=buildHarness(original),png=syntheticInk();
+ const index=JSON.parse(h.values.get('STUDY1_CONSENT_DOCUMENT_INDEX_V1'));
+ index.documents[0].researcherPresigned=true;
+ h.doc.researcherPresigned=true;
+ h.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify(index));
  const {request,adapter}=syntheticBindingEvidence(h.doc);
  h.scope.study1EConsentBindingAdapter_=()=>adapter;
  const issued=h.scope.study1EConsentIssueBound_(request);
- assert.equal(issued.sha256,sha(original));
- h.scope.study1EConsentExplain({id:issued.id,question:'研究資料保存多久？',
-  answer:'完整說明合成研究流程。',resolved:true});
- const input={token:issued.token,name:'合成參與者',signature:png.toString('base64'),
+ const input={token:issued.token,name:'SYNTHETIC',signature:png.toString('base64'),
   documentSha:h.doc.sha256,read:true,answerAcknowledged:true,agree:true};
- await assert.rejects(h.scope.study1EConsentSignPdf({...input,documentSha:'0'.repeat(64)}));
- const result=await h.scope.study1EConsentSignPdf(input);
- assert.equal(result.state,'SIGNED');assert.equal(result.experiment,'E1');
- assert.equal(result.documentSha256,sha(original));
- assert.match(result.taipeiDate,/^20\d\d\/\d\d\/\d\d$/);
- assert.match(result.signedPdfSha256,/^[a-f0-9]{64}$/);
- assert.notEqual(result.signedPdfSha256,result.documentSha256);
- assert.throws(()=>h.scope.study1EConsentSignedPdfCopy(issued.token),/尚未|未取得/);
- h.scope.study1EConsentConfirm({id:issued.id,identityVerified:true,notes:'測試環境中已核實合成當事人'});
- const copy=h.scope.study1EConsentSignedPdfCopy(issued.token);
- const integratedCopy=h.scope.study1EConsentCopy(issued.token);
- assert.equal(integratedCopy.signedPdfSha256,copy.signedPdfSha256);
- assert.equal(integratedCopy.signedPdfMime,'application/pdf');
- assert.equal(sha(Buffer.from(integratedCopy.signedPdfBase64,'base64')),
-  copy.signedPdfSha256);
- assert.equal(integratedCopy.taipeiDate,copy.taipeiDate);
- assert.equal(copy.sourceSha256,sha(original));
- assert.equal(copy.signedPdfSha256,result.signedPdfSha256);
- assert.equal(copy.mime,'application/pdf');
- assert.equal(copy.bytes,Buffer.from(copy.base64,'base64').length);
- assert.equal(sha(Buffer.from(copy.base64,'base64')),copy.signedPdfSha256);
- const signed=await PDFLib.PDFDocument.load(Buffer.from(copy.base64,'base64'));
- assert.equal(signed.getPageCount(),5);
- assert.equal(sha(h.files.get(h.originalId).bytes),sha(original),'original PDF immutable');
- assert.ok([...h.files.values()].filter(x=>x.mime==='application/pdf').length===2);
- assert.ok([...h.files.values()].every(x=>x.access==='PRIVATE'&&!x.trashed));
- const withdrawal=h.scope.study1EConsentWithdraw({token:issued.token,reason:'合成當事人要求退出'});
- assert.equal(withdrawal.requiresResearcherDataDisposition,true,'撤回事件不能冒稱資料已依REC銷毀或去識別化');
- assert.equal(h.scope.study1EConsentSignedPdfCopy(issued.token).signedPdfSha256,copy.signedPdfSha256);
+ const stored=h.scope.study1EConsentRegistry_(),row=stored.records[0];
+ const count=h.files.size;
+ row.channel='FORMAL_E1';row.researcherPresigned=false;
+ h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(stored));
+ await assert.rejects(h.scope.study1EConsentSignPdf(input),/E1_PRESIGNED_FORMAL_ONLY/);
+ row.researcherPresigned=true;row.state='EXPLAINED';
+ h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(stored));
+ await assert.rejects(h.scope.study1EConsentSignPdf(input),/E1_PRESIGNED_FORMAL_ONLY/);
+ row.state='ISSUED';row.channel='LEGACY';
+ h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(stored));
+ await assert.rejects(h.scope.study1EConsentSignPdf(input),/E1_PRESIGNED_FORMAL_ONLY/);
+ assert.equal(h.files.size,count,'invalid source never persists signed PDF');
 });
-test('E2 e-sign never opens before 2027, even if synthetic document and other flags exist',async()=>{
+test('E2 still does not become an E1 signing option',async()=>{
  const h=buildHarness(await createBlank());
- assert.throws(()=>h.scope.study1EConsentIssue({experiment:'E2'}),/實驗二|文件/);
+ assert.throws(()=>h.scope.study1EConsentReadyDocument_('E2'),/實驗二|實驗不合法/);
 });
+
 test('full signing is fail-closed when the independent PDF or wizard binding gate is missing',async()=>{
  const h=buildHarness(await createBlank()),before=h.files.size;
  h.values.set('STUDY1_ECONSENT_WIZARD_LINK_VERIFIED','false');
@@ -218,179 +215,8 @@ test('full signing is fail-closed when the independent PDF or wizard binding gat
  assert.equal(h.files.size,before);
 });
 
-test('unbound legacy invitation cannot create a signed PDF even if nominal feature flags are enabled',async()=>{
- const h=buildHarness(await createBlank());
- assert.throws(()=>h.scope.study1EConsentIssue({experiment:'E1'}),/BINDING_REQUIRED/);
- h.values.set('STUDY1_ECONSENT_LEGACY_SYNTHETIC_ONLY','true');
- const issued=h.scope.study1EConsentIssue({experiment:'E1'});
- h.scope.study1EConsentExplain({id:issued.id,question:'synthetic Q&A',answer:'synthetic answer',resolved:true});
- const count=h.files.size;
- await assert.rejects(h.scope.study1EConsentSignPdf({
-  token:issued.token,name:'TEST NAME',signature:syntheticInk().toString('base64'),
-  documentSha:h.doc.sha256,read:true,answerAcknowledged:true,agree:true
- }),/未綁定身分|未綁定/);
- assert.equal(h.files.size,count,'no signed PDF or new evidence after a refused unbound token');
-});
 
-test('FORMAL_E1 real PDF engine rechecks original self-reported name under final lock and preserves post-sign copy TTL',async()=>{
- const original=await createBlank(),h=buildHarness(original),png=syntheticInk();
- const {request,adapter}=syntheticBindingEvidence(h.doc);
- let reads=0;
- h.scope.study1EConsentBindingAdapter_=audience=>{
-  assert.ok(audience===undefined||audience==='PUBLIC_E1');
-  return {readTrustedSnapshot:(req,heldLock)=>{
-   assert.ok(heldLock&&heldLock.hasLock()===true,
-    'Final signer must retain the original ScriptLock when reading applicant, OTP and booking');
-   reads++;return adapter.readTrustedSnapshot(req,heldLock);
-  }};
- };
- const issued=h.scope.study1EConsentIssueBound_(request);
- h.scope.study1EConsentExplain({id:issued.id,question:'是否可以退出？',
-  answer:'研究人員已說明撤回及副本保存方式。',resolved:true});
- const before=h.scope.study1EConsentRegistry_();
- const invitation=before.records.find(x=>x.id===issued.id);
- assert.ok(invitation);
- invitation.channel='FORMAL_E1';
- h.values.set('STUDY1_ECONSENT_PRIVATE_V1',JSON.stringify(before));
- h.scope.study1FormalConsentGate_=()=>true;
- h.scope.study1FormalConsentCopyExpiry_=()=>Date.now()+72*3600000;
- const input={token:issued.token,name:'NOT_THE_ORIGINAL_NAME',
-  signature:png.toString('base64'),documentSha:h.doc.sha256,
-  read:true,answerAcknowledged:true,agree:true};
- const priorPdfCount=[...h.files.values()].filter(x=>x.mime==='application/pdf').length;
- await assert.rejects(h.scope.study1EConsentSignPdf(input),/NAME_NOT_SAME_APPLICATION/);
- assert.equal([...h.files.values()].filter(x=>x.mime==='application/pdf'&&!x.trashed).length,
-  priorPdfCount);
- const signed=await h.scope.study1EConsentSignPdf({...input,name:'SYNTHETIC'});
- assert.equal(signed.state,'SIGNED');
- assert.ok(reads>=5,'source reread before signing, in final CAS and name match');
- const after=h.scope.study1EConsentRegistry_();
- const current=after.records.find(x=>x.id===issued.id);
- assert.ok(current.expires>Date.now()+71*3600000);
- assert.throws(()=>h.scope.study1EConsentConfirm({id:issued.id,identityVerified:true,
-  notes:'禁止繞過研究員PDF本人簽名'}),/RESEARCHER_PDF_SIGNATURE_REQUIRED/);
- const staffRequest={id:issued.id,notes:'離線合成研究人員已完成獨立說明及本人簽章',
-  participantSignedSha256:signed.signedPdfSha256,
-  researcherSignature:png.toString('base64')};
- // No REC-approved independent researcher fields, even with all other
- // simulated safety flags enabled: no CONFIRMED and no double-signed file.
- await assert.rejects(h.scope.study1EConsentConfirmPdf(staffRequest),
-  /RESEARCHER_PDF_LAYOUT_NOT_APPROVED|study1FormalConsentRecScope_/);
- assert.equal(h.scope.study1EConsentRegistry_().records[0].state,'SIGNED');
- h.scope.study1FormalConsentRecScope_=()=>({
-  consentDocumentId:h.doc.id,consentDocumentSha256:h.doc.sha256});
- const staffLayout={
-  experiment:'E1',documentSha:h.doc.sha256,version:h.doc.version,
-  pageCount:5,pageIndex:4,pageWidth:595,pageHeight:842,
-  signature:{x:100,y:160,width:190,height:50},
-  date:{x:350,y:180,fontSize:11}
- };
- h.values.set('STUDY1_ECONSENT_APPROVED_RESEARCHER_LAYOUT_V1',
-  JSON.stringify({schemaVersion:1,bindings:[staffLayout]}));
- await assert.rejects(h.scope.study1EConsentConfirmPdf({
-  ...staffRequest,participantSignedSha256:'f'.repeat(64)}),/RESEARCHER_PDF_UNBOUND_OR_STALE/);
- const result=await h.scope.study1EConsentConfirmPdf(staffRequest);
- assert.equal(result.state,'CONFIRMED');
- assert.notEqual(result.signedPdfSha256,signed.signedPdfSha256);
- assert.match(result.researcherTaipeiDate,/^20\d\d\/\d\d\/\d\d$/);
- const copy=h.scope.study1EConsentSignedPdfCopy(issued.token);
- assert.equal(copy.dualSigned,true);
- assert.equal(copy.participantSignedPdfSha256,signed.signedPdfSha256);
- assert.equal(copy.signedPdfSha256,result.signedPdfSha256);
- assert.equal(sha(Buffer.from(copy.base64,'base64')),result.signedPdfSha256);
- assert.equal(copy.researcherTaipeiDate,result.researcherTaipeiDate);
- assert.equal(copy.sourceSha256,h.doc.sha256);
- // Even a hash-valid complete PDF must not be delivered if the participant
- // signing event were internally re-linked to a later server instant.
- const originalEvent=h.scope.study1EConsentEvent_;
- h.scope.study1EConsentEvent_=(ref,entry,kind)=>{
-  const evt=originalEvent(ref,entry,kind);
-  if(kind!=='SIGNATURE')return evt;
-  return {...evt,data:{...evt.data,
-   serverSignedAt:'2030-01-01T00:00:00.000Z',taipeiDate:'2030/01/01'}};
- };
- assert.throws(()=>h.scope.study1EConsentSignedPdfCopy(issued.token),
-  /FORMAL_DUAL_PDF_CHRONOLOGY_INVALID/);
- h.scope.study1EConsentEvent_=originalEvent;
- assert.equal(h.scope.study1EConsentSignedPdfCopy(issued.token).signedPdfSha256,
-  result.signedPdfSha256);
- const pdf=await PDFLib.PDFDocument.load(Buffer.from(copy.base64,'base64'));
- assert.equal(pdf.getPageCount(),5,'all REC PDF pages must be preserved');
- assert.equal(sha(h.files.get(h.originalId).bytes),h.doc.sha256);
- const finalRef=h.scope.study1EConsentRegistry_().records[0];
- assert.equal(finalRef.participantSignedPdf.sha,signed.signedPdfSha256);
- assert.equal(finalRef.signedPdf.sha,result.signedPdfSha256);
- await assert.rejects(h.scope.study1EConsentConfirmPdf(staffRequest),
-  /RESEARCHER_PDF_UNBOUND_OR_STALE/);
- assert.throws(()=>h.scope.study1EConsentWithdraw({
-  token:issued.token,reason:'合成參與者要求退出',dataChoice:'AUTO_DELETE'}),
-  /請填寫撤回理由/);
- const withdrawn=h.scope.study1EConsentWithdraw({
-  token:issued.token,reason:'合成參與者要求退出',dataChoice:'DEIDENTIFY'});
- assert.equal(withdrawn.requiresResearcherDataDisposition,true);
- assert.equal(withdrawn.dataDispositionState,'PENDING_RESEARCH_TEAM_ACTION');
- const pending=h.scope.study1EConsentOwnerWithdrawalCases();
- assert.equal(pending.readOnly,true);
- assert.equal(pending.records[0].dataChoice,'DEIDENTIFY');
- assert.equal(pending.records[0].dispositionState,'PENDING_RESEARCH_TEAM_ACTION');
- assert.equal(h.scope.study1EConsentSignedPdfCopy(issued.token).signedPdfSha256,
-  result.signedPdfSha256);
-});
 
-test('researcher signing uses only independently reviewed, nonoverlapping original PDF rectangles',async()=>{
- const original=await createBlank(),h=buildHarness(original);
- h.scope.study1FormalConsentRecScope_=()=>({
-  consentDocumentId:h.doc.id,consentDocumentSha256:h.doc.sha256});
- assert.throws(()=>h.scope.study1PdfResearcherLayoutRead_('E1',h.doc),
-  /RESEARCHER_PDF_LAYOUT_NOT_APPROVED/);
- const staff={experiment:'E1',documentSha:h.doc.sha256,version:h.doc.version,
-  pageCount:5,pageIndex:4,pageWidth:595,pageHeight:842,
-  signature:{x:100,y:70,width:190,height:50},
-  date:{x:350,y:87,fontSize:11}};
- h.values.set('STUDY1_ECONSENT_APPROVED_RESEARCHER_LAYOUT_V1',
-  JSON.stringify({schemaVersion:1,bindings:[staff]}));
- assert.throws(()=>h.scope.study1PdfResearcherLayoutRead_('E1',h.doc),
-  /RESEARCHER_PDF_SIGNING_FIELDS_OVERLAP/);
- staff.signature.y=180;staff.date.y=190;
- h.values.set('STUDY1_ECONSENT_APPROVED_RESEARCHER_LAYOUT_V1',
-  JSON.stringify({schemaVersion:1,bindings:[staff]}));
- assert.equal(h.scope.study1PdfResearcherLayoutRead_('E1',h.doc).signature.y,180);
- h.scope.study1FormalConsentRecScope_=()=>({
-  consentDocumentId:h.doc.id,consentDocumentSha256:'f'.repeat(64)});
- assert.throws(()=>h.scope.study1PdfResearcherLayoutRead_('E1',h.doc),
-  /RESEARCHER_LAYOUT_REC_SOURCE_MISMATCH/);
-});
-test('two handwritten signatures preserve full PDF and independently trusted Asia/Taipei calendar days across midnight',async()=>{
- const original=await createBlank(),h=buildHarness(original),ink=syntheticInk();
- const participant=await h.scope.study1PdfComposeSigned_([...original],[...ink],
-  h.scope.study1PdfLayoutRead_('E1',h.doc),
-  {experiment:'E1',version:h.doc.version,sha256:h.doc.sha256},
-  new Date('2026-11-10T15:55:00.000Z'));
- h.scope.study1FormalConsentRecScope_=()=>({
-  consentDocumentId:h.doc.id,consentDocumentSha256:h.doc.sha256});
- const staff={experiment:'E1',documentSha:h.doc.sha256,version:h.doc.version,
-  pageCount:5,pageIndex:4,pageWidth:595,pageHeight:842,
-  signature:{x:100,y:180,width:190,height:50},
-  date:{x:350,y:195,fontSize:11}};
- h.values.set('STUDY1_ECONSENT_APPROVED_RESEARCHER_LAYOUT_V1',
-  JSON.stringify({schemaVersion:1,bindings:[staff]}));
- const layout=h.scope.study1PdfResearcherLayoutRead_('E1',h.doc);
- const expected={experiment:'E1',version:h.doc.version,sha256:h.doc.sha256,
-  participantSignedSha256:participant.signedSha256};
- const dual=await h.scope.study1PdfComposeResearcherSigned_(
-  participant.signedPdfBytes,[...ink],layout,expected,
-  new Date('2026-11-10T16:05:00.000Z'));
- assert.equal(participant.taipeiDate,'2026/11/10');
- assert.equal(dual.researcherTaipeiDate,'2026/11/11');
- assert.notEqual(dual.signedSha256,participant.signedSha256);
- assert.notEqual(dual.signedSha256,h.doc.sha256);
- assert.equal(sha(original),h.doc.sha256);
- assert.equal((await PDFLib.PDFDocument.load(Buffer.from(dual.signedPdfBytes))).getPageCount(),5);
- await assert.rejects(h.scope.study1PdfComposeResearcherSigned_(
-  participant.signedPdfBytes,[...ink],layout,
-  {...expected,participantSignedSha256:'f'.repeat(64)},
-  new Date('2026-11-10T16:05:00.000Z')),/RESEARCHER_PDF_PARTICIPANT_SHA_CHANGED/);
-});
 
 
 test('MVP actual PDF engine accepts only researcher presigned source, adds participant ink once and permits OWNER private download',async()=>{
@@ -461,6 +287,11 @@ test('MVP actual PDF engine accepts only researcher presigned source, adds parti
  const viewed=await PDFLib.PDFDocument.load(Buffer.from(copy.base64,'base64'));
  assert.equal(viewed.getPageCount(),5);
  assert.equal(sha(original),h.doc.sha256);
+ const withdrawn=h.scope.study1EConsentWithdraw({token:issued.token,
+  reason:'SYNTHETIC_REQUEST_TO_WITHDRAW',dataChoice:'CONTACT_STAFF'});
+ assert.equal(withdrawn.state,'WITHDRAWN');
+ assert.equal(h.scope.study1EConsentSignedPdfCopy(issued.token).signedPdfSha256,
+  copy.signedPdfSha256,'withdrawal does not rewrite the signed original PDF');
  await assert.rejects(h.scope.study1EConsentSignPdf({
   token:issued.token,name:'SYNTHETIC',signature:png.toString('base64'),
   documentSha:h.doc.sha256,read:true,answerAcknowledged:true,agree:true
