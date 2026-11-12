@@ -13,6 +13,7 @@ const SID=core.SID,REPO=core.REPO;
 const TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
 const CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY';
 const assert=(ok,message)=>{if(!ok)throw Error('V2_PRIVATE_BLOCKED: '+message)};
+const report=message=>{if(process.env.V2_PRIVATE_TEST_MODE!=='true')console.log(message);};
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
 function invocation(env,mode){
@@ -166,21 +167,21 @@ async function inventory(api){
   deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
 }
 function summarize(s){
- console.log('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
- console.log('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({id:d.id,version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
- console.log('V2_PRIVATE_HEAD_SHA256='+TARGET);
- console.log('V2_PRIVATE_HEAD_FILE_COUNT=32');
- console.log('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
- console.log('V2_PRIVATE_DEPLOYMENT_COUNT='+s.deploymentCount);
- console.log('V2_PRIVATE_VERSIONED_DEPLOYMENT_COUNT='+s.versionedDeployments);
- console.log('V2_PRIVATE_INVENTORY_SHA256='+s.fp);
- console.log('V2_PRIVATE_MANIFEST_MYSELF=true');
- console.log('V2_PRIVATE_INTAKE_CLOSED=true');
+ report('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
+ report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({id:d.id,version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
+ report('V2_PRIVATE_HEAD_SHA256='+TARGET);
+ report('V2_PRIVATE_HEAD_FILE_COUNT=32');
+ report('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
+ report('V2_PRIVATE_DEPLOYMENT_COUNT='+s.deploymentCount);
+ report('V2_PRIVATE_VERSIONED_DEPLOYMENT_COUNT='+s.versionedDeployments);
+ report('V2_PRIVATE_INVENTORY_SHA256='+s.fp);
+ report('V2_PRIVATE_MANIFEST_MYSELF=true');
+ report('V2_PRIVATE_INTAKE_CLOSED=true');
 }
 async function audit(api){
  const state=await inventory(api);
  summarize(state);
- console.log('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
+ report('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
  return state;
 }
 async function deploy(api,env,assertMain=latestMain){
@@ -245,15 +246,15 @@ async function deploy(api,env,assertMain=latestMain){
   'new deployment has non-private access');
  assert(!newDep.points.some(x=>x.web?.executeAs&&x.web.executeAs!=='USER_DEPLOYING'),
   'new deployment has wrong executeAs');
- console.log('V2_PRIVATE_DEPLOY_VERIFIED=true');
- console.log('V2_PRIVATE_VERSION='+version.versionNumber);
- console.log('V2_PRIVATE_DEPLOY_ID='+created.deploymentId);
- console.log('V2_PRIVATE_VERSION_SHA256='+TARGET);
- console.log('V2_PRIVATE_ACCESS=MYSELF');
- console.log('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
- console.log('V2_PRIVATE_NO_HEAD_UPDATE=true');
- console.log('V2_PRIVATE_NO_SHEET_OPERATIONS=true');
- console.log('V2_PRIVATE_LIVE_INTAKE_ENABLED=false');
+ report('V2_PRIVATE_DEPLOY_VERIFIED=true');
+ report('V2_PRIVATE_VERSION='+version.versionNumber);
+ report('V2_PRIVATE_DEPLOY_ID='+created.deploymentId);
+ report('V2_PRIVATE_VERSION_SHA256='+TARGET);
+ report('V2_PRIVATE_ACCESS=MYSELF');
+ report('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
+ report('V2_PRIVATE_NO_HEAD_UPDATE=true');
+ report('V2_PRIVATE_NO_SHEET_OPERATIONS=true');
+ report('V2_PRIVATE_LIVE_INTAKE_ENABLED=false');
  return {id:created.deploymentId,version:version.versionNumber};
 }
 async function main(){
