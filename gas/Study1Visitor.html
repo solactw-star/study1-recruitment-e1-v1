@@ -390,7 +390,7 @@ function reconcileOtpIssue_(payload){
  // Never repeat MailApp.sendEmail; this endpoint is original Verification read-only.
  rpc('study1ParticipantOtpIssueState',payload,result=>{
   if(!result||result.found!==true){
-   status('OTP 原始紀錄尚未核實；寄送因果未知，不得重新送出，請聯絡研究團隊。');
+   status('OTP 原始紀錄尚未核實；寄送因果未知，請勿重複送出，聯絡研究團隊。');
    return;
   }
   if(result.status==='PENDING'&&result.delivery==='UNVERIFIED'&&
