@@ -229,7 +229,7 @@ async function inventory(api){
 }
 function summarize(s){
  report('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
- report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({id:d.id,version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
+ report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
  report('V2_PRIVATE_HEAD_SHA256='+TARGET);
  report('V2_PRIVATE_HEAD_FILE_COUNT=32');
  report('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
@@ -245,7 +245,43 @@ async function audit(api){
  report('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
  return state;
 }
-async function deploy(api,env,assertMain=latestMain){
+// Google API GET lists can briefly lag behind a successful POST. Read back
+// on a bounded schedule; NEVER repeat the POST or silently assume success.
+const READBACK_DELAYS_MS=[0,1000,2000,4000,8000];
+async function settleVersionInventory(api,before,number,createdNew,
+ sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))){
+ const oldVersions=normalizedVersions(before.versions);
+ const oldDeps=normalizedDeployments(before.deps);
+ const count=oldVersions.length+(createdNew?1:0);
+ for(let i=0;i<READBACK_DELAYS_MS.length;i++){
+  if(i)await sleep(READBACK_DELAYS_MS[i]);
+  const state=await inventory(api);
+  const versions=normalizedVersions(state.versions);
+  assert(JSON.stringify(normalizedDeployments(state.deps))===JSON.stringify(oldDeps),
+   'deployment inventory changed during version readback');
+  if(versions.length===count&&versions.some(v=>v.version===number))
+   return state;
+  assert(createdNew&&JSON.stringify(versions)===JSON.stringify(oldVersions),
+   'version inventory changed unexpectedly during readback');
+ }
+ throw Error('V2_PRIVATE_BLOCKED: immutable version not visible after bounded GET readback; use new audit');
+}
+async function settleDeploymentInventory(api,before,newId,
+ sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))){
+ const oldDeps=normalizedDeployments(before.deps);
+ for(let i=0;i<READBACK_DELAYS_MS.length;i++){
+  if(i)await sleep(READBACK_DELAYS_MS[i]);
+  const state=await inventory(api);
+  const now=normalizedDeployments(state.deps);
+  if(now.length===oldDeps.length+1&&now.some(d=>d.id===newId))
+   return state;
+  assert(JSON.stringify(now)===JSON.stringify(oldDeps),
+   'deployment inventory changed unexpectedly during readback');
+ }
+ throw Error('V2_PRIVATE_BLOCKED: new deployment not visible after bounded GET readback; use new audit');
+}
+
+async function deploy(api,env,assertMain=latestMain,sleep){
  // An actual prior audit with this exact inventory fingerprint is required.
  const before=await inventory(api);
  assert(before.fp===env.EXPECTED_INVENTORY_SHA256,
@@ -261,24 +297,37 @@ async function deploy(api,env,assertMain=latestMain){
  assertMain(env);
  assert(core.digest(recheck.head.files)===TARGET,
   'HEAD changed immediately before version creation');
- const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
-  ' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
- let version;
- try{version=await api.createVersion(description);}
- catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
- assert(version?.scriptId===SID&&Number.isSafeInteger(version.versionNumber)&&
-  version.versionNumber>0,'version create response ambiguous; stop');
- const immutable=await api.getVersionContent(version.versionNumber);
- checkHead(immutable);
- // If anything drifted between creation and deploy, leave the unused
- // immutable version untouched and DO NOT publish an endpoint.
- const preDeploy=await inventory(api);
- assert(core.digest(preDeploy.head.files)===TARGET,'HEAD changed after createVersion');
- assert(JSON.stringify(normalizedDeployments(preDeploy.deps))===
-  JSON.stringify(normalizedDeployments(before.deps)),'existing deployments changed');
- assert(preDeploy.versionCount===before.versionCount+1 &&
-  normalizedVersions(preDeploy.versions).some(v=>v.version===version.versionNumber),
-  'version inventory did not gain exactly one immutable version');
+ const descriptionBase='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
+  ' GitHub '+env.GITHUB_SHA+' Run ';
+ const description=descriptionBase+env.GITHUB_RUN_ID;
+ const deployedVersions=new Set(normalizedDeployments(before.deps)
+  .map(x=>x.version).filter(x=>x!==null));
+ // Recover only ONE orphan from a prior authorized V2 attempt after
+ // independently audited inventory, exact provenance and immutable SHA.
+ const orphans=normalizedVersions(before.versions).filter(v=>
+  v.description.startsWith(descriptionBase)&&
+  /^\\d+$/.test(v.description.slice(descriptionBase.length))&&
+  !deployedVersions.has(v.version));
+ assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
+ let version,createdNew=false;
+ if(orphans.length){
+  version={scriptId:SID,versionNumber:orphans[0].version};
+  checkHead(await api.getVersionContent(version.versionNumber));
+  report('V2_PRIVATE_REUSED_VERIFIED_ORPHAN_VERSION=true');
+ }else{
+  // No suitable orphan: exactly one version POST, never an automatic retry.
+  try{version=await api.createVersion(description);}
+  catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
+  assert(version?.scriptId===SID&&Number.isSafeInteger(version.versionNumber)&&
+   version.versionNumber>0,'version create response ambiguous; stop');
+  createdNew=true;
+  checkHead(await api.getVersionContent(version.versionNumber));
+ }
+ // Following a successful POST, retry GET-only inventory until eventual
+ // consistency is observed. No new endpoint if HEAD or deployments drift.
+ const preDeploy=await settleVersionInventory(
+  api,before,version.versionNumber,createdNew,sleep);
+ assert(core.digest(preDeploy.head.files)===TARGET,'HEAD changed after version verification');
  assertMain(env);
  let created;
  try{created=await api.createDeployment(version.versionNumber,description);}
@@ -286,9 +335,8 @@ async function deploy(api,env,assertMain=latestMain){
  assert(created?.deploymentId&&created?.deploymentConfig?.scriptId===SID&&
   created.deploymentConfig.versionNumber===version.versionNumber,
   'deployment creation response ambiguous; no retry');
- const [got,after]=await Promise.all([
-  api.getDeployment(created.deploymentId),inventory(api)
- ]);
+ const got=await api.getDeployment(created.deploymentId);
+ const after=await settleDeploymentInventory(api,before,created.deploymentId,sleep);
  assert(got?.deploymentId===created.deploymentId &&
   got.deploymentConfig?.scriptId===SID &&
   got.deploymentConfig.versionNumber===version.versionNumber,
@@ -300,7 +348,7 @@ async function deploy(api,env,assertMain=latestMain){
  const old=normalizedDeployments(before.deps),now=normalizedDeployments(after.deps);
  assert(JSON.stringify(now.filter(x=>x.id!==created.deploymentId))===
   JSON.stringify(old),'existing deployment changed');
- assert(after.versionCount===before.versionCount+1,'version count drift after deployment');
+ assert(after.versionCount===before.versionCount+(createdNew?1:0),'version count drift after deployment');
  const newDep=now.find(x=>x.id===created.deploymentId);
  assert(newDep&&newDep.version===version.versionNumber,'new deployment missing from list');
  assert(!newDep.points.some(x=>x.web?.access&&x.web.access!=='MYSELF'),
@@ -309,7 +357,7 @@ async function deploy(api,env,assertMain=latestMain){
   'new deployment has wrong executeAs');
  report('V2_PRIVATE_DEPLOY_VERIFIED=true');
  report('V2_PRIVATE_VERSION='+version.versionNumber);
- report('V2_PRIVATE_DEPLOY_ID='+created.deploymentId);
+ report('V2_PRIVATE_DEPLOY_ID_REDACTED=true');
  report('V2_PRIVATE_VERSION_SHA256='+TARGET);
  report('V2_PRIVATE_ACCESS=MYSELF');
  report('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
@@ -335,4 +383,4 @@ module.exports={SID,REPO,TARGET,CONFIRM,invocation,reviewedLocal,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,
- fingerprint,inventory,audit,deploy};
+ fingerprint,inventory,audit,deploy,settleVersionInventory,settleDeploymentInventory};
