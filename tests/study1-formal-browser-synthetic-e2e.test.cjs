@@ -90,12 +90,15 @@ test('Synthetic browser: closed gate prevents any applicant PII or CAPTCHA reque
  assert.equal(s.click('chooseE1'),false);
  assert.equal(s.calls.filter(q=>q.method!=='study1ParticipantReadiness').length,0);
  assert.match(s.node('status').textContent,/尚未開放正式報名/);
+ assert.match(s.queries.get('.noticebar').textContent,/目前尚未開放正式報名與簽署/);
+ assert.match(s.node('siteNoticeText').textContent,/不蒐集申請資料、不寄送驗證碼/);
 });
 test('Synthetic browser: gated seven-stage E1 intake -> human token -> email proof -> pending review',()=>{
  const s=simulate({ready:true,experiment:'E1',
   siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'});
  assert.equal(s.node('chooseE1').disabled,false);
  assert.equal(s.node('chooseE2').disabled,true);
+ assert.match(s.queries.get('.noticebar').textContent,/報名服務目前顯示可受理/);
  assert.equal(s.rendered[0].selector,'#formalTurnstile');
  assert.equal(s.rendered[0].options.action,'study1_e1_apply');
  assert.equal(s.node('formalHumanCheck').hidden,false);
@@ -137,4 +140,16 @@ test('Synthetic browser: Turnstile token expires and cannot be implicitly reused
  s.rendered[0].options['expired-callback']();
  assert.equal(s.click('screenNext'),true);
  assert.equal(s.calls.some(x=>x.method==='study1ParticipantBegin'),false);
+});
+
+test('FORMAL readiness service failure remains visibly CLOSED and cannot collect PII',()=>{
+ const s=simulate(()=>{throw Error('OFFLINE_READINESS_FAILURE')});
+ assert.equal(s.node('chooseE1').disabled,true);
+ assert.equal(s.node('chooseE2').disabled,true);
+ assert.equal(s.node('formalName').disabled,true);
+ assert.equal(s.node('formalHumanCheck').hidden,true);
+ assert.equal(s.click('chooseE1'),false);
+ assert.equal(s.calls.filter(x=>x.method!=='study1ParticipantReadiness').length,0);
+ assert.match(s.queries.get('.noticebar').textContent,/尚未開放正式報名與簽署/);
+ assert.match(s.node('siteNoticeText').textContent,/不蒐集申請資料/);
 });

@@ -157,3 +157,12 @@
 - REMOTE_GAS_HEAD_SYNC=NOT_RUN；PUBLIC_VERSION=NOT_CREATED；PUBLIC_DEPLOYED=false；PUBLIC_UI_VERIFIED=false；FORMAL_READY=false；LIVE_INTAKE_ENABLED=false。
 - DEPLOYMENT_NEXT: 研究室所有者使用既有 V2 同 Script ID 的 `study1-v2-gas-head-only.yml` 原 workflow（先 mode=audit 取得單次遠端 HEAD SHA，再 mode=apply 進行備份、競寫確認與唯一 PUT），回讀新版 HEAD 及登入後公開 `ANYONE` manifest；再於同 V2 GAS 專案建立新不可變版本與獨立 `ANYONE/USER_DEPLOYING` Web App 部署。不可重用 MYSELF 私人版號 1、覆蓋舊私人部署或手工拼湊部署 URL。
 - 最小 UI smoke：持有一般 Google 帳號但非 OWNER 的瀏覽器開啟**新公開部署**，檢查首頁確為 Study1、FORMAL 報名關閉及 OWNER 路由被拒絕。尚無實際新公開網址及畫面證據，保持 BLOCKED，不填實測 PASS。
+
+## 2026-11-12｜帳號授權與 UI UAT 暫停，直接接續 E1 網站程式
+
+- TASK_DOMAIN=`Study1_V2_E1_WEB_CONTINUATION_NO_OAUTH`；SOURCE_REPO=`solactw-star/study1-recruitment-e1-v1`；PRE_MAIN_SHA=`8e334d9bf51ed0ac163a5d6c09b97cb5b147c1d0`。
+- USER_DECISION: 本輪明確要求**不等待 Google 帳號授權、實際 UI UAT 或 GAS 部署**，先直接完成可以離線編輯／測試的網站程式。原公開登入後唯讀之 `ANYONE/USER_DEPLOYING` 產品目標維持不變，但真人報名與電子同意仍不得啟用。
+- FORMAL_UI_INCREMENT: 原 `gas/Study1Visitor.html` 的正式頁標題改為「報名資訊（目前不收件）」，加強第一屏資訊狀態；正式七階段控制器在尚未取得 readiness、回應 `ready=false`、取得失敗或 Google RPC 不可用時均顯示明確報名關閉訊息。絕不因連線失敗打開 E1/E2、姓名欄、OTP、時段或簽署。
+- OFFLINE_REGRESSION: 更新既有 `tests/study1-formal-browser-synthetic-e2e.test.cjs`，新增關閉訊息／讀取失敗無 PII／無 CAPTCHA 負測；沿用原 `.github/workflows/study1-v2-public-readonly-ci.yml` 自動納入測試，不建立平行正式網站或替代原 V05/V08 核心。
+- USER_STATED_BLOCKERS: `GOOGLE_ACCOUNT_AUTHORIZATION_BLOCKED=true`、`PUBLIC_UI_VERIFIED=false`。不以 CI 代表真實瀏覽器驗收；本輪 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+- NEXT_ACTION: 繼續從 E1 五項 MVP 的必要已存在程式檔修正、測試與 GitHub 增量回讀；公開唯讀安全邊界、原 V2 私人版本 1、原 GAS、正式 Sheets、REC 均不更動；待帳號權限可用再一次完成最小必要部署／三項 smoke。
