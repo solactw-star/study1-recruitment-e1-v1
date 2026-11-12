@@ -129,3 +129,14 @@
 - NEXT_ACTION: **不要再次執行 `deploy`**。僅以唯讀方式取得原 HEAD 與新版本化部署的 deploymentId、updateTime、ACL／entryPoints、經驗證私人 `/exec` URL，對照原 HEAD 歷史紀錄並核實未變；其後完成指定版本真實 UI UAT。若要正式開放真人收件，另依 REC、PI、個資安全與正式啟用授權處理。
 - WRITE_SCOPE: 本次僅增量寫回 V2 同一 `docs/V2-MIGRATION-STATUS.md`；不修改 V2 GAS HEAD／部署、原 GAS、正式 Sheets、REC、其他 GitHub 程式或工作流程。最終 `MAIN_SYNC_VERIFIED` 以寫後 main commit、檔案全文與 commit 變更清單回讀為準。
 
+## 2026-11-12｜V2 站內導覽增量修復（GitHub only；最小 UI smoke 標準）
+
+- TASK_DOMAIN: `Study1_E1_V2_NAVIGATION_CONTINUE_BUILD`；PRE_MAIN_SHA: `6583b9a7acbd1a3e63dac9b9f4aaafffdafde75f`。
+- DECISION: 使用者要求停止重複完整部署稽核；僅檢查 V2 私人部署可開啟、顯示正確研究首頁且收件仍關閉後，繼續建置網站。這不取代 REC／PI／正式真人收件核准。
+- SOURCE_FINDING: V2 `gas/Index.html`「查看正式報名流程」及 `gas/Study1Visitor.html`「研究資訊首頁」原本硬連到**原 GAS 公開網站**，不屬 V2 私人部署。
+- CODE_CHANGE: 僅 V2 `gas/Website.js` 提供 `study1V2SelfWebUrl_()`，依 V2 Script ID 限定從 GAS `ScriptApp.getService().getUrl()` 取得目前執行中的 Web App URL；`Index.html`、`Study1Visitor.html` 改由 HTML template 載入同站連結，不把私人部署 ID 寫入 GitHub；若網址無法取得或格式不符，連結退回本頁錨點而非跳到原站。對應兩個既有關閉網站測試更新為檢查動態路由及禁止原 GAS 舊連結。
+- VERIFIED_LIMIT: 這次只修改 V2 GitHub 原有檔案；已確認的 **GAS 版本 1 是不可變快照，並不會因 GitHub 更新而自動改變**。未獲 GAS HEAD 同步、更新版本及指定私人部署的後續授權／驗證之前，不能宣稱修復已顯示在版本 1 網站。
+- MINIMUM_UI_SMOKE: 由持有 MYSELF 權限的 OWNER 開啟使用者提供的新 V2 版本 1 `/exec`，確認研究招募首頁可見、頁面身分正確與「目前尚未開放報名」；新程式部署後另確認報名連結不離開 V2。無實際有權瀏覽器畫面證據，`UI_VERIFIED=false`。
+- SECURITY: `OPEN=false`、`CONSENT_READY=false`、`MYSELF`、`USER_DEPLOYING`；不寄送 OTP、不建立申請、不預約、不簽署 PDF、不修改原 GAS、正式 Sheets、REC；E2 維持關閉。
+- WRITE_OWNER: V2 GitHub main（僅網站首頁、FORMAL 頁與關閉檢查測試、本進度檔）。`MAIN_SYNC_VERIFIED` 由此次 commit SHA、檔案差異與回讀確認；`GAS_SOURCE_SYNC_NEW_CODE=false`、`NEW_VERSION_DEPLOYED=false`、`UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+- NEXT_ACTION: 不再追逐冗長部署核驗；優先完成 V2 E1 五項 MVP 必要流程，待獲獨立部署授權後以最小安全同步／版本更新及真實頁面 smoke 確認，仍不開放真人收件。

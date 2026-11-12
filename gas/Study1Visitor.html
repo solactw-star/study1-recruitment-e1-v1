@@ -67,7 +67,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
 </head>
 <body data-site-mode="<?= flowMode ?>">
 <div class="noticebar" role="note"><?= flowMode === 'FORMAL' ? 'Study1 正式報名流程｜正式收件及簽署尚未開放' : '研究網站示範模式 · 僅供老師體驗操作 · 不接受正式報名、不寄發電子郵件或蒐集真人資料' ?></div>
-<header><nav><div class="brand">Study 1 <small>記憶與身體感覺研究</small></div><a href="https://script.google.com/macros/s/AKfycbwJv-Gne_31fjJHFoEkkXzAFns3g5RS1lMYT2ooUO1BQJejDsRbfBE4svr5S0cz43s/exec" target="_top">研究資訊首頁</a></nav>
+<header><nav><div class="brand">Study 1 <small>記憶與身體感覺研究</small></div><a href="<?= siteAppUrl || '#' ?>" target="_top">研究資訊首頁</a></nav>
 <div class="hero"><div class="eyebrow"><?= flowMode === 'FORMAL' ? '心理學研究 · E1 正式報名流程' : '心理學研究 · 參與者報名體驗' ?></div><h1 id="visitorHeroTitle">一起探索，<br><span>記憶與身體感覺</span><br>之間的關係。</h1><p>與研究介紹首頁相同的研究主題及視覺風格，依序了解資格、確認聯絡方式並選擇參與時段。<?= flowMode === 'FORMAL' ? '是否接受申請以研究倫理核准及系統安全狀態為準。' : '本頁為虛構資料展示。' ?></p><p class="help" id="siteNoticeText"><?= flowMode === 'FORMAL' ? '正式報名及個資蒐集僅在核實開放後啟用。' : '所有資料均為虛構測試，不會建立正式報名。' ?></p></div></header>
 <main class="shell"><div class="maincard">
 <div id="progressText">正在載入報名流程…</div><div id="progress" class="progress" aria-label="報名進度"><span></span><span></span><span></span><span></span><span></span><span></span></div>

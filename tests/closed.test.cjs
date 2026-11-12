@@ -47,7 +47,8 @@ test('Closed initialization retains unrelated GAS properties',()=>{
 });
 test('The information-only HTML has no intake or external scripts',()=>{
   assert.match(html,/mailto:lily4318@cycu\.edu\.tw/);
-  assert.match(html,/exec\?view=apply/);
+  assert.match(html,/siteAppUrl \+ '\?view=apply'/);
+  assert.doesNotMatch(html,/AKfycbwJv-Gne_31fj/);
   assert.doesNotMatch(html,/<(?:form|textarea)\b/i);
   const inputs=[...html.matchAll(/<input\b[^>]*>/gi)].map(x=>x[0]);
   assert.equal(inputs.length,0);
