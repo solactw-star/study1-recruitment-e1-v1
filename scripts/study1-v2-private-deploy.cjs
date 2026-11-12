@@ -166,6 +166,8 @@ async function inventory(api){
   deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
 }
 function summarize(s){
+ console.log('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
+ console.log('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({id:d.id,version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
  console.log('V2_PRIVATE_HEAD_SHA256='+TARGET);
  console.log('V2_PRIVATE_HEAD_FILE_COUNT=32');
  console.log('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
@@ -181,7 +183,7 @@ async function audit(api){
  console.log('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
  return state;
 }
-async function deploy(api,env){
+async function deploy(api,env,assertMain=latestMain){
  // An actual prior audit with this exact inventory fingerprint is required.
  const before=await inventory(api);
  assert(before.fp===env.EXPECTED_INVENTORY_SHA256,
@@ -194,7 +196,7 @@ async function deploy(api,env){
   'matching private deployment already exists; use read-only audit');
  const recheck=await inventory(api);
  assert(recheck.fp===before.fp,'deployment/version inventory raced');
- latestMain(env);
+ assertMain(env);
  assert(core.digest(recheck.head.files)===TARGET,
   'HEAD changed immediately before version creation');
  const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
@@ -215,7 +217,7 @@ async function deploy(api,env){
  assert(preDeploy.versionCount===before.versionCount+1 &&
   normalizedVersions(preDeploy.versions).some(v=>v.version===version.versionNumber),
   'version inventory did not gain exactly one immutable version');
- latestMain(env);
+ assertMain(env);
  let created;
  try{created=await api.createDeployment(version.versionNumber,description);}
  catch(e){throw Error('V2_PRIVATE_DEPLOY_POST_UNKNOWN_NO_RETRY: '+e.message);}
