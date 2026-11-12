@@ -19,7 +19,7 @@ const APPROVED = Object.freeze([
  'Study1ParticipantIntake','Study1ParticipantTrust','Study1PdfLib',
  'Study1PdfStampCore','Study1SelfReportAuthority','Study1Team','Study1Flow','Study1Unified',
  'Study1Visitor','Study1WizardEnrollment','Study1WizardP0Bridge','Website',
- 'appsscript','程式碼'
+ 'appsscript'
 ].sort());
 const fail = m => {throw Error('V2_HEAD_ONLY_BLOCKED: '+m);};
 const require_ = (v,m) => {if(!v)fail(m);};

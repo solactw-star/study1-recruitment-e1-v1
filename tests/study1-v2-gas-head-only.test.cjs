@@ -37,12 +37,13 @@ test('only MYSELF manifest and closed public front-end are accepted',()=>{
  f[0].source=f[0].source.replace('MYSELF','ANYONE_ANONYMOUS');assert.throws(()=>m.closedManifest(f),/MYSELF/);
  f[0].source=manifest();f[1].source=f[1].source.replace('open:false','open:true');assert.throws(()=>m.closedWebsite(f),/closed/);
 });
-test('V2 checked-in gas maps to V2 only and exact expected 32-source inventory',()=>{
+test('V2 checked-in gas maps to V2 only and exact expected 31-source inventory',()=>{
  const dir=process.env.STUDY1_V2_GAS_FIXTURE_DIR;
  if(!dir)return; // optional when independent package uses its own full gas/ directory
  const files=m.localSources(dir);assert.equal(files.length,m.APPROVED.length);
  assert.equal(files.filter(f=>f.type==='JSON').length,1);
  assert.ok(files.some(f=>f.name==='Study1Team'));
+ assert.ok(!files.some(f=>f.name==='程式碼'), 'no inert myFunction entrypoint');
  const clone=fs.mkdtempSync(path.join(os.tmpdir(),'v2-inventory-'));
  for(const p of fs.readdirSync(dir))fs.copyFileSync(path.join(dir,p),path.join(clone,p));
  fs.writeFileSync(path.join(clone,'EXTRA.js'),'x');assert.throws(()=>m.localSources(clone),/allowlist/);
