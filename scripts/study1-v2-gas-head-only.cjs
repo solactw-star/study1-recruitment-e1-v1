@@ -54,6 +54,10 @@ function publicRpcSurface(files){
  const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
  let total=0;
  for(const f of files.filter(x=>x.type==='SERVER_JS'))for(const m of f.source.matchAll(regex)){
+  // Nested helper declarations are indented and are not callable via google.script.run.
+  // Top-level declarations are flush-left, or follow another top-level declaration on one line.
+  const prefix=f.source.slice(f.source.lastIndexOf('\n',m.index)+1,m.index);
+  if(prefix.length>0&&prefix.trim()==='')continue;
   if(m[1].endsWith('_')||safe.has(m[1]))continue;
   require_(f.source.slice(m.index+m[0].length).startsWith(gate),
    'unguarded public RPC '+f.name+'.'+m[1]);
