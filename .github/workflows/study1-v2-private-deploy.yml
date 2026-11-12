@@ -1,0 +1,72 @@
+name: Study1 V2 PRIVATE MYSELF inventory and deploy (manual only)
+# Independent from HEAD-only source sync. Uses only the new V2 Script ID.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'audit: GET-only version/deployment/ACL inventory; deploy: create one PRIVATE version and MYSELF deployment'
+        type: choice
+        required: true
+        options: [audit, deploy]
+        default: audit
+      reviewed_sha:
+        description: 'Exact current V2 main 40-character commit SHA'
+        type: string
+        required: true
+      expected_inventory_sha256:
+        description: 'deploy only: V2_PRIVATE_INVENTORY_SHA256 from separate successful audit'
+        type: string
+        required: false
+      confirmation:
+        description: 'deploy only: I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY'
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  # Prevent overlap with V2 HEAD source synchronization.
+  group: study1-v2-gas-head-only
+  cancel-in-progress: false
+jobs:
+  private-preview:
+    if: ${{ github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static/synthetic tests (no GAS API mutations)
+        run: |
+          node --check scripts/study1-v2-private-deploy.cjs
+          node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
+      - name: Exact V2 main, manual-only, and deploy input guard
+        env:
+          PRIVATE_MODE: ${{ inputs.mode }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test "$GITHUB_REPOSITORY" = solactw-star/study1-recruitment-e1-v1
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          if [ "$PRIVATE_MODE" = deploy ]; then
+            test "$CONFIRMATION" = I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY
+            [[ "$EXPECTED_INVENTORY_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          else
+            test "$PRIVATE_MODE" = audit
+          fi
+      - name: V2-only audit or independently confirmed MYSELF private deployment
+        env:
+          PRIVATE_MODE: ${{ inputs.mode }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: |
+          node scripts/study1-v2-private-deploy.cjs "$PRIVATE_MODE"
