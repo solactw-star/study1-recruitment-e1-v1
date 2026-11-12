@@ -449,3 +449,15 @@ test('E1 no seat remains: original quote refuses without writing another reserva
  assert.equal(h.ctx.study1FormalV05Slots(b).slots[0].remaining,0);
  assert.equal(h.tables.Reservations.rows.length,1);assert.equal(h.mutations.length,writes);
 });
+
+test('E1 original hold idempotency lookup does not confuse raw requestId with WZ_ HMAC',()=>{
+ const h=harness(),a=h.proof(h.person('A')),key='REQ_KEY_HMAC_CAUSAL_12345678';
+ const first=h.holdSlot(a,h.S1,key),row=h.tables.Reservations.rows[0].slice();
+ assert.ok(row[5].startsWith('WZ_'));
+ assert.notEqual(row[5],key);
+ const writes=h.mutations.length;
+ const outcome=h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key});
+ assert.equal(outcome.resolved,true);assert.equal(outcome.status,'HELD');
+ assert.equal(outcome.reservationId,first.reservationId);
+ assert.equal(h.mutations.length,writes);
+});

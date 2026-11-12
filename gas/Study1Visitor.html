@@ -231,7 +231,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null};
+ emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -1092,7 +1092,10 @@ function formalV08Read_(){
    if(formalConsent&&formalConsent.reservationId!==chosen.reservationId)
     formalConsentReset_();
    state.activeBooking=chosen;
-   if(state.pendingHoldRequestId&&chosen.status==='HELD')state.pendingHoldRequestId=null;
+   if(state.pendingHoldRequestId&&chosen.status==='HELD'&&
+      state.pendingHoldReservationId===chosen.reservationId){
+    state.pendingHoldRequestId=null;state.pendingHoldReservationId=null;
+   }
    formalV08Panel_(chosen);
   }else{
    formalConsentReset_();state.activeBooking=null;show('slots');formalV05Read_();
@@ -1111,7 +1114,9 @@ function formalHoldUnknown_(slotId,requestId){
    status('原預約來源不一致，仍為UNKNOWN；請研究團隊核對。');return;
   }
   if(r.status==='HELD'){
-   status('已唯讀核對原Reservations有效HELD，尚非CONFIRMED。');formalV08Read_();return;
+   state.pendingHoldReservationId=r.reservationId;
+   status('已唯讀核對同一原Reservations有效HELD，尚非CONFIRMED。');
+   formalV08Read_();return;
   }
   if(r.status==='CONFIRMED'){
    status('原Reservations已CONFIRMED；仍須核對PDF與本人副本。');formalV08Read_();return;
@@ -1146,6 +1151,10 @@ el('hold').addEventListener('click',()=>{
   rpc('study1FormalHoldSlot',{emailProof:state.emailProof,
    quote:quote.quote},held=>{
    if(!held||held.held!==true){formalHoldUnknown_(chosen.slotId,requestId);return;}
+   if(typeof held.reservationId!=='string'||!/^RSV_[A-Za-z0-9_-]{8,76}$/.test(held.reservationId)){
+    formalHoldUnknown_(chosen.slotId,requestId);return;
+   }
+   state.pendingHoldReservationId=held.reservationId;
    status('原Reservations已完成暫留與回讀，尚未完成正式知情同意。');
    formalV08Read_();
   },()=>formalHoldUnknown_(chosen.slotId,requestId));

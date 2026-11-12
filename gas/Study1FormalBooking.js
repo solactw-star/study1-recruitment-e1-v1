@@ -279,7 +279,17 @@ function study1FormalHoldOutcome(input){if(typeof study1V2PublicRpcDeny_==='func
   throw Error('V05_HOLD_OUTCOME_REQUEST_INVALID');
  study1FormalKey_(input.requestId);study1BindingId_(input.slotId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
-  const rows=ctx.snapshot.reservations.rows.filter(x=>x[5]===input.requestId);
+  // The original Reservations idempotency_key is a WZ_ HMAC, never the
+  // client requestId. Derive exactly the SAME key as study1WizardHoldBound_.
+  const doc=study1EConsentReadyDocument_('E1');
+  if(!doc||doc.experiment!=='E1'||!/^[a-f0-9]{64}$/.test(doc.sha256||''))
+   throw Error('V05_HOLD_OUTCOME_DOCUMENT_NOT_READY');
+  const issuedKey='WZ_'+study1BindingHmac_([
+   'STUDY1_WIZARD_BOOKING_V1',ctx.identity.applicantId,
+   ctx.identity.challengeId,ctx.identity.screeningId,'E1',input.slotId,
+   doc.sha256,doc.version,input.requestId
+  ]);
+  const rows=ctx.snapshot.reservations.rows.filter(x=>x[5]===issuedKey);
   if(!rows.length)return {resolved:false,status:'UNKNOWN',reason:'NOT_FOUND_IN_SNAPSHOT',
    asOfUtc:ctx.nowUtc};
   if(rows.length!==1)throw Error('V05_HOLD_OUTCOME_DUPLICATE_KEY');
