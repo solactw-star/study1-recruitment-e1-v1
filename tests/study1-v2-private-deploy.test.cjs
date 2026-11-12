@@ -11,14 +11,14 @@ const runEnv=()=>({GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',
  CONFIRMATION:d.CONFIRM,EXPECTED_INVENTORY_SHA256:d.fingerprint([],[]),
  GITHUB_RUN_ID:'999'});
 function fakeApi(){
- let version=0,deploy=null,puts=0,versionCreates=0;
+ let version=0,versionDescription='private',deploy=null,puts=0,versionCreates=0;
  const api={
   getHead:async()=>gas(),
-  getVersions:async()=>version?[{scriptId:d.SID,versionNumber:version,createTime:'2026-11-12T00:00:00Z',description:'private'}]:[],
+  getVersions:async()=>version?[{scriptId:d.SID,versionNumber:version,createTime:'2026-11-12T00:00:00Z',description:versionDescription}]:[],
   getDeployments:async()=>deploy?[deploy]:[],
   getVersionContent:async()=>gas(),
   getDeployment:async id=>{assert.equal(id,deploy?.deploymentId);return deploy;},
-  createVersion:async()=>{versionCreates++;version=1;return {scriptId:d.SID,versionNumber:1};},
+  createVersion:async description=>{versionCreates++;version++;versionDescription=description;return {scriptId:d.SID,versionNumber:version};},
   createDeployment:async(n,description)=>{puts++;deploy={
    deploymentId:'PRIVATE-ONLY-V2-001',
    deploymentConfig:{scriptId:d.SID,versionNumber:n,manifestFileName:'appsscript',description},
@@ -144,6 +144,67 @@ test('successful private deploy creates exactly one version and one V2 deploymen
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
  const verified=await d.audit(f.api);
  assert.equal(verified.versionCount,1);assert.equal(verified.deploymentCount,1);
+});
+test('failed previous run orphan is reused only after audited provenance and immutable source verification',async()=>{
+ const f=fakeApi(),e=runEnv();
+ const prefix='Study1 V2 PRIVATE MYSELF HEAD '+d.TARGET+
+  ' GitHub '+e.GITHUB_SHA+' Run ';
+ const orphan=await f.api.createVersion(prefix+'43182160131');
+ assert.equal(orphan.versionNumber,1);
+ const reviewed=await d.audit(f.api);
+ const resumed=await d.deploy(f.api,
+  {...e,EXPECTED_INVENTORY_SHA256:reviewed.fp},()=>{},async()=>{});
+ assert.equal(resumed.version,1);
+ assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
+ const after=await d.audit(f.api);
+ assert.equal(after.versionCount,1);
+ assert.equal(after.deploymentCount,1);
+});
+test('GET-only readback tolerates a temporarily stale versions list after single POST',async()=>{
+ const f=fakeApi(),e=runEnv();
+ const create=f.api.createVersion,getVersions=f.api.getVersions;
+ let created=false,stale=0;const sleeps=[];
+ f.api.createVersion=async description=>{
+  const v=await create(description);created=true;return v;
+ };
+ f.api.getVersions=async()=>{
+  if(created&&stale++===0)return [];
+  return getVersions();
+ };
+ const deployed=await d.deploy(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
+ assert.equal(deployed.version,1);
+ assert.deepEqual(sleeps,[1000]);
+ assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
+});
+test('ambiguous multiple matching orphans stop before any new POST',async()=>{
+ const f=fakeApi(),e=runEnv();
+ const text='Study1 V2 PRIVATE MYSELF HEAD '+d.TARGET+
+  ' GitHub '+e.GITHUB_SHA+' Run ';
+ f.api.getVersions=async()=>[
+  {scriptId:d.SID,versionNumber:1,description:text+'123'},
+  {scriptId:d.SID,versionNumber:2,description:text+'124'}
+ ];
+ const before=await d.audit(f.api);
+ await assert.rejects(d.deploy(f.api,
+  {...e,EXPECTED_INVENTORY_SHA256:before.fp},()=>{},async()=>{}),
+  /multiple matching orphan versions/);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+});
+test('new deployment may appear one GET behind without repeating POST',async()=>{
+ const f=fakeApi(),e=runEnv();
+ const create=f.api.createDeployment,getDeps=f.api.getDeployments;
+ let created=false,stale=0;const sleeps=[];
+ f.api.createDeployment=async(...args)=>{
+  const dep=await create(...args);created=true;return dep;
+ };
+ f.api.getDeployments=async()=>{
+  if(created&&stale++===0)return [];
+  return getDeps();
+ };
+ const deployed=await d.deploy(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
+ assert.equal(deployed.version,1);
+ assert.deepEqual(sleeps,[1000]);
+ assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
 });
 test('inventory SHA mismatch or HEAD drift blocks before version/deployment',async()=>{
  const f=fakeApi(),e=runEnv();
