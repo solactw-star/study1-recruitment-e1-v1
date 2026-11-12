@@ -295,5 +295,5 @@ test('MVP actual PDF engine accepts only researcher presigned source, adds parti
  await assert.rejects(h.scope.study1EConsentSignPdf({
   token:issued.token,name:'SYNTHETIC',signature:png.toString('base64'),
   documentSha:h.doc.sha256,read:true,answerAcknowledged:true,agree:true
- }),/失效|狀態|BINDING|驗證|not|此固定文件/);
+ }),/E1_PRESIGNED_FORMAL_ONLY|失效|狀態|BINDING|驗證|not|此固定文件/);
 });

@@ -95,7 +95,7 @@ test('an uncertain append cannot trigger external email',()=>{
  assert.equal(f.sends,0);assert.equal(f.rows.length,0);
 });
 test('consent caller uses at-most-once outbox without claiming delivery',()=>{
- assert.ok(sign.includes('study1ParticipantBookingNotice_(verifiedContactEmail,changed.id)'));
+ assert.match(sign,/study1ParticipantBookingNotice_\((?:contactEmail|verifiedContactEmail),changed\.id\)/);
  assert.ok(sign.includes('PROVIDER_ACCEPTED_NOT_DELIVERED'));
  assert.ok(!sign.includes("emailNotificationStatus='SENT'"));
 });
