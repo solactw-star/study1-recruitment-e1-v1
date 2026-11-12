@@ -406,3 +406,63 @@ test('A Slot removed after initial preflight fails under the shared lock before 
  assert.deepEqual(x.writes,[]);
  assert.deepEqual(x.open,[]);
 });
+
+test('Ambiguous OTP delivery recovery reads original challenge without sending or writing',()=>{
+ const x=env(),app=x.begin(),payload={applicantId:app.applicantId,
+  screeningId:app.screeningId,experiment:'E1',email:x.input.email,
+  requestId:'REQ_OTP_RECOVERY_00001'};
+ const none=x.scope.study1ParticipantOtpIssueState_(payload);
+ assert.equal(none.found,false);assert.equal(none.status,'NOT_FOUND');
+ const sent=x.scope.study1ParticipantOtpSend_(payload);
+ assert.equal(x.mail.length,1);
+ const before=x.writes.length;
+ const found=x.scope.study1ParticipantOtpIssueState_(payload);
+ assert.equal(found.found,true);assert.equal(found.status,'PENDING');
+ assert.equal(found.delivery,'UNVERIFIED');
+ assert.equal(found.challengeId,sent.challengeId);
+ assert.equal(x.mail.length,1,'reconciliation must not send email');
+ assert.equal(x.writes.length,before,'reconciliation must never write Sheet cells');
+});
+test('OTP original F:G single-use, expiry and supersession are reflected by read-only recovery',()=>{
+ const x=env(),app=x.begin(),p={applicantId:app.applicantId,screeningId:app.screeningId,
+  experiment:'E1',email:x.input.email,requestId:'REQ_OTP_USED_00000001'};
+ const sent=x.scope.study1ParticipantOtpSend_(p);
+ const code=x.mail[0].body.match(/驗證碼：(\d{8})/)[1];
+ const success=x.scope.study1ParticipantOtpVerify_({applicantId:app.applicantId,
+  screeningId:app.screeningId,experiment:'E1',email:x.input.email,
+  challengeId:sent.challengeId,code});
+ assert.equal(success.verified,true);
+ const read=x.scope.study1ParticipantOtpIssueState_(p);
+ assert.equal(read.status,'USED');assert.equal(read.challengeId,undefined);
+ assert.equal(x.mail.length,1);
+ assert.equal(x.scope.study1ParticipantOtpVerify_({applicantId:app.applicantId,
+  screeningId:app.screeningId,experiment:'E1',email:x.input.email,
+  challengeId:sent.challengeId,code}).verified,false);
+ const y=env(),app2=y.begin(),q={applicantId:app2.applicantId,screeningId:app2.screeningId,
+  experiment:'E1',email:y.input.email,requestId:'REQ_OTP_EXPIRE_000001'};
+ y.scope.study1ParticipantOtpSend_(q);
+ y.time.now+=11*60000;
+ assert.equal(y.scope.study1ParticipantOtpIssueState_(q).status,'EXPIRED');
+ const z=env(),app3=z.begin(),old={applicantId:app3.applicantId,
+  screeningId:app3.screeningId,experiment:'E1',email:z.input.email,
+  requestId:'REQ_OTP_OLD_000000001'};
+ z.scope.study1ParticipantOtpSend_(old);
+ z.time.now+=61000;
+ z.scope.study1ParticipantOtpSend_({...old,requestId:'REQ_OTP_NEW_000000002'});
+ assert.equal(z.scope.study1ParticipantOtpIssueState_(old).status,'SUPERSEDED');
+});
+test('OTP lookup validates binding and fails closed without mail or mutation',()=>{
+ const x=env(),app=x.begin(),valid={applicantId:app.applicantId,
+  screeningId:app.screeningId,experiment:'E1',email:x.input.email,
+  requestId:'REQ_OTP_PROTECTED_00001'};
+ x.scope.study1ParticipantOtpSend_(valid);
+ const startWrites=x.writes.length,startMail=x.mail.length;
+ assert.throws(()=>x.scope.study1ParticipantOtpIssueState_({...valid,email:'other@example.org'}));
+ assert.equal(x.mail.length,startMail);assert.equal(x.writes.length,startWrites);
+ x.lock.held=true;
+ assert.throws(()=>x.scope.study1ParticipantOtpIssueState_(valid),/LOOKUP_LOCK_BUSY/);
+ x.lock.held=false;
+ const closed=env({enabled:false});
+ assert.throws(()=>closed.scope.study1ParticipantOtpIssueState_(valid),/PUBLIC_EMAIL_OTP_NOT_READY/);
+ assert.equal(closed.open.length,0);assert.equal(closed.mail.length,0);
+});

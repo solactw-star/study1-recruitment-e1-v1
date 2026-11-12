@@ -8,6 +8,7 @@ on:
       - 'tests/closed.test.cjs'
       - 'tests/study1-v2-public-readonly.test.cjs'
       - 'tests/study1-formal-browser-synthetic-e2e.test.cjs'
+      - 'tests/study1-participant-intake.test.cjs'
       - '.github/workflows/study1-v2-public-readonly-ci.yml'
   workflow_dispatch:
 permissions:
@@ -29,4 +30,4 @@ jobs:
         run: |
           for f in gas/*.js; do node --check "$f"; done
           node --check scripts/study1-v2-gas-head-only.cjs
-          node --test tests/study1-v2-public-readonly.test.cjs tests/closed.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/study1-formal-browser-synthetic-e2e.test.cjs
+          node --test tests/study1-v2-public-readonly.test.cjs tests/closed.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/study1-formal-browser-synthetic-e2e.test.cjs tests/study1-participant-intake.test.cjs

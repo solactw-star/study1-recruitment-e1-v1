@@ -254,6 +254,55 @@ function study1ParticipantOtpSend_(input){
   return {sent:true,reason:'ISSUED',challengeId,expiresAtUtc:expires};
  }finally{lock.releaseLock();}
 }
+
+/** Read-only recovery for an ambiguous OTP MailApp outcome.
+ * The same high-entropy requestId deterministically identifies the original
+ * Verification A:I row. This helper NEVER issues, resends, or consumes OTP.
+ * Mail delivery is always UNVERIFIED, even if a challenge row exists.
+ */
+function study1ParticipantOtpIssueState_(request){
+ study1ParticipantMailGate_();
+ const r=study1ParticipantOtpRequest_(request);
+ const challengeId='CHL_'+study1BindingHmac_([
+  'PUBLIC_PENDING_MAIL_OTP_V1',r.applicantId,r.email,r.requestId]).slice(0,28);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(5000)!==true)throw Error('OTP_ISSUE_LOOKUP_LOCK_BUSY');
+ try{
+  if(lock.hasLock()!==true)throw Error('OTP_ISSUE_LOOKUP_LOCK_LOST');
+  study1ParticipantMailGate_();
+  const data=study1ParticipantOtpRows_(r);
+  const state=study1WizardIssueRows_(data.book,r.applicantId,r.email);
+  const matches=study1WizardLookup_(state.ref,1,challengeId,true);
+  if(matches.length===0)return {found:false,status:'NOT_FOUND'};
+  if(matches.length!==1)throw Error('OTP_ISSUE_LOOKUP_NOT_UNIQUE');
+  const row=study1BindingOtpRow_(state.ref.tab,matches[0],9);
+  if(row[0]!==challengeId||row[1]!==r.applicantId||
+     row[2]!==OTP_RULES_.emailPurpose||
+     study1BindingEmail_(row[7])!==r.email)
+   throw Error('OTP_ISSUE_LOOKUP_BINDING_MISMATCH');
+  const created=study1BindingUtc_(row[8]),
+   expires=study1BindingUtc_(row[4]),now=Date.now();
+  if(created>now+60000||expires<=created||
+     expires-created>OTP_RULES_.ttlMinutes*60000)
+   throw Error('OTP_ISSUE_LOOKUP_TIME_INVALID');
+  if(state.snapshot.rows.some(v=>v[0]!==''&&v[0]!==challengeId&&
+      (v[1]===r.applicantId||study1BindingEmail_(v[7])===r.email)&&
+      study1BindingUtc_(v[8])>created))
+   return {found:true,status:'SUPERSEDED'};
+  if(row[6]!==''){
+   study1BindingUtc_(row[6]);
+   return {found:true,status:'USED'};
+  }
+  if(expires<=now)return {found:true,status:'EXPIRED'};
+  if(!Number.isSafeInteger(Number(row[5]))||Number(row[5])<0)
+   throw Error('OTP_ISSUE_LOOKUP_ATTEMPTS_INVALID');
+  if(Number(row[5])>=OTP_RULES_.maxAttempts)
+   return {found:true,status:'LOCKED'};
+  if(lock.hasLock()!==true)throw Error('OTP_ISSUE_LOOKUP_LOCK_LOST');
+  return {found:true,status:'PENDING',challengeId,
+   delivery:'UNVERIFIED'};
+ }finally{lock.releaseLock();}
+}
 function study1ParticipantOtpVerify_(input){
  study1ParticipantMailGate_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
@@ -467,6 +516,10 @@ function study1ParticipantBegin(request){if(typeof study1V2PublicRpcDeny_==='fun
 }
 function study1ParticipantSendOtp(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantOtpSend_(request);
+}
+/** Public name remains denied in V2 ANYONE/read-only deployments. */
+function study1ParticipantOtpIssueState(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ return study1ParticipantOtpIssueState_(request);
 }
 function study1ParticipantVerifyOtp(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantOtpVerify_(request);

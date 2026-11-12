@@ -231,7 +231,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,otpRequestId:null,slots:[],chosenDay:null,monthIndex:0,activeBooking:null};
+ emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -246,11 +246,17 @@ const show=step=>{
   ({choose:'研究選擇',screen:'資格初篩',otp:'電子郵件驗證',slots:'時段與資格確認'}[step]||step);
 };
 const status=message=>{el('status').textContent=message};
-const rpc=(name,payload,onSuccess)=>{
- if(!window.google||!google.script||!google.script.run){status('目前無法連線至研究報名系統。');return;}
+const rpc=(name,payload,onSuccess,onFailure)=>{
+ if(!window.google||!google.script||!google.script.run){
+  if(typeof onFailure==='function')onFailure();
+  else status('目前無法連線至研究報名系統。');
+  return;
+ }
  state.busy=true;
  google.script.run.withFailureHandler(()=>{
-  state.busy=false;status('目前未完成該項操作，請勿重複送出；可聯絡研究團隊確認。');
+  state.busy=false;
+  if(typeof onFailure==='function')onFailure();
+  else status('目前未完成該項操作，請勿重複送出；可聯絡研究團隊確認。');
  }).withSuccessHandler(result=>{
   state.busy=false;onSuccess(result);
  })[name](payload);
@@ -380,6 +386,29 @@ el('screenNext').addEventListener('click',()=>{
   show('otp');status('已建立待驗證申請，尚未完成信箱驗證、預約或知情同意。');
  });
 });
+function reconcileOtpIssue_(payload){
+ // Never repeat MailApp.sendEmail; this endpoint is original Verification read-only.
+ rpc('study1ParticipantOtpIssueState',payload,result=>{
+  if(!result||result.found!==true){
+   status('OTP 原始紀錄尚未核實；寄送因果未知，不得重新送出，請聯絡研究團隊。');
+   return;
+  }
+  if(result.status==='PENDING'&&result.delivery==='UNVERIFIED'&&
+     typeof result.challengeId==='string'&&
+     /^CHL_[A-Za-z0-9_-]{12,76}$/.test(result.challengeId)){
+   state.mail=result.challengeId;
+   el('otpInputWrap').hidden=false;
+   status('已唯讀核對原 Verification 有尚未使用的驗證碼；郵件是否送達仍未知，僅在確實收到郵件時輸入。');
+   return;
+  }
+  if(result.status==='USED'){
+   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
+   status('原驗證碼已一次性使用，原申請後續狀態尚未核實；請勿重複驗證或寄送。');
+   return;
+  }
+  status('原 OTP 狀態為過期、受限或已被新挑戰取代；請勿自動補寄，聯絡研究團隊核對。');
+ },()=>status('OTP 寄送與唯讀回查均未成功；原因果未知，請勿重送。'));
+}
 el('otpSend').addEventListener('click',()=>{
  if(!state.ready||state.busy||!state.app||state.otpRequestId)return;
  // MailApp may have accepted a message when the RPC times out. Never create
@@ -389,7 +418,7 @@ el('otpSend').addEventListener('click',()=>{
  el('otpSend').disabled=true;
  rpc('study1ParticipantSendOtp',payload,result=>{
   if(!result||typeof result!=='object'){
-   status('驗證碼寄送結果尚未確認；請勿重複要求寄送，聯絡研究團隊核對。');return;
+   reconcileOtpIssue_(payload);return;
   }
   if(result.sent===false&&result.reason==='THROTTLED'){
    status('驗證碼請求受到安全頻率限制；本次未確認寄出，請稍後聯絡研究團隊。');return;
@@ -408,28 +437,38 @@ el('otpSend').addEventListener('click',()=>{
    el('otpInputWrap').hidden=false;
    status('此申請已核發過驗證碼，系統不再寄送；若先前收到郵件，可輸入其中的八位碼。');return;
   }
-  status('驗證碼寄送結果尚未確認；請勿重複要求寄送，聯絡研究團隊核對。');
- });
+  reconcileOtpIssue_(payload);
+ },()=>reconcileOtpIssue_(payload));
 });
 el('otpVerify').addEventListener('click',()=>{
- if(!state.ready||state.busy||!state.app||!state.mail)return;
+ if(!state.ready||state.busy||!state.app||!state.mail||state.otpVerifyUnknown)return;
  const code=el('otpInput').value.trim();
  if(!/^[0-9]{8}$/.test(code)){status('請輸入信箱中收到的八位數驗證碼；尚未送出驗證請求。');return;}
  rpc('study1ParticipantVerifyOtp',{...state.app,challengeId:state.mail,
   code},result=>{
   if(!result||result.verified!==true){status('驗證碼尚未通過核實，可能錯誤、逾期或已使用；未建立有效信箱證據。');return;}
-  if(!result.emailProof){status('郵件證據回讀未完成，請聯絡研究團隊。');return;}
+  if(!result.emailProof){
+   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
+   status('OTP 已核實但信箱憑證不完整；可能已一次性使用，請勿重複驗證。');
+   return;
+  }
+  // OTP F:G has been consumed. Even if the next Applicants readback fails,
+  // do not replay the one-time OTP; retain proof in memory for staff review.
+  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
+  state.emailProof=result.emailProof;
   rpc('study1ParticipantEmailStatus',result.emailProof,statusResult=>{
    if(!statusResult||statusResult.emailVerified!==true||
       statusResult.applicationState!=='SELF_REPORTED_ELIGIBLE_EMAIL_VERIFIED'||
       statusResult.eligibilitySource!=='PARTICIPANT_SELF_REPORT'){
-    status('原申請與驗證紀錄尚未一致，請聯絡研究團隊。');return;
+    status('OTP 已一次性使用，但原申請狀態尚未核實；請勿重複驗證，聯絡研究團隊。');return;
    }
-   state.emailProof=result.emailProof;
    show('slots');
    status('資格依本人勾選自陳，Email OTP已核對；以下場次由正式E1來源提供，暫留不等於完成研究同意。');
    formalV05Read_();
-  });
+  },()=>status('OTP 已一次性使用；原申請狀態回讀未知，請勿重複驗證碼或寄送。'));
+ },()=>{
+  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
+  status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');
  });
 });
 if(typeof google!=='undefined'&&google.script&&google.script.run){

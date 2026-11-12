@@ -34,6 +34,7 @@ function simulate(readiness,options={}){
    screeningId:'SCR_CLOSED_TEST_12345678',phase:'PENDING_EMAIL'}),
   study1ParticipantSendOtp:req=>({
    sent:true,reason:'ISSUED',challengeId:'CHL_CLOSED_TEST_12345678'}),
+  study1ParticipantOtpIssueState:req=>({found:false,status:'NOT_FOUND'}),
   study1ParticipantVerifyOtp:req=>({
    verified:true,reason:'EMAIL_CONTROL_ONLY',emailProof:{
     version:1,signature:'a'.repeat(64),applicantId:req.applicantId,
@@ -251,4 +252,53 @@ test('OTP incorrect code shape never reaches verification RPC',()=>{
  assert.equal(s.click('otpVerify'),true);
  assert.equal(s.calls.some(x=>x.method==='study1ParticipantVerifyOtp'),false);
  assert.match(s.node('status').textContent,/八位數驗證碼/);
+});
+
+test('Unknown MailApp outcome is reconciled with ONE read-only original challenge lookup',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{
+   study1ParticipantSendOtp:()=>{throw Error('UNKNOWN_MAIL_RECEIPT')},
+   study1ParticipantOtpIssueState:()=>({found:true,status:'PENDING',
+    delivery:'UNVERIFIED',challengeId:'CHL_CLOSED_TEST_12345678'})
+ }});
+ mockEligibleE1(s);s.click('otpSend');
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantSendOtp').length,1);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantOtpIssueState').length,1);
+ assert.equal(s.node('otpInputWrap').hidden,false);
+ assert.equal(s.click('otpSend'),false);
+ assert.match(s.node('status').textContent,/郵件是否送達仍未知/);
+});
+test('Read-only OTP status USED refuses new one-time verification and resend',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{
+   study1ParticipantSendOtp:()=>{throw Error('MAIL_UNKNOWN')},
+   study1ParticipantOtpIssueState:()=>({found:true,status:'USED'})
+ }});
+ mockEligibleE1(s);s.click('otpSend');
+ assert.equal(s.node('otpVerify').disabled,true);
+ assert.equal(s.node('otpInputWrap').hidden,true);
+ assert.equal(s.click('otpSend'),false);
+ assert.match(s.node('status').textContent,/已一次性使用/);
+});
+test('Verification RPC uncertain outcome blocks repeat of consumed OTP',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantVerifyOtp:()=>{throw Error('OTP_COMMIT_UNKNOWN')}}});
+ mockEligibleE1(s);s.click('otpSend');
+ s.node('otpInput').value='24681357';
+ assert.equal(s.click('otpVerify'),true);
+ assert.equal(s.node('otpVerify').disabled,true);
+ assert.equal(s.click('otpVerify'),false);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantVerifyOtp').length,1);
+ assert.match(s.node('status').textContent,/可能已一次性使用/);
+});
+test('After OTP succeeds but Applicants state readback fails, no OTP is consumed twice',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantEmailStatus:()=>{throw Error('APPLICANT_STATE_UNKNOWN')}}});
+ mockEligibleE1(s);s.click('otpSend');
+ s.node('otpInput').value='24681357';s.click('otpVerify');
+ assert.equal(s.node('otpVerify').disabled,true);
+ assert.equal(s.click('otpVerify'),false);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantVerifyOtp').length,1);
+ assert.equal(s.node('step-slots').hidden,true);
+ assert.match(s.node('status').textContent,/回讀未知/);
 });

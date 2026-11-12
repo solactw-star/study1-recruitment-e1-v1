@@ -192,3 +192,12 @@
 - HEAD_CODE_READBACK=PASS；FORMAL 頁改用單一 OTP 核發請求識別、節流與未確認寄件結果不冒稱已送達、自陳不符不送出個資、格式不符不呼叫後端。公開版遠端 `ANYONE` 不開放申請／寄信／預約／PDF 的原安全閘門仍未修改。
 - SYNC_STATUS=`MAIN_CODE_CI_VERIFIED=true`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。Google 授權阻塞尚未解除，不阻礙離線建置；不得將離線 CI 判為真人營運成功。
 - NEXT_ACTION：繼續既有 E1 五項 MVP 必要後端與 UI 程式整合，尤其 OTP 結果通知、原時段預約與最後 PDF 研究者預簽／參與者簽署之閉環；維持原 GAS、正式 Sheets、REC 不動。
+
+
+## 2026-11-12｜E1 Email OTP 唯讀因果回查與一次性驗證前後端整合（GitHub-only）
+- TASK_DOMAIN=`Study1_V2_E1_OTP_UNKNOWN_RECOVERY`；PRE_MAIN_SHA=`5830d6f882c37d3c40368aafee3175506838fa4b`；遵循原唯一主規格 §70-S.16–18、§70-S.24、§70-S.34；程式更新不等於真人收件核准。
+- 後端 `gas/Study1ParticipantIntake.js`：沿用原 Verification A:I／F:G、共同 ScriptLock、原 HMAC，新增 `study1ParticipantOtpIssueState_` 唯讀核查同一高熵 requestId 的持久 OTP 挑戰，明確區分 `NOT_FOUND/PENDING/USED/EXPIRED/LOCKED/SUPERSEDED`，不從存在性推定 MailApp 送達；加入原公開入口 `study1ParticipantOtpIssueState`，在 V2 `ANYONE` 公開唯讀版延續 `study1V2PublicRpcDeny_` 直接封鎖。
+- 前端 `gas/Study1Visitor.html`：寄件未知結果只用原 requestId 進行單次唯讀回查，**禁止自動重寄 OTP**；只有 PENDING 且 challenge 來源合理時才顯示驗證輸入。OTP 核驗回應不明時直接鎖住送出；F:G 成功一次性消耗後即停用核驗按鈕，Applicants 狀態回讀失敗不得重複提交舊碼或顯示完成。
+- 安全：不新增/修改任何真實 Sheet 欄位或資料；本輪不調用 MailApp、不發真人郵件、不修改原 GAS／REC／私人 V1，不重新部署。不將 OTP 視為學籍/本人身分證明，不將 `PROVIDER_ACCEPTED` 或 challenge 存在視為郵件已送達。
+- 測試：增量擴充原 `tests/study1-participant-intake.test.cjs` 與 `tests/study1-formal-browser-synthetic-e2e.test.cjs`，並沿用既有離線 CI；包含同一 requestId 回查、F:G 一次性、到期、取代、未授權、寄件不明、一次性核驗回應不明等負例。
+- SYNC_STATUS：`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；等待 CI、commit 與回讀確認後才能標明 GitHub 本輪已完成。
