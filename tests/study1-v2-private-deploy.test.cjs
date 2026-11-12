@@ -191,6 +191,82 @@ test('V2 Apps Script API addresses only fixed V2 project and version/deployment 
  assert.ok(sent.every(x=>!x[0].includes('sheets.googleapis.com')));
  assert.ok(!sent.some(x=>x[1]==='PUT'||x[1]==='DELETE'));
 });
+test('GET 503 retries with bounded exponential backoff and no GAS mutations',async()=>{
+ let gets=0;const waits=[],calls=[];
+ const fetcher=async(url,opts)=>{
+  calls.push({url,method:opts.method});
+  if(url.includes('oauth2.googleapis.com'))return {
+   ok:true,json:async()=>({access_token:'test_token_safe_for_testing'})
+  };
+  gets++;
+  return gets<3?{ok:false,status:503}:{ok:true,json:async()=>({deployments:[]})};
+ };
+ const api=await d.makeApi({refresh_token:'fake',client_id:'fake',client_secret:'fake'},
+  fetcher,async ms=>waits.push(ms),()=>0);
+ assert.deepEqual(await api.getDeployments(),[]);
+ assert.equal(gets,3);
+ assert.deepEqual(waits,[1000,2000]);
+ assert.equal(calls.filter(c=>c.method==='GET').length,3);
+ assert.equal(calls.filter(c=>c.method==='POST').length,1); // OAuth refresh only
+ assert.equal(d.GET_RETRY_MAX_ATTEMPTS,3);
+});
+test('GET 429 uses quota-aware 30s and 60s delays, then fails closed',async()=>{
+ let gets=0;const waits=[];
+ const fetcher=async(url,opts)=>{
+  if(opts.method==='POST')return {ok:true,json:async()=>({access_token:'test_token_safe_for_testing'})};
+  gets++;
+  return {ok:false,status:429};
+ };
+ const api=await d.makeApi({refresh_token:'fake',client_id:'fake',client_secret:'fake'},
+  fetcher,async ms=>waits.push(ms),()=>0);
+ await assert.rejects(api.getVersions(),/GET V2 Apps Script API \/versions HTTP 429 after 3 attempt/);
+ assert.equal(gets,3);
+ assert.deepEqual(waits,[30000,60000]);
+ assert.equal(d.retryDelayMs(503,1,1),1249);
+ assert.equal(d.retryDelayMs(429,2,1),60249);
+ assert.throws(()=>d.retryDelayMs(403,1,0),/invalid GET retry/);
+ assert.deepEqual([d.safeApiRoute('/deployments/OPAQUE_ID'),
+  d.safeApiRoute('/deployments?pageToken=PRIVATE_TOKEN')],
+  ['/deployments/:id','/deployments']);
+});
+test('GET 401/403 errors and thrown network failures never retry',async()=>{
+ for(const status of [401,403,404]){
+  let gets=0;const waits=[];
+  const api=await d.makeApi({refresh_token:'fake',client_id:'fake',client_secret:'fake'},
+   async(url,opts)=>opts.method==='POST'?
+    {ok:true,json:async()=>({access_token:'test_token_safe_for_testing'})}:
+    (gets++,{ok:false,status}),
+   async ms=>waits.push(ms),()=>0);
+  await assert.rejects(api.getHead(),new RegExp('GET V2 Apps Script API \\/content HTTP '+status+' after 1 attempt'));
+  assert.equal(gets,1);assert.deepEqual(waits,[]);
+ }
+ let thrown=0;
+ const api=await d.makeApi({refresh_token:'fake',client_id:'fake',client_secret:'fake'},
+  async(url,opts)=>opts.method==='POST'?
+   {ok:true,json:async()=>({access_token:'test_token_safe_for_testing'})}:
+   (thrown++,Promise.reject(Error('network-failure'))),
+  async()=>{throw Error('unexpected delay');},()=>0);
+ await assert.rejects(api.getHead(),/network-failure/);
+ assert.equal(thrown,1);
+});
+test('POST versions/deployments never retry even when server says 503 or 429',async()=>{
+ for(const status of [503,429]){
+  let mutations=0;const waits=[];
+  const fetcher=async(url,opts)=>{
+   if(url.includes('oauth2.googleapis.com'))return {
+    ok:true,json:async()=>({access_token:'test_token_safe_for_testing'})
+   };
+   if(opts.method==='POST')mutations++;
+   return {ok:false,status};
+  };
+  const api=await d.makeApi({refresh_token:'fake',client_id:'fake',client_secret:'fake'},
+   fetcher,async ms=>waits.push(ms),()=>0);
+  await assert.rejects(api.createVersion('readonly-test'),new RegExp('POST V2 Apps Script API \\/versions HTTP '+status+' after 1 attempt'));
+  await assert.rejects(api.createDeployment(1,'readonly-test'),new RegExp('POST V2 Apps Script API \\/deployments HTTP '+status+' after 1 attempt'));
+  assert.equal(mutations,2);
+  assert.deepEqual(waits,[]);
+ }
+});
 test('workflow cannot be auto-triggered or upload code and has no legacy target',()=>{
  const script=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-private-deploy.cjs'),'utf8');
  const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
