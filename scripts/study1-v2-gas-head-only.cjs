@@ -58,7 +58,7 @@ function publicRpcSurface(files){
   // Pin the entire vendor blob, and reject any unreviewed change instead of
   // misclassifying minifier-local names as remotely callable functions.
   if(f.name==='Study1PdfLib'){
-   const blob=crypto.createHash('sha1').update('blob '+Buffer.byteLength(f.source)+'\\0'+f.source).digest('hex');
+   const blob=crypto.createHash('sha1').update('blob '+Buffer.byteLength(f.source)+'\0'+f.source).digest('hex');
    require_(blob==='f0916cac6bcfa54425c819a16e6ca11360a8d7c5',
     'reviewed minified PDF bundle changed');
    continue;
