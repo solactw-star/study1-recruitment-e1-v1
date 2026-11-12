@@ -69,14 +69,14 @@ function study1AdminPersisted_(){
   if(found.schemaVersion!==1||!Number.isSafeInteger(found.revision)||found.revision<1)throw Error('測試設定版本損毀');
   return Object.assign({schemaVersion:1,revision:found.revision},study1AdminValidate_(found.config));
 }
-function adminGetSandboxConfig(){
+function adminGetSandboxConfig(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   study1SandboxBookingFlags_();
   return {mode:'SANDBOX_ONLY',open:false,consentReady:false,
     store:'ScriptProperties:STUDY1_SANDBOX_ADMIN_CONFIG_V1',config:study1AdminPersisted_()};
 }
 /** Validate an unsaved admin draft on the server, without touching any property. */
-function adminValidateSandboxConfig(input){
+function adminValidateSandboxConfig(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   study1SandboxBookingFlags_();
   return {mode:'SANDBOX_ONLY',open:false,consentReady:false,config:study1AdminValidate_(input)};
@@ -86,7 +86,7 @@ function study1AdminRequireRevision_(current,expectedRevision){
   if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw Error('無效的設定版本');
   if(current.revision!==expectedRevision)throw Error('設定已由其他工作更新，請重新讀取後編輯');
 }
-function adminSaveSandboxConfig(input,expectedRevision){
+function adminSaveSandboxConfig(input,expectedRevision){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   study1SandboxBookingFlags_();
   if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)throw Error('無效的設定版本');
@@ -128,7 +128,7 @@ function adminSaveSandboxConfig(input,expectedRevision){
  * Explicit owner-only, disposable backend self-test. It never edits the real
  * sandbox admin config, OPEN/CONSENT_READY, other properties or research Sheets.
  */
-function adminRunSandboxSelfTest(){
+function adminRunSandboxSelfTest(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   const lock=LockService.getScriptLock();
   if(!lock.tryLock(8000))throw Error('其他測試設定工作進行中，請稍後重試');
@@ -351,7 +351,7 @@ function study1SandboxBookingView_(state,config){
   return {mode:'SANDBOX_ONLY',open:false,consentReady:false,revision:state.revision,
     slots,bookings:state.bookings.map(x=>({code:x.code,slotId:x.slotId,status:x.status}))};
 }
-function adminGetTestBookings(){
+function adminGetTestBookings(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   study1SandboxBookingFlags_();
   // Config edits and booking writes use this same script lock. Read both
@@ -405,7 +405,7 @@ function study1SandboxBookingMutation_(input,state,config){
     return {changed:true,view};
 }
 /** A single owner-only server transaction; all capacity checks are locked. */
-function adminChangeTestBooking(input){
+function adminChangeTestBooking(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
   study1AdminOwnerRequired_();
   study1SandboxBookingFlags_();
   if(!input||typeof input!=='object'||Array.isArray(input)||
@@ -474,11 +474,11 @@ function study1ConsentVersionRead_(){
   throw Error('公開同意書版本指標不一致，拒絕使用');
  return s;
 }
-function study1ConsentVersionList(){
+function study1ConsentVersionList(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();study1SandboxBookingFlags_();
  return study1ConsentVersionRead_();
 }
-function study1ConsentVersionUpload(input){
+function study1ConsentVersionUpload(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();study1SandboxBookingFlags_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
   !['base64,expectedRevision,experiment,title,version',
@@ -542,7 +542,7 @@ function study1ConsentVersionUpload(input){
   throw e;
  }finally{lock.releaseLock();}
 }
-function study1ConsentVersionSelect(input){
+function study1ConsentVersionSelect(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();study1SandboxBookingFlags_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
   Object.keys(input).sort().join(',')!=='expectedRevision,id'||
@@ -599,7 +599,7 @@ function study1ConsentDocumentBytes_(entry){
 }
 /** OWNER explicitly approves READ-ONLY publication of a selected blank PDF,
  * or deactivates a published pointer; neither operation enables enrollment. */
-function study1ConsentVersionPublication(input){
+function study1ConsentVersionPublication(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();study1SandboxBookingFlags_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
   Object.keys(input).sort().join(',')!=='confirmSha256,expectedRevision,experiment,id'||
@@ -673,7 +673,7 @@ function study1EConsentEnabled_(){
  return p.getProperty('OPEN')==='true'&&p.getProperty('CONSENT_READY')==='true'&&
   p.getProperty('STUDY1_ECONSENT_PROVIDER_VERIFIED')==='true';
 }
-function study1EConsentAvailability(){return {enabled:study1EConsentEnabled_()};}
+function study1EConsentAvailability(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();return {enabled:study1EConsentEnabled_()};}
 /**
  * E1 formal e-consent registry v2: immutable versioned JSON snapshots in the
  * SAME original private consent Drive folder. Only a small SHA/HMAC protected
@@ -944,7 +944,7 @@ function study1EConsentChange_(id,fn){
  }finally{lock.releaseLock();}
 }
 /** Authenticated OWNER creates a fixed-document one-person invitation. */
-function study1EConsentIssue(input){
+function study1EConsentIssue(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!study1EConsentEnabled_())throw Error('尚未開放有效電子簽署');
  if(!input||Object.keys(input).join(',')!=='experiment'||
@@ -974,7 +974,7 @@ function study1EConsentIssue(input){
  }finally{lock.releaseLock();}
 }
 /** OWNER documents researcher explanation and specific questions before signing. */
-function study1EConsentExplain(input){
+function study1EConsentExplain(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!input||Object.keys(input).sort().join(',')!=='answer,id,question,resolved'||
   typeof input.id!=='string'||typeof input.question!=='string'||
@@ -991,7 +991,7 @@ function study1EConsentExplain(input){
  });
 }
 /** Bearer proof is required even to read the attested explanation. */
-function study1EConsentSession(token){
+function study1EConsentSession(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const r=study1EConsentRegistry_(),entry=study1EConsentEntry_(token,r);
  if(!study1EConsentEnabled_()&&entry.state!=='CONFIRMED'&&entry.state!=='WITHDRAWN')
   throw Error('電子同意目前不開放');
@@ -1002,7 +1002,7 @@ function study1EConsentSession(token){
   explanation:explanation&&{question:explanation.question,answer:explanation.answer}};
 }
 /** Browser supplied signature is accepted once, bound to owner-verified invite. */
-function study1EConsentSign(input){
+function study1EConsentSign(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!study1EConsentEnabled_())throw Error('尚未開放有效電子簽署');
  // Legacy isolated synthetic event is preserved solely for existing TEST regression.
  // It must NEVER serve as an operational signed consent or replace a signed PDF.
@@ -1037,7 +1037,7 @@ function study1EConsentSign(input){
  {state:'UNVERIFIED'};
 }
 /** Staff confirmation is another independently stored event, not an overwrite. */
-function study1EConsentConfirm(input){
+function study1EConsentConfirm(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!input||Object.keys(input).sort().join(',')!=='id,identityVerified,notes'||
   input.identityVerified!==true||typeof input.id!=='string'||
@@ -1060,7 +1060,7 @@ function study1EConsentConfirm(input){
  });
 }
 /** Participant can retrieve their own document-bound evidence with bearer code. */
-function study1EConsentCopy(token){
+function study1EConsentCopy(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
  if(!['CONFIRMED','WITHDRAWN'].includes(entry.state))
   throw Error('尚未完成雙方確認，不提供有效簽署副本');
@@ -1088,7 +1088,7 @@ function study1EConsentCopy(token){
   withdrawalAt:withdrawn?.recordedAt||null,withdrawalEvidenceSha256:entry.withdrawal?.sha||null};
 }
 /** Withdrawal is a new private event, never deletion/edit of original consent. */
-function study1EConsentWithdraw(input){
+function study1EConsentWithdraw(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const keys=input&&typeof input==='object'&&!Array.isArray(input)?
   Object.keys(input).sort().join(','):'';
  if(!['reason,token','dataChoice,reason,token'].includes(keys)||
@@ -1109,7 +1109,7 @@ function study1EConsentWithdraw(input){
   requiresResearcherDataDisposition:true,
   dataDispositionState:'PENDING_RESEARCH_TEAM_ACTION'};
 }
-function study1EConsentOwnerList(){
+function study1EConsentOwnerList(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const r=study1EConsentRegistry_();
  return {revision:r.revision,records:r.records.map(x=>({id:x.id,
@@ -1126,7 +1126,7 @@ function study1EConsentOwnerList(){
  * No public URL/Drive ID, questionnaire answers or bearer signing token is
  * leaked. Bytes are returned only after the original PRIVATE SHA readback.
  */
-function study1EConsentOwnerSignedPdfDownload(consentId){
+function study1EConsentOwnerSignedPdfDownload(consentId){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(typeof consentId!=='string'||!/^[-a-f0-9]{30,40}$/i.test(consentId))
   throw Error('OWNER_SIGNED_PDF_RECORD_ID_INVALID');
@@ -1155,7 +1155,7 @@ function study1EConsentOwnerSignedPdfDownload(consentId){
 
 
 /** No names, health answers or reasons in this owner-only action queue. */
-function study1EConsentOwnerWithdrawalCases(){
+function study1EConsentOwnerWithdrawalCases(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const r=study1EConsentRegistry_();
  return {readOnly:true,records:r.records.filter(x=>
@@ -1172,7 +1172,7 @@ function study1EConsentOwnerWithdrawalCases(){
 
 
 /** Staff-managed withdrawal handles requests after bearer links expire. */
-function study1EConsentOwnerWithdraw(input){
+function study1EConsentOwnerWithdraw(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!input||Object.keys(input).sort().join(',')!=='id,identityVerified,reason'||
   input.identityVerified!==true||typeof input.id!=='string'||
@@ -1245,7 +1245,7 @@ function study1EConsentSignedPdfRead_(ref,entry){
   throw Error('完整簽署PDF已變動或SHA不一致');
  return bytes;
 }
-async function study1EConsentSignPdf(input){
+async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  // Important: this endpoint is intentionally UNAVAILABLE until a real
  // registration-bound identity provider and approved PDF evidence provider
  // are installed. No owner-only TEST fixture can set these live gates.
@@ -1399,7 +1399,7 @@ async function study1EConsentSignPdf(input){
 /** OWNER handwritten second signature in the REC-pinned researcher PDF box.
  * Original PDF and participant-signed PDF remain immutable and traceable.
  */
-async function study1EConsentConfirmPdf(input){
+async function study1EConsentConfirmPdf(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
   Object.keys(input).sort().join(',')!=='id,notes,participantSignedSha256,researcherSignature'||
@@ -1504,7 +1504,7 @@ async function study1EConsentConfirmPdf(input){
   throw error;
  }
 }
-function study1EConsentOwnerPendingPdfConfirmations(){
+function study1EConsentOwnerPendingPdfConfirmations(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  return {readOnly:true,records:study1EConsentRegistry_().records
   .filter(x=>x.channel==='FORMAL_E1'&&x.state==='SIGNED'&&x.signedPdf)
@@ -1513,7 +1513,7 @@ function study1EConsentOwnerPendingPdfConfirmations(){
 }
 
 /** Only the one fixed document's signed-PDF bytes, after staff confirmation. */
-function study1EConsentSignedPdfCopy(token){
+function study1EConsentSignedPdfCopy(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
  if(!['CONFIRMED','WITHDRAWN'].includes(entry.state)||!entry.signedPdf)
   throw Error('未取得雙方確認的完整版簽署PDF，禁止以原PDF加HTML收據取代');

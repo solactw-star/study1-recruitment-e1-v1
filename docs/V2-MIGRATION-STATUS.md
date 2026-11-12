@@ -140,3 +140,12 @@
 - SECURITY: `OPEN=false`、`CONSENT_READY=false`、`MYSELF`、`USER_DEPLOYING`；不寄送 OTP、不建立申請、不預約、不簽署 PDF、不修改原 GAS、正式 Sheets、REC；E2 維持關閉。
 - WRITE_OWNER: V2 GitHub main（僅網站首頁、FORMAL 頁與關閉檢查測試、本進度檔）。`MAIN_SYNC_VERIFIED` 由此次 commit SHA、檔案差異與回讀確認；`GAS_SOURCE_SYNC_NEW_CODE=false`、`NEW_VERSION_DEPLOYED=false`、`UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 - NEXT_ACTION: 不再追逐冗長部署核驗；優先完成 V2 E1 五項 MVP 必要流程，待獲獨立部署授權後以最小安全同步／版本更新及真實頁面 smoke 確認，仍不開放真人收件。
+
+## 2026-11-12｜V2 登入 Google 帳號公開唯讀版程式準備（尚未部署）
+
+- TASK_DOMAIN=`Study1_V2_LOGIN_ONLY_PUBLIC_BROWSE`；PRE_MAIN_SHA=`2640405a1868998a35a550b289d576417a4ae88d`。使用者核准 `ANYONE`（非匿名）、`USER_DEPLOYING`，保留既有私人 V1 `MYSELF`、原 GAS 與正式 Sheets 不變。
+- V2 `gas/appsscript.json` 設為登入後公開；`Website.js` 以伺服器端直接阻擋 `admin/team/preview/demo` 路由及私人 RPC；其他 GAS JS 對外函式全部加上公開唯讀拒絕入口；E1 Readiness 固定 `ready=false`；不寄信、不儲存真人資料、不預約、不讀取/簽署 PDF。
+- V2 HEAD-only 安全守門新增 `ANYONE` 模式的 RPC 逐函式保護核對；新增 `tests/study1-v2-public-readonly.test.cjs` 與純離線 GitHub CI。正式主規格增量更新原 `docs/study1-system-spec.md` §70-S.34。
+- 下一步：核對 V2 main CI，使用原 V2 HEAD-only 安全來源備份/同步，再建立新版本化登入後公開部署。若無適用工具或安全回讀，`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`，不可聲稱公開已完成。
+- 最小 UI smoke：非 OWNER 已登入 Google 帳號能顯示正確招募首頁，FORMAL 頁關閉報名，後台及私人 RPC 被拒絕。未驗收 `PUBLIC_UI_VERIFIED=false`。
+- 未修改 V2 私人版本 1、原 GAS／原網站、正式 Sheets、REC 或真人研究資料。維持 `OPEN=false`、`CONSENT_READY=false`、E2 關閉、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。

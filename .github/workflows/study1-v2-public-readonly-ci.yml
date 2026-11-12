@@ -1,0 +1,31 @@
+name: Study1 V2 Google-login-only public browse safety (CI, no deploy)
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gas/**'
+      - 'scripts/study1-v2-gas-head-only.cjs'
+      - 'tests/closed.test.cjs'
+      - 'tests/study1-v2-public-readonly.test.cjs'
+      - '.github/workflows/study1-v2-public-readonly-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Offline syntax and deny-all-public-RPC checks
+        env:
+          STUDY1_V2_GAS_FIXTURE_DIR: gas
+        run: |
+          for f in gas/*.js; do node --check "$f"; done
+          node --check scripts/study1-v2-gas-head-only.cjs
+          node --test tests/study1-v2-public-readonly.test.cjs tests/closed.test.cjs tests/study1-v2-gas-head-only.test.cjs

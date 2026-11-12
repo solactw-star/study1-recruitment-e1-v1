@@ -101,7 +101,7 @@ function study1FormalRowsFor_(ctx){
   .map(x=>({reservationId:x[0],slotId:x[2],status:x[3],
    holdUntilUtc:x[4],createdAtUtc:x[6]}));
 }
-function study1FormalV05Slots(emailProof){
+function study1FormalV05Slots(emailProof){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1FormalWithLock_(emailProof,ctx=>{
   // Missing/invalid registry is NOT an empty calendar: fail closed.
   const p=PropertiesService.getScriptProperties();
@@ -127,7 +127,7 @@ function study1FormalV05Slots(emailProof){
    selfReportedEligible:true,emailVerified:true};
  });
 }
-function study1FormalQuoteHold(input){
+function study1FormalQuoteHold(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,requestId,slotId')
   throw Error('V05_QUOTE_REQUEST_INVALID');
@@ -157,7 +157,7 @@ function study1FormalQuoteHold(input){
   return {allowed:true,quote:q};
  });
 }
-function study1FormalHoldSlot(input){
+function study1FormalHoldSlot(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,quote')
   throw Error('V05_HOLD_REQUEST_INVALID');
@@ -259,7 +259,7 @@ function study1FormalAfterMutation_(original,expected){
  }
  return updated;
 }
-function study1FormalStatus(emailProof){
+function study1FormalStatus(emailProof){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1FormalWithLock_(emailProof,ctx=>({
   experiment:'E1',asOfUtc:ctx.nowUtc,reservations:study1FormalRowsFor_(ctx)
  }));
@@ -270,7 +270,7 @@ function study1FormalWaitlistGate_(){
     .getProperty('STUDY1_E1_WAITLIST_POLICY_REVIEWED')!=='true')
   throw Error('E1_WAITLIST_POLICY_NOT_READY');
 }
-function study1FormalWaitlistJoin(input){
+function study1FormalWaitlistJoin(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,requestId,slotId')
   throw Error('V08_WAITLIST_REQUEST_INVALID');
@@ -309,7 +309,7 @@ function study1FormalWaitlistJoin(input){
    position:queue.length+1,reason:'CREATED'};
  });
 }
-function study1FormalWaitlistClaim(input){
+function study1FormalWaitlistClaim(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,requestId,reservationId')
   throw Error('V08_WAITLIST_CLAIM_INVALID');
@@ -341,7 +341,7 @@ function study1FormalWaitlistClaim(input){
    slotId:r[2],holdUntilUtc:after[4]};
  });
 }
-function study1FormalCancel(input){
+function study1FormalCancel(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,requestId,reservationId')
   throw Error('V08_CANCEL_REQUEST_INVALID');
@@ -362,7 +362,7 @@ function study1FormalCancel(input){
    status:'CANCELLED'};
  });
 }
-function study1FormalMove(input){
+function study1FormalMove(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!==
     'emailProof,newSlotId,requestId,reservationId')
@@ -514,7 +514,7 @@ function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken){
  * and no claim of booked seating based solely on a CONFIRMED consent event.
  * Uses the ORIGINAL doubly-read Reservations snapshot and existing validator.
  */
-function study1OwnerE1ConsentBookingAudit(){
+function study1OwnerE1ConsentBookingAudit(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const lock=LockService.getScriptLock();
  if(!lock||typeof lock.tryLock!=='function'||lock.tryLock(10000)!==true)

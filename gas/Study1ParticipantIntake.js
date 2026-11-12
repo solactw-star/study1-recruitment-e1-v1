@@ -444,6 +444,8 @@ function study1ParticipantEmailStatus_(untrusted){
  * Existing Website.js CLOSED endpoints are preserved and unchanged.
  */
 function study1ParticipantReadiness(){
+ if(typeof study1V2PublicRpcDeny_==='function')return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};
+
  try{
   study1ParticipantGate_();
   const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
@@ -460,16 +462,16 @@ function study1ParticipantReadiness(){
   return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};
  }
 }
-function study1ParticipantBegin(request){
+function study1ParticipantBegin(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantBegin_(request);
 }
-function study1ParticipantSendOtp(request){
+function study1ParticipantSendOtp(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantOtpSend_(request);
 }
-function study1ParticipantVerifyOtp(request){
+function study1ParticipantVerifyOtp(request){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantOtpVerify_(request);
 }
-function study1ParticipantEmailStatus(proof){
+function study1ParticipantEmailStatus(proof){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  return study1ParticipantEmailStatus_(proof);
 }
 

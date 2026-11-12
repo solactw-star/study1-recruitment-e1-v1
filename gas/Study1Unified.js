@@ -600,7 +600,7 @@ function study1B01LayoutView_(state,deduplicated){
   deduplicated:deduplicated===true};
 }
 /** GET under original GAS OWNER identity, CLOSED flags and ScriptLock. */
-function study1UnifiedB01LayoutGet(){
+function study1UnifiedB01LayoutGet(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedRoleAuthorise_('OWNER','SYNTHETIC_READ');
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(8000))throw Error('B01偏好讀取鎖定中');
@@ -615,7 +615,7 @@ function study1UnifiedB01LayoutGet(){
  }finally{lock.releaseLock();}
 }
 /** SAVE requires an explicit expectedRevision and a single request identity. */
-function study1UnifiedB01LayoutSave(command){
+function study1UnifiedB01LayoutSave(command){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedRoleAuthorise_('OWNER','SYNTHETIC_WRITE');
  if(!command||typeof command!=='object'||Array.isArray(command)||
   Object.keys(command).sort().join(',')!=='expectedRevision,hidden,order,requestId'||
@@ -669,7 +669,7 @@ function study1UnifiedB01LayoutSave(command){
 }
 
 /* The only B06 entrypoint; available to the SAME authorized GAS owner only. */
-function study1UnifiedB06Command(command){
+function study1UnifiedB06Command(command){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedAssertOwner_();
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(8000))throw Error('其他研究管理操作進行中，請重新載入');
@@ -959,7 +959,7 @@ function study1B12AuditPage_(fixture,b06,query){
    selected[selected.length-1].id:null};
 }
 /* The only B12 read endpoint is the SAME private original GAS site. */
-function study1UnifiedB12AuditPage(query){
+function study1UnifiedB12AuditPage(query){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedRoleAuthorise_('OWNER','SYNTHETIC_READ');
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(8000))throw Error('B12稽核讀取鎖定中');
@@ -2371,7 +2371,7 @@ function study1UnifiedTransition_(s,cmd,now,outerLock){
  * It never reads existing fixtures, REC, Sheets, real email or signatures.
  * PASS is not research approval or live participant acceptance.
  */
-function study1UnifiedPreviewSelfTest(){
+function study1UnifiedPreviewSelfTest(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedAssertOwner_();
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(8000))throw Error('整站記憶體驗收暫時鎖定');
@@ -2444,14 +2444,14 @@ function study1UnifiedPreviewSelfTest(){
 }
 
 /** Single future site workflow, currently only reachable to the 828 owner in TEST mode. */
-function study1UnifiedPreviewGet(){
+function study1UnifiedPreviewGet(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedAssertOwner_();
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(8000))throw Error('測試流程資料暫時鎖定');
  try{study1SandboxBookingFlags_();return study1UnifiedView_(study1UnifiedRead_());}
  finally{lock.releaseLock();}
 }
-function study1UnifiedPreviewCommand(command){
+function study1UnifiedPreviewCommand(command){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1UnifiedAssertOwner_();
  const c=study1UnifiedRequireCommand_(command);
  const lock=LockService.getScriptLock();

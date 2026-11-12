@@ -1627,3 +1627,11 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 **OWNER 狀態分流**：同意紀錄 `CONFIRMED` 只代表完整 PDF／事件證據已存，**不能代表**原 `Reservations` 已獨立確認；後台新增 OWNER 專用唯讀核對原 `Slots`／`Reservations`，沿用既有 read-only double snapshot + schema/status驗證、ScriptLock 和權限，按同意紀錄修訂版回傳 E1 各筆 `CONFIRMED/HELD/EXPIRED/CANCELLED/UNKNOWN`。只有來源同一申請者、同一 slot、唯一 reservation、有效 CONFIRMED timestamp 才顯示真正成立。若 GET 失敗／原來源矛盾／版本不同，顯示「預約未核實」，不得以已簽 PDF 推定成立。本人簽署後的完整 PDF 只能 OWNER 在通過既有 PDF 事件、私人 ACL、原 SHA 查核後下載；不顯示原 Drive fileId/URL；撤回紀錄需依既有處理流程，不能刪除歷史證據。
 
 **營運控制**：原舊邀請／研究人員逐筆說明／第二簽介面保留在程式供歷史相容，但不在 E1 正式工作區顯示；不得由此開啟 E2、憑證核身、Demo 或正式收件。V2 同意索引仍需獨立 OWNER 核定遷移，未授權時關閉。本節只授權 PR 程式與測試，不能因 CI PASS 宣稱 GAS、REC、PI 核定時段或公開 E1 真 UI 已通過。
+
+### 70-S.34｜2026-11-12 V2 公開登入後唯讀閱覽（最新明確授權）
+
+- 使用者正式授權新 V2 GAS Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f` 的登入後唯讀公開版本：`webapp.access=ANYONE`、`executeAs=USER_DEPLOYING`，不是匿名開放，也不啟用真人報名。
+- 公開頁只可顯示 Study1 招募資訊及 E1 FORMAL 報名尚未開放提示。全體公開訪客及 OWNER 均不能在**公開版本**執行非敏感查詢以外的 RPC；管理、正式資料、Email OTP、時段、PDF、簽名及所有其他 RPC 伺服器端一律阻擋，`admin/team/preview/demo` 直接拒絕；私人 V1 的 OWNER 管理部署保持原狀。
+- 發布前必須先跑 V2 GitHub 公開安全 CI，確認全部對外 RPC 已封鎖、E1 Readiness 強制拒收，再依原 V2 Script ID 審核來源、備份、競寫、HEAD 同步與回讀，建立新不可變公開版。任何尚未完成的階段不得宣稱已部署。
+- 最小人工 UI 驗收限三項：一般已登入 Google 帳號開啟正確 Study1 首頁、E1 報名顯示關閉、公開訪客被後台路由及私人 RPC 拒絕。E2 未開放；`OPEN=false`、`CONSENT_READY=false`、原 GAS、正式 Sheets、REC 及真人研究資料均不變。
+- 公開唯讀不是正式真人營運核准，`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，未核實 REC/PI/安全及真人 UI 前不得開放 E1 收件。

@@ -60,7 +60,7 @@ test('GAS manifest restricts access to the deploying account',()=>{
   const clasp=JSON.parse(fs.readFileSync(path.join(root,'.clasp.json'),'utf8'));
   assert.equal(manifest.timeZone,'Asia/Taipei');
   assert.equal(manifest.runtimeVersion,'V8');
-  assert.equal(manifest.webapp.access,'MYSELF');
+  assert.equal(manifest.webapp.access,'ANYONE');
   assert.equal(manifest.webapp.executeAs,'USER_DEPLOYING');
   assert.equal(clasp.scriptId,'1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f');
 });

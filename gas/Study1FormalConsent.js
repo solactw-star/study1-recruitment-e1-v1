@@ -100,7 +100,7 @@ function study1FormalConsentDocument_(ctx,reservationId){
  * original reservation ID. Everything else is rederived from original rows.
  * This creates a one-use HMAC-bound invitation, not consent or acceptance.
  */
-function study1FormalConsentBegin(input){
+function study1FormalConsentBegin(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
     Object.keys(input).sort().join(',')!=='emailProof,reservationId')
   throw Error('FORMAL_CONSENT_REQUEST_INVALID');
@@ -150,7 +150,7 @@ function study1FormalConsentBegin(input){
 }
 
 /** Token-bound full ORIGINAL PDF, separate from old CLOSED public document RPC. */
-function study1FormalConsentOriginalPdf(token){
+function study1FormalConsentOriginalPdf(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1FormalConsentGate_();
  const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
  if(entry.channel!=='FORMAL_E1'||entry.experiment!=='E1'||!entry.binding||
@@ -190,7 +190,7 @@ function study1FormalConsentOriginalPdf(token){
 /** Server-side status exposes no name, email, individual screening answers,
  * raw signature or document bytes; participant needs possession of the token.
  */
-function study1FormalConsentStatus(token){
+function study1FormalConsentStatus(token){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  const entry=study1EConsentEntry_(token,study1EConsentRegistry_());
  // A confirmed participant must still obtain their existing signed copy or
  // submit withdrawal if intake is closed later. Bearer TTL and private SHA

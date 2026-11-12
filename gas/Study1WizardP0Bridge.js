@@ -504,7 +504,7 @@ function study1FormalPublicSlotReady_(heldLock){
  * review real rows and their valid REC/protocol scope before provisioning.
  * A browser's claim that a slot is E1 is never used as authority.
  */
-function study1OwnerE1SlotAudit(){
+function study1OwnerE1SlotAudit(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const lock=LockService.getScriptLock();
  if(!lock||typeof lock.tryLock!=='function'||lock.tryLock(5000)!==true)
@@ -593,7 +593,7 @@ function study1OwnerE1SlotAudit(){
  * written to Slots, Properties or registry. Client classification is NEVER
  * treated as approval, even though the candidate is HMAC-addressed.
  */
-function study1OwnerE1SlotRegistryProposal(input){
+function study1OwnerE1SlotRegistryProposal(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
     Object.keys(input).sort().join(',')!=='decisions'||

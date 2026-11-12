@@ -41,14 +41,41 @@ function canonical(files) {
  return result.map(x=>JSON.stringify(x)).join('\n');
 }
 const digest = files => sha(canonical(files));
+/** Reject public source releases unless every callable private RPC is deny-gated. */
+function publicRpcSurface(files){
+ const w=files.find(f=>f.name==='Website'&&f.type==='SERVER_JS')?.source||'';
+ require_(w.includes("function study1V2PublicRpcDeny_(){throw new Error('STUDY1_V2_PUBLIC_READ_ONLY');}"),
+  'missing public RPC deny helper');
+ require_(w.includes("['admin','team','preview','demo'].includes(e.parameter.view)"),
+  'public admin routes exposed');
+ const safe=new Set(['doGet','getPublicConfig','study1ParticipantReadiness','requestOtp',
+  'verifyOtp','holdSlot','cancelHold','submitConsent','listSlots']);
+ const regex=/\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g;
+ const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
+ let total=0;
+ for(const f of files.filter(x=>x.type==='SERVER_JS'))for(const m of f.source.matchAll(regex)){
+  if(m[1].endsWith('_')||safe.has(m[1]))continue;
+  require_(f.source.slice(m.index+m[0].length).startsWith(gate),
+   'unguarded public RPC '+f.name+'.'+m[1]);
+  total++;
+ }
+ require_(total>=35,'exposed RPC inventory unexpectedly reduced');
+ const intake=files.find(f=>f.name==='Study1ParticipantIntake'&&f.type==='SERVER_JS')?.source||'';
+ require_(intake.includes("if(typeof study1V2PublicRpcDeny_==='function')return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};"),
+  'participant readiness must refuse new intake');
+ require_(w.includes('function getPublicConfig(){return {open:false,consentReady:false'),
+  'public website intake not closed');
+ return total;
+}
 function closedManifest(files){
  const m=files.find(f=>f.name==='appsscript'&&f.type==='JSON');
  require_(m,'missing Apps Script manifest');
  let obj;
  try{obj=JSON.parse(m.source);}catch{fail('manifest cannot parse');}
  require_(obj.timeZone==='Asia/Taipei' && obj.runtimeVersion==='V8' &&
-  obj.webapp?.access==='MYSELF' && obj.webapp?.executeAs==='USER_DEPLOYING',
-  'V2 manifest must remain MYSELF / USER_DEPLOYING');
+  ['MYSELF','ANYONE'].includes(obj.webapp?.access) && obj.webapp?.executeAs==='USER_DEPLOYING',
+  'V2 manifest must have MYSELF or login-only ANYONE / USER_DEPLOYING');
+ if(obj.webapp.access==='ANYONE')publicRpcSurface(files);
  return obj;
 }
 function closedWebsite(files){
@@ -229,6 +256,6 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,
+module.exports={REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
  runnerPaths,aad,audit,prepare,apply};
