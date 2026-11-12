@@ -393,6 +393,15 @@ test('§70-S.23 OWNER confirmed dual-PDF transitions only original HELD to CONFI
  assert.equal(done.reason,'CONFIRMED_AFTER_DUAL_PDF');
  const row=h.tables.Reservations.rows[0];
  assert.equal(row[3],'CONFIRMED');assert.equal(row[7],row[9]);
+ // A signed PDF alone was insufficient: the independently confirmed
+ // ORIGINAL Reservations row must be visible through the read-only recovery.
+ const writesAfterConfirmation=h.mutations.length;
+ const recovered=h.ctx.study1FormalHoldOutcome({emailProof:proof,slotId:h.S1,
+  requestId:'REQ_HOLD_1234567890'});
+ assert.equal(recovered.status,'CONFIRMED');
+ assert.equal(recovered.reservationId,held.reservationId);
+ assert.equal(h.ctx.study1FormalStatus(proof).reservations[0].status,'CONFIRMED');
+ assert.equal(h.mutations.length,writesAfterConfirmation,'read-only recovery cannot mutate confirmation');
  assert.ok(c.pdfChecks>=2);assert.equal(c.bindingChecks,1);
  assert.equal(h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length,before+1);
  const replay=h.ctx.study1FormalFinalizeSignedE1Booking_(c.consentId);
