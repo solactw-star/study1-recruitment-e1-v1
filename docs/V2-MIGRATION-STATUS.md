@@ -166,3 +166,13 @@
 - OFFLINE_REGRESSION: 更新既有 `tests/study1-formal-browser-synthetic-e2e.test.cjs`，新增關閉訊息／讀取失敗無 PII／無 CAPTCHA 負測；沿用原 `.github/workflows/study1-v2-public-readonly-ci.yml` 自動納入測試，不建立平行正式網站或替代原 V05/V08 核心。
 - USER_STATED_BLOCKERS: `GOOGLE_ACCOUNT_AUTHORIZATION_BLOCKED=true`、`PUBLIC_UI_VERIFIED=false`。不以 CI 代表真實瀏覽器驗收；本輪 `GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 - NEXT_ACTION: 繼續從 E1 五項 MVP 的必要已存在程式檔修正、測試與 GitHub 增量回讀；公開唯讀安全邊界、原 V2 私人版本 1、原 GAS、正式 Sheets、REC 均不更動；待帳號權限可用再一次完成最小必要部署／三項 smoke。
+
+### 2026-11-12 21:20（台灣）｜無帳號授權狀態下繼續 FORMAL 網站建置，27 項離線驗收通過
+
+- TASK_DOMAIN=`Study1_V2_E1_WEB_CONTINUATION_NO_OAUTH`；LAST_VERIFIED_STEP=FORMAL_CLOSED_BANNER_AND_OFFLINE_AUTH_FAILURE_REGRESSION；LAST_CODE_MAIN_SHA=`168eb53fd018943f54220b1dedce18f7b235df6f`。
+- 受影響 V2 程式：原 `gas/Study1Visitor.html`。FORMAL 頁標題改顯示「報名資訊（目前不收件）」；首次讀取 readiness 期間顯示「未核實前不接受正式申請」。明確 `ready=false`、GAS RPC 例外、或完全沒有 Google RPC 時，維持 E1／E2 按鈕、姓名／Email／電話及資格選項不可使用；同步顯示不蒐集資料、不寄驗證碼、不預約的提示，避免只顯示模糊連線中或錯誤成功訊息。
+- 受影響既有測試：`tests/study1-formal-browser-synthetic-e2e.test.cjs`，新增 / 擴充失敗模式，並由既有 `.github/workflows/study1-v2-public-readonly-ci.yml` 在 `gas/` 程式變動時自動執行；不重做已驗證 V05/V08 核心、不中途啟用真人流程。
+- CI_VERIFIED： [GitHub Actions Run #43226367365](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43226367365)，source SHA `168eb53fd018943f54220b1dedce18f7b235df6f`，Job `public-safety` ID `131210472300`；實際 Job 日誌 `27 PASS / 0 FAIL / 0 SKIP`（含無 Google RPC、readiness 失敗與 E1 關閉 UI 回歸）。
+- AUTH_BLOCKER：使用者回報目前無法完成 Google 帳號授權。僅阻礙遠端私人／公開網站實際檢查；不阻擋 V2 GitHub 可離線建置與測試。不得將上述合成驗證標為瀏覽器 UAT 成功。
+- SYNC_STATUS：程式先前已提交 main；本輪更新同一進度主檔並回讀 commit／變更清單。不執行 GAS HEAD PUT、不建立或更新版本／部署、不修改私人版本 1／原 GAS／正式 Sheets／REC；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+- NEXT_ACTION：接續 E1 五項 MVP 中尚需程式完善的報名、OTP、時段預約、研究者預簽 PDF 與 OWNER 後台、Email 通知，以現有正式主規格為準做離線增量實作與必要測試，不以 Google 授權為工程工作前置阻塞；正式收件仍關閉。
