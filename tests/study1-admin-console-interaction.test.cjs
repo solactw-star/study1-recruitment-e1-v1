@@ -165,16 +165,16 @@ function routeHarness(active='solac.tw@gmail.com',effective='solac.tw@gmail.com'
  vm.runInContext(source,h.ctx,{timeout:1000});
  return {...h,htmlCalls};
 }
-test('Actual Website doGet admin route checks identity before rendering AdminConsole',()=>{
+test('V2 public deployment denies admin route EVEN to OWNER before any AdminConsole HTML is served',()=>{
  const h=routeHarness();
- const rendered=h.ctx.doGet({parameter:{view:'admin'}});
- assert.equal(rendered.name,'AdminConsole');
- assert.deepEqual(h.htmlCalls,['AdminConsole']);
+ assert.throws(()=>h.ctx.doGet({parameter:{view:'admin'}}),
+  /STUDY1_V2_PUBLIC_READ_ONLY/);
+ assert.deepEqual(h.htmlCalls,[]);
  assert.equal(h.props.size,0);
 });
-test('Non-owner execution context stops admin route before HTML is served; public route stays CLOSED',()=>{
+test('V2 public deployment rejects guest admin route and leaves public homepage closed',()=>{
  const h=routeHarness('','not-the-owner@example.com');
- assert.throws(()=>h.ctx.doGet({parameter:{view:'admin'}}),/拒絕存取/);
+ assert.throws(()=>h.ctx.doGet({parameter:{view:'admin'}}),/STUDY1_V2_PUBLIC_READ_ONLY/);
  assert.deepEqual(h.htmlCalls,[]);
  const publicPage=h.ctx.doGet({parameter:{view:'home'}});
  assert.equal(publicPage.name,'Index');
@@ -185,7 +185,7 @@ test('Non-owner execution context stops admin route before HTML is served; publi
 
 test('Redacted active email cannot open admin HTML or call its RPCs even if deployer is owner',()=>{
  const h=routeHarness('', 'solac.tw@gmail.com');
- assert.throws(()=>h.ctx.doGet({parameter:{view:'admin'}}),/拒絕存取/);
+ assert.throws(()=>h.ctx.doGet({parameter:{view:'admin'}}),/STUDY1_V2_PUBLIC_READ_ONLY/);
  assert.deepEqual(h.htmlCalls,[]);
  const ui=client(h);
  assert.equal(ui.el('save').disabled,true);
@@ -659,13 +659,15 @@ test('Malformed GAS import validation success reply never applies an unverified 
  assert.equal(ui.el('save').disabled,false,'A verified config read restores the UI');
 });
 
-test('Owner-only unified participant preview HTML route preserves CLOSED public routing',()=>{
+test('V2 public deployment denies owner and guest preview routes without exposing private HTML',()=>{
  const s=routeHarness();
- assert.equal(s.ctx.doGet({parameter:{view:'preview'}}).name,'Study1Unified');
- assert.deepEqual(s.htmlCalls,['Study1Unified']);
+ assert.throws(()=>s.ctx.doGet({parameter:{view:'preview'}}),
+  /STUDY1_V2_PUBLIC_READ_ONLY/);
+ assert.deepEqual(s.htmlCalls,[]);
  assert.equal(s.props.size,0);
  const guest=routeHarness('','solac.tw@gmail.com');
- assert.throws(()=>guest.ctx.doGet({parameter:{view:'preview'}}),/拒絕存取/);
+ assert.throws(()=>guest.ctx.doGet({parameter:{view:'preview'}}),
+  /STUDY1_V2_PUBLIC_READ_ONLY/);
  assert.deepEqual(guest.htmlCalls,[]);
  assert.equal(guest.ctx.doGet({parameter:{view:'home'}}).name,'Index');
 });
