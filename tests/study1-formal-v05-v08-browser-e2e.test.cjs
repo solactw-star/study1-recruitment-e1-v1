@@ -6,7 +6,7 @@ const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses
 const end=html.indexOf("\n})();\n\n(function(){",start);
 assert.ok(start>0&&end>start,'formal controller must remain inside original IIFE');
 const formal=html.slice(start,end+5);
-function simulate(available,withConsent=false,researcherPresigned=false){
+function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none'){
  const nodes=new Map(),calls=[],errors=[],reservations=[],uuid=()=>crypto.randomBytes(8).toString('hex');
  const now=Date.now(),S1='SLOT_E1_BROWSER_A_12345678',S2='SLOT_E1_BROWSER_B_12345678';
  const base=[{slotId:S1,startAtUtc:new Date(now+86400000).toISOString(),endAtUtc:new Date(now+90000000).toISOString(),capacity:1,remaining:1,waitlistCount:0,bookable:true},
@@ -59,17 +59,26 @@ function simulate(available,withConsent=false,researcherPresigned=false){
  const server={
   study1ParticipantReadiness:()=>({ready:true,experiment:'E1',siteKey:'OFFLINE_TEST_SITEKEY_1234567890'}),
   study1ParticipantBegin:()=>({accepted:true,applicantId:eProof.applicantId,screeningId:eProof.screeningId,phase:'PENDING_EMAIL'}),
-  study1ParticipantSendOtp:()=>({sent:true,challengeId:eProof.challengeId}),
+  study1ParticipantSendOtp:()=>({sent:true,reason:'ISSUED',challengeId:eProof.challengeId}),
   study1ParticipantVerifyOtp:()=>({verified:true,emailProof:eProof}),
   study1ParticipantEmailStatus:()=>({emailVerified:true,eligibilitySource:'PARTICIPANT_SELF_REPORT',applicationState:'SELF_REPORTED_ELIGIBLE_EMAIL_VERIFIED'}),
   study1FormalV05Slots:()=>({experiment:'E1',slots}),
   study1FormalQuoteHold:input=>({allowed:true,quote:{slotId:input.slotId,requestId:input.requestId,signature:'c'.repeat(64)}}),
   study1FormalHoldSlot:input=>{
-   const r={reservationId:'RSV_SYNTH_'+uuid(),slotId:input.quote.slotId,status:'HELD',
+   if(holdMode==='before_commit')throw Error('OFFLINE_HOLD_UNKNOWN');
+    const r={reservationId:'RSV_SYNTH_'+uuid(),slotId:input.quote.slotId,
+     requestId:input.quote.requestId,status:'HELD',
     holdUntilUtc:new Date(now+600000).toISOString()};
-   reservations.push(r);return {held:true,reservationId:r.reservationId};
+   reservations.push(r);
+    if(holdMode==='after_commit')throw Error('OFFLINE_HOLD_RESPONSE_LOST');
+    return {held:true,reservationId:r.reservationId};
   },
   study1FormalStatus:()=>({experiment:'E1',reservations:reservations.map(x=>({...x}))}),
+  study1FormalHoldOutcome:input=>{
+   const rows=reservations.filter(x=>x.requestId===input.requestId);
+   if(rows.length!==1)return {resolved:false,status:'UNKNOWN'};
+   return {resolved:true,status:rows[0].status,reservationId:rows[0].reservationId,slotId:rows[0].slotId};
+  },
   study1FormalWaitlistJoin:input=>{
    const r={reservationId:'RSV_SYNTH_'+uuid(),slotId:input.slotId,status:'WAITLISTED',holdUntilUtc:''};
    reservations.push(r);return {joined:true,reservationId:r.reservationId};
@@ -329,4 +338,23 @@ test('§70-S.24 MVP: researcher presigns source before upload; participant signs
  assert.ok(h.calls.some(c=>c.name==='study1EConsentSignPdf'));
  assert.equal(h.calls.some(c=>c.name==='study1EConsentConfirmPdf'),false);
  assert.deepEqual(h.errors,[]);
+});
+
+test('FORMAL lost HOLD response after commit: one original GET, no duplicate hold',()=>{
+ const h=simulate(undefined,false,false,'after_commit');h.enter();h.click('hold');
+ assert.equal(h.reservations.length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldOutcome').length,1);
+ assert.equal(h.reservations[0].status,'HELD');
+ assert.equal(h.node('step-confirm').hidden,false);
+});
+test('FORMAL unknown missing HOLD: fail-closed and cannot submit another booking',()=>{
+ const h=simulate(undefined,false,false,'before_commit');h.enter();h.click('hold');
+ assert.equal(h.reservations.length,0);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldOutcome').length,1);
+ assert.equal(h.node('hold').disabled,true);
+ assert.equal(h.click('hold'),false);
+ assert.equal(h.node('step-confirm').hidden,true);
+ assert.match(h.node('status').textContent,/UNKNOWN/);
 });

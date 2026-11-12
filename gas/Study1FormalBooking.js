@@ -96,9 +96,15 @@ function study1FormalRemaining_(ctx,row){
  return row[3]-bookingHoldCount_(ctx.snapshot.reservations.rows,
   row[0],study1BindingUtc_(ctx.nowUtc));
 }
+/** Never rewrite the original HELD audit row for temporal expiry. */
+function study1FormalEffectiveStatus_(row,asOfUtc){
+ return row[3]==='HELD'&&study1BindingUtc_(row[4])<=study1BindingUtc_(asOfUtc)?
+  'EXPIRED':row[3];
+}
 function study1FormalRowsFor_(ctx){
  return ctx.snapshot.reservations.rows.filter(x=>x[1]===ctx.identity.applicantId)
-  .map(x=>({reservationId:x[0],slotId:x[2],status:x[3],
+  .map(x=>({reservationId:x[0],slotId:x[2],
+   status:study1FormalEffectiveStatus_(x,ctx.nowUtc),
    holdUntilUtc:x[4],createdAtUtc:x[6]}));
 }
 function study1FormalV05Slots(emailProof){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
@@ -263,6 +269,29 @@ function study1FormalStatus(emailProof){if(typeof study1V2PublicRpcDeny_==='func
  return study1FormalWithLock_(emailProof,ctx=>({
   experiment:'E1',asOfUtc:ctx.nowUtc,reservations:study1FormalRowsFor_(ctx)
  }));
+}
+/** One read-only causality check for a missing HOLD RPC response.
+ * An absent row is UNKNOWN, NEVER a reason to replay the original write.
+ */
+function study1FormalHoldOutcome(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ if(!input||typeof input!=='object'||Array.isArray(input)||
+    Object.keys(input).sort().join(',')!=='emailProof,requestId,slotId')
+  throw Error('V05_HOLD_OUTCOME_REQUEST_INVALID');
+ study1FormalKey_(input.requestId);study1BindingId_(input.slotId);
+ return study1FormalWithLock_(input.emailProof,ctx=>{
+  const rows=ctx.snapshot.reservations.rows.filter(x=>x[5]===input.requestId);
+  if(!rows.length)return {resolved:false,status:'UNKNOWN',reason:'NOT_FOUND_IN_SNAPSHOT',
+   asOfUtc:ctx.nowUtc};
+  if(rows.length!==1)throw Error('V05_HOLD_OUTCOME_DUPLICATE_KEY');
+  const r=rows[0];
+  if(r[1]!==ctx.identity.applicantId||r[2]!==input.slotId)
+   throw Error('V05_HOLD_OUTCOME_BINDING_MISMATCH');
+  const status=study1FormalEffectiveStatus_(r,ctx.nowUtc);
+  if(!['HELD','EXPIRED','CONFIRMED','CANCELLED'].includes(status))
+   return {resolved:false,status:'UNKNOWN',reason:'NON_HOLD_STATUS',asOfUtc:ctx.nowUtc};
+  return {resolved:true,status,reservationId:r[0],slotId:r[2],
+   holdUntilUtc:r[4],asOfUtc:ctx.nowUtc};
+ });
 }
 function study1FormalWaitlistGate_(){
  study1FormalGate_();

@@ -227,3 +227,11 @@
 - ACTIVE_ENGINEERING：E1 五項MVP：報名/自陳/Email OTP、研究者預簽與本人最後簽PDF/副本、PI核定Slots/Reservations、Email結果通知outbox、OWNER必要後台；下一輪應接續預約狀態與PDF/OWNER整合。帳號授權與真實 UI 仍阻塞，**不阻擋新Repo離線程式建置**，不得以合成CI替代實機。
 - CURRENT_STATE：`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；`OPEN=false`、`CONSENT_READY=false`、私人 V1 不變；不寄真人Email、不收件、不更動原個資/營運 Sheets、REC 或原研究系統。
 - PROJECT_INSTRUCTION_UPDATE：已準備將原研究專案指令 V2.6 之§2.3、§3.3、§4.3–4.4、§5.1、§6、§7 以新 V2 唯一來源及本次決策取代；ChatGPT Project 設定中的指令需另由有設定權限者貼入／確認，不能以本 Repo 寫入冒稱該設定已同步。
+
+## 2026-11-12｜V2 E1 原 Slots／Reservations 讀取到期／UNKNOWN 因果回查
+
+- TASK_DOMAIN=`Study1_V2_E1_ORIGINAL_BOOKING_CLOSURE`；PRE_MAIN_SHA=`f91ac9dd80dfbbb58ae8accae621f898a87d85b7`；正式來源僅新 V2 GitHub 主規格 §70-S.19、23–24、33–35。舊 GitHub、PR #133、舊 GAS `LEGACY_FROZEN`，不得寫入。
+- 後端原 `gas/Study1FormalBooking.js`：以原有 ScriptLock 與原 Slots/Reservations 雙次唯讀快照，將已逾期的原 `HELD` 投影為 `EXPIRED`，**不改寫原十欄列與歷史**。新增私人 `study1FormalHoldOutcome` RPC，以本人 Email OTP、原 requestId 與 slotId 在原 Reservations 唯讀核對唯一 idempotency_key。無唯一紀錄只回 `UNKNOWN` 且不得重送，跨本人／場次即拒絕。公開 `ANYONE` 版本沿用伺服器端 RPC deny。
+- 前端原 `gas/Study1Visitor.html`：一筆真 HOLD 回應未知時，僅以相同 requestId 做一次唯讀查核；原有效 HELD 再核對本人狀態，不能宣稱 CONFIRMED；無原列或資料矛盾時鎖定再次提交，禁止自動重播。原額滿及 FIFO 能力仍以原伺服器核定 E1 來源處理，不創建假場次。
+- 原 `tests/study1-formal-v05-v08-original-booking.test.cjs` 與 `tests/study1-formal-v05-v08-browser-e2e.test.cjs` 新增零寫入到期、額滿阻擋、精確 requestId、丟失回應、UNKNOWN 不重送測試；納入既有 V2 CI，不取代原有測試。
+- 無遠端 GAS／Sheet／REC／信件或私人版本 1 操作。Google 授權仍阻礙真 UI；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。

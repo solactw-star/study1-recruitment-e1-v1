@@ -412,3 +412,40 @@ test('§70-S.23 no online signature can resurrect an expired HELD or stale origi
   /FORMAL_BOOKING_HELD_EXPIRED_OR_CHANGED/);
  assert.equal(h.tables.Reservations.rows[0][3],'HELD');
 });
+
+test('E1 read-only HELD expiry is derived without rewriting original Reservations',()=>{
+ const h=harness(),a=h.proof(h.person('A')),b=h.proof(h.person('B'));
+ const hold=h.holdSlot(a,h.S1,'REQ_HOLD_EXPIRY_123456789');
+ const original=h.tables.Reservations.rows[0].slice(),writes=h.mutations.length;
+ assert.equal(h.ctx.study1FormalStatus(a).reservations[0].status,'HELD');
+ assert.equal(h.ctx.study1FormalV05Slots(b).slots[0].remaining,0);
+ h.clock.now+=11*60000;
+ const result=h.ctx.study1FormalStatus(a);
+ assert.equal(result.reservations[0].status,'EXPIRED');
+ assert.equal(result.reservations[0].reservationId,hold.reservationId);
+ assert.deepEqual(h.tables.Reservations.rows[0],original);
+ assert.equal(h.mutations.length,writes);
+ assert.equal(h.ctx.study1FormalV05Slots(b).slots[0].remaining,1);
+});
+test('E1 original hold outcome is read-only, exact-key and bound to applicant and slot',()=>{
+ const h=harness(),a=h.proof(h.person('A')),b=h.proof(h.person('B')),key='REQ_HOLD_CAUSAL_123456789';
+ const absent=h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key});
+ assert.equal(absent.resolved,false);assert.equal(absent.status,'UNKNOWN');
+ const hold=h.holdSlot(a,h.S1,key),writes=h.mutations.length;
+ const r=h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key});
+ assert.equal(r.status,'HELD');assert.equal(r.reservationId,hold.reservationId);
+ assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:b,slotId:h.S1,requestId:key}),/BINDING_MISMATCH/);
+ assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S2,requestId:key}),/BINDING_MISMATCH/);
+ assert.equal(h.tables.Reservations.rows.length,1);assert.equal(h.mutations.length,writes);
+ h.clock.now+=11*60000;
+ assert.equal(h.ctx.study1FormalHoldOutcome({emailProof:a,slotId:h.S1,requestId:key}).status,'EXPIRED');
+});
+test('E1 no seat remains: original quote refuses without writing another reservation',()=>{
+ const h=harness(),a=h.proof(h.person('A')),b=h.proof(h.person('B'));
+ h.holdSlot(a,h.S1,'REQ_HOLD_FIRST_123456789');
+ const writes=h.mutations.length;
+ const q=h.ctx.study1FormalQuoteHold({emailProof:b,slotId:h.S1,requestId:'REQ_HOLD_SECOND_123456789'});
+ assert.equal(q.allowed,false);assert.equal(q.reason,'FULL_OR_WAITLIST');
+ assert.equal(h.ctx.study1FormalV05Slots(b).slots[0].remaining,0);
+ assert.equal(h.tables.Reservations.rows.length,1);assert.equal(h.mutations.length,writes);
+});
