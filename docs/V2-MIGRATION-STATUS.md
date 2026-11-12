@@ -97,3 +97,17 @@
 - SAFETY: V2 Script ID `1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f` 固定；先前核實 GAS HEAD SHA-256 `73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7` 的 32 檔配置、`MYSELF`／`USER_DEPLOYING`、收件關閉檢查不變。此輪只寫 V2 GitHub 程式／測試／本進度檔；不執行遠端 audit、deploy，不碰原 GAS／正式 Sheets，不開放真人收件。
 - NEXT_ACTION: 手動用**執行當下最新 main SHA** 觸發 `.github/workflows/study1-v2-private-deploy.yml` 的 `mode=audit`（另外兩欄留空），回讀真實遠端版本／部署、MYSELF、HEAD 32 檔 SHA 及 `V2_PRIVATE_INVENTORY_SHA256`；任何 503 重試耗盡或不安全 ACL 均保留阻塞，不能逕行 deploy。
 - SYNC_STATUS: `MAIN_SYNC_VERIFIED=true`（本檔寫回後以最新 main 回讀為準），`GET_RETRY_CI_VERIFIED=true`，`REMOTE_DEPLOYMENT_INVENTORY_VERIFIED=false`，`GAS_PRIVATE_DEPLOYED=false`，`UI_VERIFIED=false`，`FORMAL_READY=false`，`LIVE_INTAKE_ENABLED=false`。
+
+## 2026-11-12 18:48（Asia/Taipei）｜真實 PRIVATE audit 成功、孤立版本接續修復
+
+- TASK_DOMAIN: `Study1_E1_V2_PRIVATE_MYSELF_DEPLOY`
+- LATEST_REAL_AUDIT: [Run 43201314393](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43201314393), `workflow_dispatch`, `mode=audit`, GitHub HEAD `9d6bc139e47818f3fddc1e168f504b54bb57f0e9`, completed/success；三項回讀資料 HTTP 503 經 GET-only 有限重試成功，36/36 靜態與合成測試通過。
+- REMOTE_HEAD: 32 個 GAS 檔案；SHA-256 `73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7`，與既有已核對 GAS HEAD／V2 原始碼相符。Manifest `MYSELF`、`USER_DEPLOYING`、收件關閉；`V2_PRIVATE_AUDIT_NO_MUTATIONS=true`。
+- REMOTE_INVENTORY: 1 個不可變版本、1 個自動 HEAD 開發部署、0 個版本化部署；`V2_PRIVATE_INVENTORY_SHA256=63f34f5609ad81321debc352b62fa41e2a0bf3ef422dc58bab5d2cc9ccf94d06`。audit 沒有產生 Artifact（0），符合唯讀盤點預期。
+- EARLIER_DEPLOY_FAILURE: [Run 43182160131](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43182160131) 於 `version inventory did not gain exactly one immutable version` 阻擋在部署 POST 之前。後續 audit 顯示已有版本 1，與前次成功建立版本但立即 GET 清單尚未可見相符；**該版本的來源描述及完整內容仍必須在下一次 `deploy` 中獨立驗證，不得只憑版本號接續**。
+- REMEDIATION_CODE: 同原路徑 `scripts/study1-v2-private-deploy.cjs`，增加 5 輪上限的 GET-only 版本／部署回讀（不重試 POST）；僅能重用符合 `9d6bc139e47818f3fddc1e168f504b54bb57f0e9` 或當次主分支 SHA、來源 HEAD 標記與數字 Run ID 的**唯一未部署版本**，重用前透過 `getVersionContent` 驗證固定 32 檔 SHA、私人 ACL 與收件關閉；歧義或競寫 fail closed。新日誌不再輸出完整部署 ID。
+- REMEDIATION_TEST: `tests/study1-v2-private-deploy.test.cjs` 補強孤立版本恢復、讀回延遲、重複 POST 避免及多版本歧義。修正後 [CI Run 43203568042](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43203568042)，commit `7511a4ae2a526f84a2e55e49db07ad851bf5148e`，`40 PASS / 0 FAIL`。歷史兩次中間修補 CI 語法失敗已由此最新成功 Run 取代。
+- REPOSITORY_VISIBILITY_REVIEW: GitHub `get_repo` 回報 V2 `visibility=public`；與先前「私人 V2 副本」的目標不一致。GitHub `package.json.private=true` **不等於** GitHub Repository 私有；需由管理者於 Repository Settings 核對並調整 GitHub 可見性，另核查先前公開 Actions 日誌的部署識別資訊。未見證據可宣稱 OAuth 憑證外洩，不應作此推定。
+- STATUS: `V2_HEAD_SYNC_VERIFIED=true`（沿用且由當次真實 HEAD 核對支持）、`V2_REMOTE_INVENTORY_AUDIT_VERIFIED=true`（截至 Run 43201314393）、`PRIVATE_DEPLOY_CODE_CI_VERIFIED=true`（40/40）、`GAS_PRIVATE_DEPLOYED=false`、`UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+- NEXT_ACTION: 由 V2 管理者用當下最新 `main` SHA 再執行 `.github/workflows/study1-v2-private-deploy.yml` 的 `mode=audit`（其餘 deploy 專用欄位空白），取得**新**盤點指紋，逐項核對版本內容、ACL、現有部署數；再手動 `mode=deploy` 填新 SHA、核對過的盤點指紋、`I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY`。若 `V2_PRIVATE_REUSED_VERIFIED_ORPHAN_VERSION=true` 且 `V2_PRIVATE_DEPLOY_VERIFIED=true`，須獨立回讀並在 GAS UI 確認私人部署後，執行必要後台／報名頁實際 UAT。整段仍不開啟真人收件、不同步原 GAS 或正式 Sheets。
+- WRITE_OWNER: V2 GitHub；本次只修改 V2 專用部署程式、測試及 V2 進度主檔，無 GAS、Sheet 或 REC 修改。文件的正式 GitHub `main` SHA 以寫入後回讀為準。
