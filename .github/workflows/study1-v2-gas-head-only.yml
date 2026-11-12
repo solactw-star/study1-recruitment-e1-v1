@@ -1,0 +1,101 @@
+name: Study1 V2 GAS HEAD-only manual sync (NO DEPLOY)
+# Isolated V2 source-only workflow. Never auto-trigger or access old GAS/Sheets.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'audit (GET only) or apply (one V2 HEAD PUT, no deployment)'
+        required: true
+        type: choice
+        options: [audit, apply]
+        default: audit
+      reviewed_sha:
+        description: 'Exact 40-character latest V2 main commit SHA'
+        required: true
+        type: string
+      expected_remote_sha256:
+        description: 'Apply only: V2_AUDIT_REMOTE_SHA256 copied from an audit run'
+        required: false
+        type: string
+      confirmation:
+        description: 'Apply only: I_AUTHORIZE_STUDY1_V2_HEAD_ONLY'
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: study1-v2-gas-head-only
+  cancel-in-progress: false
+jobs:
+  head-only:
+    if: ${{ github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: V2 isolated safety tests and local closed-site smoke
+        run: |
+          node --check scripts/study1-v2-gas-head-only.cjs
+          node --test tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
+      - name: Reject stale main, wrong repository, and missing explicit inputs
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          SYNC_MODE: ${{ inputs.mode }}
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REPOSITORY" = solactw-star/study1-recruitment-e1-v1
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          if [ "$SYNC_MODE" = apply ]; then
+            test "$CONFIRMATION" = I_AUTHORIZE_STUDY1_V2_HEAD_ONLY
+            [[ "$EXPECTED_REMOTE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          else
+            test "$SYNC_MODE" = audit
+          fi
+      - name: V2 HEAD audit or verified encrypted prewrite backup (NO GAS mutation)
+        env:
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          SYNC_MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$SYNC_MODE" = audit ]; then
+            node scripts/study1-v2-gas-head-only.cjs audit
+          else
+            node scripts/study1-v2-gas-head-only.cjs prepare
+          fi
+      - name: Store encrypted private-source snapshot (ciphertext ONLY)
+        if: ${{ inputs.mode == 'apply' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: study1-v2-gas-prewrite-${{ github.run_id }}
+          path: ${{ runner.temp }}/study1-v2-prewrite-${{ github.run_id }}.json.enc
+          if-no-files-found: error
+          retention-days: 7
+      - name: Refuse concurrent V2 main update before HEAD PUT
+        if: ${{ inputs.mode == 'apply' }}
+        run: |
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+      - name: Write ONCE only new V2 GAS HEAD and verify full readback (NEVER DEPLOY)
+        if: ${{ inputs.mode == 'apply' }}
+        env:
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          SYNC_MODE: ${{ inputs.mode }}
+        run: node scripts/study1-v2-gas-head-only.cjs apply
+      - name: Purge ephemeral prewrite state
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/study1-v2-head-state-$GITHUB_RUN_ID.json"
+          rm -f "$RUNNER_TEMP/study1-v2-prewrite-$GITHUB_RUN_ID.json.enc"
