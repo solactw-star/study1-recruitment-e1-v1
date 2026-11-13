@@ -647,6 +647,15 @@ function study1OwnerE1ConsentBookingAudit(){if(typeof study1V2PublicRpcDeny_==='
   const registry=study1EConsentRegistry_();
   const snapshot=study1FormalSnapshot_(),asOfUtc=new Date().toISOString();
   study1FormalValidateSnapshot_(snapshot,asOfUtc);
+  return study1OwnerE1BookingProject_(registry,snapshot,asOfUtc,lock);
+ }finally{lock.releaseLock();}
+}
+
+/** The ORIGINAL Reservations status projection; the caller has ScriptLock.
+ * Shared by the existing standalone audit and the joined OWNER audit.
+ * This helper never reads a source, sends email or writes a row.
+ */
+function study1OwnerE1BookingProject_(registry,snapshot,asOfUtc,lock){
   if(!snapshot||!snapshot.reservations||
      !Array.isArray(snapshot.reservations.rows)||
      !Array.isArray(registry.records)||
@@ -697,6 +706,68 @@ function study1OwnerE1ConsentBookingAudit(){if(typeof study1V2PublicRpcDeny_==='
   if(lock.hasLock()!==true)throw Error('OWNER_E1_BOOKING_AUDIT_LOCK_LOST');
   return {readOnly:true,source:'ORIGINAL_RESERVATIONS',
    consentRevision:registry.revision,asOfUtc,records};
+}
+
+/** OWNER-only coherent E1 read: one ScriptLock and two full passes over
+ * original consent, Slots/Reservations and Notifications. Matching the consent
+ * revision by itself cannot detect changes to the two external Sheets.
+ * This is a bounded double-read, not an ACID snapshot against external writers.
+ */
+function study1OwnerE1OperationsAudit(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ const lock=LockService.getScriptLock();
+ if(!lock||typeof lock.tryLock!=='function'||lock.tryLock(10000)!==true)
+  throw Error('OWNER_E1_OPERATIONS_LOCK_BUSY');
+ try{
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_OPERATIONS_LOCK_LOST');
+  study1AdminOwnerRequired_();
+  const consentA=study1EConsentRegistry_();
+  const originalA=study1FormalSnapshot_();
+  const noticesA=study1OwnerE1NoticeSnapshot_();
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_OPERATIONS_LOCK_LOST');
+  const consentB=study1EConsentRegistry_();
+  const originalB=study1FormalSnapshot_();
+  const noticesB=study1OwnerE1NoticeSnapshot_();
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_OPERATIONS_LOCK_LOST');
+  if(!consentA||!consentB||
+     !Number.isSafeInteger(consentA.revision)||consentA.revision<0||
+     consentA.revision!==consentB.revision||
+     !Array.isArray(consentA.records)||!Array.isArray(consentB.records)||
+     JSON.stringify(consentA.records)!==JSON.stringify(consentB.records))
+   throw Error('OWNER_E1_OPERATIONS_CONSENT_DRIFT');
+  // Exact original headers and full rows: booking status alone is insufficient.
+  function exactOriginal(x){
+   if(!x||!x.slots||!x.reservations||
+      !Array.isArray(x.slots.headers)||!Array.isArray(x.slots.rows)||
+      !Array.isArray(x.reservations.headers)||!Array.isArray(x.reservations.rows))
+    throw Error('OWNER_E1_OPERATIONS_ORIGINAL_SOURCE_INVALID');
+   return JSON.stringify([x.slots.headers,x.slots.rows,
+    x.reservations.headers,x.reservations.rows]);
+  }
+  if(exactOriginal(originalA)!==exactOriginal(originalB))
+   throw Error('OWNER_E1_OPERATIONS_RESERVATIONS_DRIFT');
+  if(!noticesA||!noticesB||
+     !Number.isSafeInteger(noticesA.rowCount)||
+     noticesA.rowCount!==noticesB.rowCount||
+     JSON.stringify(noticesA.rows)!==JSON.stringify(noticesB.rows))
+   throw Error('OWNER_E1_OPERATIONS_NOTIFICATIONS_DRIFT');
+  const asOfUtc=new Date().toISOString();
+  study1FormalValidateSnapshot_(originalA,asOfUtc);
+  study1FormalValidateSnapshot_(originalB,asOfUtc);
+  const booking=study1OwnerE1BookingProject_(consentA,originalA,asOfUtc,lock);
+  const notice=study1OwnerE1NoticeProject_(consentA,noticesA.rows,lock);
+  if(booking.consentRevision!==notice.consentRevision||
+     booking.consentRevision!==consentA.revision||
+     booking.records.length!==notice.records.length)
+   throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
+  const bookingIds=new Set(booking.records.map(x=>x.id));
+  if(bookingIds.size!==booking.records.length||
+     notice.records.some(x=>!bookingIds.has(x.id)))
+   throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_OPERATIONS_LOCK_LOST');
+  return {readOnly:true,source:'ORIGINAL_E1_OPERATIONS',
+   snapshotConsistency:'SAME_LOCK_DOUBLE_READ',asOfUtc,
+   consentRevision:consentA.revision,booking,notice};
  }finally{lock.releaseLock();}
 }
 

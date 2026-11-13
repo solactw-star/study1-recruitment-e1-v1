@@ -1009,10 +1009,20 @@ function e1OwnerOperationsSetup_(){
   PROVIDER_ACCEPTED_NOT_DELIVERED:'郵件服務已接受（非實際送達證明）',
   UNKNOWN_REQUIRES_STAFF_REVIEW:'結果未知，禁止重送',
   SOURCE_MISMATCH:'紀錄不一致，禁止重送'};
- function render(booking,notice){
+ function render(combined){
+  if(!combined||combined.readOnly!==true||
+     combined.source!=='ORIGINAL_E1_OPERATIONS'||
+     combined.snapshotConsistency!=='SAME_LOCK_DOUBLE_READ'||
+     !Number.isSafeInteger(combined.consentRevision)||
+     typeof combined.asOfUtc!=='string'||
+     !Number.isFinite(Date.parse(combined.asOfUtc))||
+     new Date(combined.asOfUtc).toISOString()!==combined.asOfUtc)
+   throw Error('OWNER_E1_OPERATIONS_JOINED_SNAPSHOT_INVALID');
+  const booking=combined.booking,notice=combined.notice;
   const b=validate(booking,'ORIGINAL_RESERVATIONS');
   const n=validate(notice,'ORIGINAL_NOTIFICATIONS');
-  if(booking.consentRevision!==notice.consentRevision||b.size!==n.size||
+  if(combined.consentRevision!==booking.consentRevision||
+     booking.consentRevision!==notice.consentRevision||b.size!==n.size||
      [...b.keys()].some(id=>!n.has(id)))
    throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
   clear();
@@ -1053,23 +1063,18 @@ function e1OwnerOperationsSetup_(){
   }
   table.appendChild(body);out.appendChild(table);
   button.disabled=false;
-  statusNode.textContent='已依相同同意索引版號 '+booking.consentRevision+
+  statusNode.textContent='已在同一鎖內雙重回讀，依相同同意索引版號 '+booking.consentRevision+
    ' 核對 '+b.size+' 筆，需人工查核 '+reviewCount+
    ' 筆；同意索引不代替完整PDF逐檔SHA，預約與郵件送達仍是獨立證據。';
  }
  button.addEventListener('click',()=>{
   const current=++request;button.disabled=true;clear();
-  statusNode.textContent='正在分別讀取原 Reservations 與 Notifications（不寫入、不寄信）…';
+  statusNode.textContent='正在同一鎖內雙重回讀同意、原 Reservations 與 Notifications（不寫入、不寄信）…';
   const failed=error=>{if(current===request)fail(error);};
-  google.script.run.withFailureHandler(failed).withSuccessHandler(booking=>{
+  google.script.run.withFailureHandler(failed).withSuccessHandler(combined=>{
    if(current!==request)return;
-   try{validate(booking,'ORIGINAL_RESERVATIONS');}
-   catch(error){fail(error);return;}
-   google.script.run.withFailureHandler(failed).withSuccessHandler(notice=>{
-    if(current!==request)return;
-    try{render(booking,notice);}catch(error){fail(error);}
-   }).study1OwnerE1NotificationAudit();
-  }).study1OwnerE1ConsentBookingAudit();
+   try{render(combined);}catch(error){fail(error);}
+  }).study1OwnerE1OperationsAudit();
  });
 }
 e1OwnerOperationsSetup_();

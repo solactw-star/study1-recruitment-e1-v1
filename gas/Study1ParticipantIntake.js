@@ -728,12 +728,16 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
   if(lock.hasLock()!==true)throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_LOST');
   study1AdminOwnerRequired_();
   const registry=study1EConsentRegistry_();
-  if(!registry||!Number.isSafeInteger(registry.revision)||
-     !Array.isArray(registry.records))
-   throw Error('OWNER_E1_NOTICE_CONSENT_SOURCE_INVALID');
-  const entries=registry.records.filter(x=>x&&
-   x.channel==='FORMAL_E1'&&x.experiment==='E1'&&
-   x.researcherPresigned===true);
+  const originalNotice=study1OwnerE1NoticeSnapshot_();
+  return study1OwnerE1NoticeProject_(registry,originalNotice.rows,lock);
+ }finally{lock.releaseLock();}
+}
+
+/** An independent ORIGINAL Notifications read including current row count.
+ * Two reads within each pass detect local drift; the joined audit performs
+ * another entirely fresh pass under the same ScriptLock.
+ */
+function study1OwnerE1NoticeSnapshot_(){
   const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
   const source=study1WizardTable_(book,'Notifications',
    STUDY1_E1_NOTIFICATION_HEADERS_);
@@ -744,6 +748,18 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
      first.length!==source.n-1||
      JSON.stringify(first)!==JSON.stringify(second))
    throw Error('OWNER_E1_NOTICE_DOUBLE_SNAPSHOT_CHANGED');
+  return {rows:first,rowCount:source.n};
+}
+/** OWNER projection from explicitly supplied original outbox rows.
+ * Caller holds ScriptLock. Never sends, appends, updates or repeats notices.
+ */
+function study1OwnerE1NoticeProject_(registry,first,lock){
+  if(!registry||!Number.isSafeInteger(registry.revision)||
+     !Array.isArray(registry.records))
+   throw Error('OWNER_E1_NOTICE_CONSENT_SOURCE_INVALID');
+  const entries=registry.records.filter(x=>x&&
+   x.channel==='FORMAL_E1'&&x.experiment==='E1'&&
+   x.researcherPresigned===true);
   const byReservation=new Map();
   for(const row of first){
    if(!Array.isArray(row)||row.length!==9)
@@ -806,5 +822,4 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
   if(lock.hasLock()!==true)throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_LOST');
   return {readOnly:true,source:'ORIGINAL_NOTIFICATIONS',
    consentRevision:registry.revision,records};
- }finally{lock.releaseLock();}
 }

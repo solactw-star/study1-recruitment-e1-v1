@@ -148,7 +148,7 @@ const uiStart=ownerHtml.indexOf('function e1OwnerOperationsSetup_(){');
 const uiEnd=ownerHtml.indexOf('\ne1OwnerOperationsSetup_();',uiStart);
 assert.ok(uiStart>0&&uiEnd>uiStart,'existing OWNER console must wire read-only operations UI');
 const uiSource=ownerHtml.slice(uiStart,uiEnd+'\ne1OwnerOperationsSetup_();'.length);
-function browser(booking,notice){
+function browser(booking,notice,override={}){
  const elements=new Map(),calls=[];
  const make=id=>({id,disabled:false,textContent:'',children:[],listeners:{},
   addEventListener(event,fn){this.listeners[event]=fn;},
@@ -161,10 +161,13 @@ function browser(booking,notice){
   document:{getElementById:id=>elements.get(id),createElement:type=>make(type)},
   google:{script:{run:{withFailureHandler(fn){this.fail=fn;return this;},
    withSuccessHandler(fn){this.done=fn;return this;},
-   study1OwnerE1ConsentBookingAudit(){calls.push('booking');
-    const cb=this.done;if(booking instanceof Error)this.fail(booking);else cb(booking);},
-   study1OwnerE1NotificationAudit(){calls.push('notice');
-    const cb=this.done;if(notice instanceof Error)this.fail(notice);else cb(notice);}
+   study1OwnerE1OperationsAudit(){calls.push('combined');
+    if(booking instanceof Error)return this.fail(booking);
+    if(notice instanceof Error)return this.fail(notice);
+    this.done({...{readOnly:true,source:'ORIGINAL_E1_OPERATIONS',
+     snapshotConsistency:'SAME_LOCK_DOUBLE_READ',
+     asOfUtc:'2026-11-13T12:00:00.000Z',consentRevision:4,
+     booking,notice},...override});}
   }}}
  };
  ctx.$=ctx.document.getElementById;
@@ -178,7 +181,7 @@ const notice={readOnly:true,source:'ORIGINAL_NOTIFICATIONS',
  noticeStatus:'PROVIDER_ACCEPTED_NOT_DELIVERED'}]};
 test('OWNER UI combines booking and outbox only after same revision and exact ID set',()=>{
  const b=browser(booking,notice);b.click();
- assert.deepEqual(b.calls,['booking','notice']);
+ assert.deepEqual(b.calls,['combined']);
  assert.equal(b.elements.get('e1OpsRead').disabled,false);
  assert.match(b.elements.get('e1OpsStatus').textContent,/相同同意索引版號 4/);
  const view=JSON.stringify(b.elements.get('e1OpsResults'));
@@ -199,7 +202,7 @@ test('OWNER UI flags PDF-index / booking / outbox UNKNOWN without retries',()=>{
   noticeStatus:'SOURCE_MISMATCH'}]});
  inconsistent.click();
  assert.match(JSON.stringify(inconsistent.elements.get('e1OpsResults')),/來源衝突／UNKNOWN/);
- assert.deepEqual(h.calls,['booking','notice']);
+ assert.deepEqual(h.calls,['combined']);
 });
 test('OWNER UI rejects revision drift, missing row, booking ambiguity and private read error',()=>{
  for(const [bk,nt] of [
@@ -214,10 +217,24 @@ test('OWNER UI rejects revision drift, missing row, booking ambiguity and privat
   assert.equal(b.elements.get('e1OpsRead').disabled,false);
  }
 });
+test('OWNER UI refuses joined metadata that is not verified within one lock and two reads',()=>{
+ for(const override of [
+  {snapshotConsistency:'SEPARATE_RPCS'},
+  {source:'ORIGINAL_NOTIFICATIONS'},
+  {consentRevision:5},
+  {asOfUtc:'INVALID'},
+  {readOnly:false}
+ ]){
+  const h=browser(booking,notice,override);h.click();
+  assert.equal(h.elements.get('e1OpsResults').children.length,0);
+  assert.match(h.elements.get('e1OpsStatus').textContent,/未能完整核對/);
+  assert.deepEqual(h.calls,['combined']);
+ }
+});
 test('public OWNER interface remains closed and contains no notification send/retry path',()=>{
  assert.match(ownerHtml,/id="e1OwnerOperations"/);
- assert.match(ownerHtml,/\.study1OwnerE1ConsentBookingAudit\(\)/);
- assert.match(ownerHtml,/\.study1OwnerE1NotificationAudit\(\)/);
+ assert.match(ownerHtml,/\.study1OwnerE1OperationsAudit\(\)/);
+ assert.doesNotMatch(uiSource,/\.study1OwnerE1ConsentBookingAudit\(\)|\.study1OwnerE1NotificationAudit\(\)/);
  assert.match(backend,/if\(typeof study1V2PublicRpcDeny_==='function'\)study1V2PublicRpcDeny_\(\);\s*study1AdminOwnerRequired_\(\);/);
  assert.doesNotMatch(uiSource,/MailApp|\.sendEmail\(|\.setValues\(|\.appendRow\(|\.innerHTML\s*=/);
 });
@@ -322,4 +339,148 @@ test('OWNER repair UI contains only explicit preflight and one guarded RPC, no e
  assert.match(repairCode,/\.study1OwnerE1SignedBookingPreflight\(consentId\)/);
  assert.match(repairCode,/\.study1OwnerE1SignedBookingRepair\(once\)/);
  assert.doesNotMatch(repairCode,/MailApp|\.sendEmail\(|study1EConsentSignPdf\(|\.appendRow\(|\.setValues\(|\.innerHTML\s*=/);
+});
+
+
+/** Two-pass cross-source RPC harness: unlike the standalone checks above,
+ * it runs BOTH original GAS files under one ScriptLock. All data is synthetic.
+ */
+const bookingBackend=fs.readFileSync(path.join(root,'gas/Study1FormalBooking.js'),'utf8');
+function joinedHarness(opts={}){
+ let ownerChecks=0,consentReads=0,bookingReads=0,noticeReads=0,noticeMetadata=0,
+  locks=0,unlocks=0,privateOpens=0,writes=0,mailCalls=0,lockHeld=false;
+ const slotId='SLOT_E1_JOINED_12345678';
+ const signed={id:RID,channel:'FORMAL_E1',experiment:'E1',state:'CONFIRMED',
+  researcherPresigned:true,binding:{experiment:'E1',applicantId:APP,
+   reservationId:RSV,slotId}};
+ const registry={revision:7,records:[signed]};
+ const stableReservation=[RSV,APP,slotId,'CONFIRMED',
+  '2026-11-13T05:30:00.000Z','KEY_JOINED','2026-11-13T05:00:00.000Z',
+  '2026-11-13T05:45:00.000Z','','2026-11-13T05:45:00.000Z'];
+ const slots=[slotId,'2026-11-14T07:00:00.000Z',
+  '2026-11-14T08:00:00.000Z',1,'CYCU','OPEN','PI',
+  '2026-11-13T04:00:00.000Z'];
+ const stableNotice=row();
+ let noticeRows=[stableNotice],nowLocked=()=>lockHeld;
+ const deep=x=>JSON.parse(JSON.stringify(x));
+ const ctx={
+  study1AdminOwnerRequired_:()=>{ownerChecks++;if(opts.denied)throw Error('OWNER_REQUIRED');},
+  LockService:{getScriptLock:()=>({
+   tryLock:()=>{locks++;if(opts.lockBusy)return false;lockHeld=true;return true;},
+   hasLock:()=>nowLocked(),
+   releaseLock:()=>{lockHeld=false;unlocks++;}
+  })},
+  study1EConsentRegistry_:()=>{
+   consentReads++;const result=deep(registry);
+   if(consentReads===2&&opts.registryRevisionDrift)result.revision=8;
+   if(consentReads===2&&opts.registryContentDrift)result.records[0].state='WITHDRAWN';
+   return result;
+  },
+  study1FormalSnapshot_:()=>{
+   bookingReads++;
+   const result={slots:{headers:['slot_id','start_at_utc'],rows:[deep(slots)]},
+    reservations:{headers:['reservation_id','applicant_id'],rows:[deep(stableReservation)]}};
+   if(bookingReads===2&&opts.bookingDrift)result.reservations.rows[0][9]='2026-11-13T05:46:00.000Z';
+   if(bookingReads===2&&opts.slotDrift)result.slots.rows[0][5]='CLOSED';
+   if(opts.missingHeaders)delete result.slots.headers;
+   return result;
+  },
+  study1FormalValidateSnapshot_:()=>{if(opts.invalidSchema)throw Error('ORIGINAL_SCHEMA_INVALID');},
+  study1BindingUtc_:x=>Date.parse(x),
+  study1BindingSheetId_:()=> 'SYNTHETIC_ONLY',
+  SpreadsheetApp:{openById:()=>{privateOpens++;return {};},flush:()=>{writes++;}},
+  study1WizardTable_:(_,name,headers)=>{
+   assert.equal(name,'Notifications');assert.equal(headers.length,9);
+   noticeMetadata++;
+   if(noticeMetadata===2&&opts.noticeAppend)noticeRows=[...noticeRows,row('UNKNOWN')];
+   return {n:noticeRows.length+1,tab:{getRange:()=>{
+    return {getValues:()=>{
+     noticeReads++;const result=deep(noticeRows);
+     if(opts.noticeInnerDrift&&noticeReads===2)result[0][4]='UNKNOWN';
+     if(opts.noticeDrift&&noticeReads>=3)result[0][4]='UNKNOWN';
+     return result;
+    }};
+   }}};
+  },
+  study1BindingHmac_:parts=>{
+   assert.deepEqual(deep(parts),['E1_BOOKING_CONFIRMATION_NOTICE_V1',RID,APP,RSV]);
+   return 'a'.repeat(64);
+  },
+  STUDY1_E1_NOTIFICATION_HEADERS_:Object.freeze([
+   'job_id','applicant_id','reservation_id','notice_type','status',
+   'attempts','created_at_utc','sent_at_utc','last_error_code']),
+  MailApp:{sendEmail:()=>{mailCalls++;}},
+  Date,JSON,Array,Object,Map,Set,String,Number,Error
+ };
+ if(opts.publicDenied)ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
+ const scope=vm.createContext(ctx);
+ vm.runInContext(bookingBackend,scope);
+ vm.runInContext(src,scope);
+ return {scope,stats:()=>({ownerChecks,consentReads,bookingReads,noticeReads,
+  noticeMetadata,locks,unlocks,privateOpens,writes,mailCalls})};
+}
+
+test('joined OWNER audit returns one coherent read under one lock and same consent revision',()=>{
+ const h=joinedHarness(),result=h.scope.study1OwnerE1OperationsAudit(),s=h.stats();
+ assert.equal(result.readOnly,true);
+ assert.equal(result.source,'ORIGINAL_E1_OPERATIONS');
+ assert.equal(result.snapshotConsistency,'SAME_LOCK_DOUBLE_READ');
+ assert.equal(result.consentRevision,7);
+ assert.equal(result.booking.consentRevision,result.notice.consentRevision);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.booking.records)),
+  [{id:RID,bookingStatus:'CONFIRMED',bookingConfirmed:true}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.notice.records)),
+  [{id:RID,consentState:'CONFIRMED',
+   noticeStatus:'PROVIDER_ACCEPTED_NOT_DELIVERED'}]);
+ assert.deepEqual([s.consentReads,s.bookingReads,s.noticeReads,s.noticeMetadata,s.locks,s.unlocks],
+  [2,2,4,2,1,1]);
+ assert.equal(s.writes,0);assert.equal(s.mailCalls,0);
+ assert.doesNotMatch(JSON.stringify(result),/APP_ORIGINAL|RSV_ORIGINAL|example.org|SIGNED_PDF|Sheet/);
+});
+test('matching consent revision alone cannot disguise ORIGINAL Reservations or Slots drift',()=>{
+ for(const opts of [{bookingDrift:true},{slotDrift:true}]){
+  const h=joinedHarness(opts);
+  assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),/OPERATIONS_RESERVATIONS_DRIFT/);
+  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+ }
+});
+test('Notifications status changes, new row or intra-pass mutation block joined result',()=>{
+ for(const [opts,error] of [
+  [{noticeDrift:true},/OPERATIONS_NOTIFICATIONS_DRIFT/],
+  [{noticeAppend:true},/OPERATIONS_NOTIFICATIONS_DRIFT/],
+  [{noticeInnerDrift:true},/NOTICE_DOUBLE_SNAPSHOT_CHANGED/]
+ ]){
+  const h=joinedHarness(opts);
+  assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),error);
+  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+ }
+});
+test('identical numeric consent revision with changed record fails closed',()=>{
+ for(const opts of [{registryRevisionDrift:true},{registryContentDrift:true}]){
+  const h=joinedHarness(opts);
+  assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),/OPERATIONS_CONSENT_DRIFT/);
+  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+ }
+});
+test('schema/lock failures prohibit joined result and never send, write or retry',()=>{
+ for(const [opts,error] of [
+  [{missingHeaders:true},/OPERATIONS_ORIGINAL_SOURCE_INVALID/],
+  [{invalidSchema:true},/ORIGINAL_SCHEMA_INVALID/],
+  [{lockBusy:true},/OPERATIONS_LOCK_BUSY/]
+ ]){
+  const h=joinedHarness(opts);
+  assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),error);
+  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+ }
+});
+test('joined public RPC denied BEFORE owner and private reads; non-owner denied before lock',()=>{
+ for(const opts of [{publicDenied:true},{denied:true}]){
+  const h=joinedHarness(opts);
+  assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),
+   /PUBLIC_RPC_DENIED|OWNER_REQUIRED/);
+  const s=h.stats();
+  assert.equal(s.consentReads,0);assert.equal(s.bookingReads,0);
+  assert.equal(s.noticeReads,0);assert.equal(s.privateOpens,0);
+  assert.equal(s.writes,0);assert.equal(s.mailCalls,0);
+ }
 });
