@@ -303,3 +303,5 @@
 - LAST_VERIFIED_STEP=`CI_PENDING`；WRITE_OWNER=唯一新 V2 GitHub；NEXT_ACTION=驗證新 main CI 並核對是否仍可實體搬離四個合成 GAS 元件；BLOCKERS=正式 E1 核定資料／OAuth／真正 UI；`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`。
 
 - CI_REPAIR_2026-11-13：新 Visitor FORMAL-only SHA `b73eb852a520f39a1700c8081cb2298f91ba3f67` 的 Run #43396439242 實際 `217 PASS / 1 FAIL`，因原 `study1-signed-pdf-wizard-readback.test.cjs` 仍用正式 GAS 讀取已退出的舊 DEMO `officialSignedPdfVerify_`，非現行 FORMAL 的 `formalVerifySigned_`。修正原測試僅將其既有虛構 PDF 測試來源改指 `tests/fixtures/Study1Visitor.demo.html`，保留所有測試與負例，不恢復舊 DEMO 正式程式。增列 FORMAL intake 的既有靜態檢查入安全 CI。本段更新後以新 SHA CI 回讀，不得宣稱先前失敗 SHA 通過。
+
+- CI_REPAIR_2026-11-13_2：`ec44724c8ce4e15472268c4b0f61e43c0f673f8a` Run #43396600310 實際 `229 PASS / 1 FAIL`（增加 FORMAL 靜態測試後，尚有一條原 Demo 路由單行正規式不符現行已加嚴的 public deny／換行程式）。只更新該測試為符合現行 `e.parameter.view==='apply'` 與輸入換行及已拒絕 Demo 路由的保護契約，不改已通過之正式路由程式；下個 SHA 必須重新回讀 CI。

@@ -6,8 +6,8 @@ const website=read('gas/Website.js'),visitor=read('gas/Study1Visitor.html');
 const intake=read('gas/Study1ParticipantIntake.js');
 const gate=read('scripts/study1-gas-backend-allowlist.cjs');
 
-test('Formal E1 entry is canonical; deprecated demo alias is owner-locked and uses FORMAL only',()=>{
- assert.match(website,/view==='apply'\)\{const t=HtmlService\.createTemplateFromFile\('Study1Visitor'\)/);
+test('Formal E1 entry is canonical; demo/team/preview routes are denied before HTML construction',()=>{
+ assert.match(website,/e\.parameter\.view==='apply'\)\{\s*const t=HtmlService\.createTemplateFromFile\('Study1Visitor'\)/);
  assert.match(website,/t\.flowMode='FORMAL'/);
  assert.match(website,/t\.evaluate\(\)/);
  assert.match(visitor,/<body data-site-mode="FORMAL">/);
