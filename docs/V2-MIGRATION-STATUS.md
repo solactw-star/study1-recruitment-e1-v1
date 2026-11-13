@@ -429,3 +429,5 @@
 - BLOCKERS：現行遠端 V2 GAS 同 SHA source sync／私人 OWNER 和公版實際 UI 仍未核實；PI 核定 Slots、正式預簽 PDF、REC 適用性及真人營運授權不因 Agent 指引新增而成立。Automations 當輪讀取工具不可用，原每小時排程未變更也未重新驗證其 prompt。
 - NEXT_ACTION：按最新 V2 main 由 Agent 增量檢視 E1 本人 PDF 副本／OWNER 同意、原 Reservations、Email outbox 的跨來源時間漂移與 UNKNOWN 人工處置，優先補安全負測及真實缺口；需要 OAuth、GAS 同步、部署或真人 UAT 時分別核對授權、備份及完整回讀，不重做已通過合成核心。
 - SYNC_STATUS：`AGENT_GUIDANCE_GITHUB_READBACK_VERIFIED=true`；`MAIN_CODE_CI_VERIFIED=true` 僅指更新前 `6040000...` 程式基線，`AGENT_GUIDANCE_POST_DOC_CI_PENDING=true`；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`OPEN=false`、`CONSENT_READY=false`。
+
+- POST_DOC_CI_READBACK：新增 Agent 指引＋原進度主檔同一 SHA `e11c5035afb23a86f091746e7bb426311439779b` 的 [Run #43424915157](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43424915157)、Job `public-safety` #131883857667 原始日誌回讀 `274 tests / 274 PASS / 0 FAIL / 0 SKIP`，狀態 `completed/success`。本段屬文件回讀補記，後續最後文件提交 SHA 亦須另核對 CI；`AGENT_GUIDANCE_GITHUB_READBACK_VERIFIED=true`、`AGENT_GUIDANCE_CI_VERIFIED_ON_E11C=true`，不代表實際 GAS 同步、真 UI、排程 prompt 或真人收件已驗收。
