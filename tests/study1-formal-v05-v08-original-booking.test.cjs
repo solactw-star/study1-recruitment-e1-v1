@@ -633,7 +633,7 @@ test('non-presigned, inconsistent signed PDF or wrong slot stays blocked before 
   if(corrupt==='signedPdf')c.x.signedPdf.sha='f'.repeat(64);
   if(corrupt==='slot')c.x.binding.slotId='SLOT_DIFFERENT_12345';
   assert.throws(()=>h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId),
-   /DUAL_PDF|HASH_MISMATCH|IDENTITY_SLOT_CHANGED/);
+   /DUAL_PDF|HASH_MISMATCH|IDENTITY_SLOT_CHANGED|CONSENT_SOURCE_CHANGED/);
   assert.equal(h.mutations.length,count);
  }
 });

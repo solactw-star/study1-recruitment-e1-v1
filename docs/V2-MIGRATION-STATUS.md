@@ -404,3 +404,6 @@
 - LAST_VERIFIED_STEP=`CI_PENDING_NEW_MAIN_SHA`；WRITE_OWNER=僅新 V2 GitHub 原 `gas/`、`tests/`、`docs/V2-MIGRATION-STATUS.md`；NEXT_ACTION=同一筆原子 main 提交後取最新 commit SHA、全檔 blob、完整 diff、同 SHA CI Job 原始日誌，修正所有真實失敗；通過後更新本進度原檔驗證紀錄。
 - BLOCKERS：實際 V2 遠端 GAS、私人 OWNER UI、PI 核定真 E1 Slots／研究者預簽 PDF 與真人收件尚無本輪核可或 UAT 證據。本輪不存取或更動正式 Sheets、原同意 PDF／REC、任何舊 Repo／GAS、GAS 遠端 HEAD/部署、Script Properties、研究資料或真人郵件。
 - SYNC_STATUS：`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`OPEN=false`、`CONSENT_READY=false`，CI 結果待相同新 HEAD 回讀。
+
+
+- CI_REPAIR_2026-11-13：main `916e98f8ee00a1720053ef0139139e85392b467f` 的 [Run #43417083105](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43417083105) public-safety Job #131857576179 **274 tests／273 PASS／1 FAIL／0 SKIP**；唯一失敗為新增「錯 slot 來源不得手動收尾」負測僅接受 `DUAL_PDF|HASH_MISMATCH|IDENTITY_SLOT_CHANGED`，實際更早按完整 binding digest 回報 `FORMAL_BOOKING_CONSENT_SOURCE_CHANGED`（已正確在寫入前拒絕）。只將此合法安全錯誤碼加入原測試預期，未改生產程式、未略過負測；下一 main SHA 必須重驗，不以原失敗 SHA 冒充成功。
