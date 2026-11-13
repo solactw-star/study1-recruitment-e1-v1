@@ -3,9 +3,9 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto');
 const html=fs.readFileSync(path.join(__dirname,'../gas/Study1Visitor.html'),'utf8');
 const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses");
-const end=html.indexOf("\n})();\n\n(function(){",start);
+const end=html.indexOf("\n})();\n</script>",start);
 assert.ok(start>0&&end>start,'formal controller must remain inside original IIFE');
-const formal=html.slice(start,end+5);
+const formal=html.slice(start,end+6);
 function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none'){
  const nodes=new Map(),calls=[],errors=[],reservations=[],uuid=()=>crypto.randomBytes(8).toString('hex');
  const now=Date.now(),S1='SLOT_E1_BROWSER_A_12345678',S2='SLOT_E1_BROWSER_B_12345678';

@@ -48,18 +48,21 @@ test('Unified/Team/Fixture synthetic sources cannot ship with formal E1 HEAD',()
  for(const fname of ['Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js'])
   assert.ok(fs.existsSync(path.join(folder,fname)),'offline test-only source retained: '+fname);
  const html=fs.readFileSync(path.join(folder,'Study1Visitor.html'),'utf8');
- const split=html.indexOf('\n})();\n\n(function(){');
- assert.ok(split>0);
- assert.doesNotMatch(html.slice(0,split),/study1UnifiedPreview|study1Fixture/);
- assert.match(html,/document\.body\.dataset\.siteMode==='FORMAL'\)return;/);
- assert.match(html,/document\.body\.dataset\.siteMode!=='FORMAL'\)return;/);
+ assert.ok(html.includes("document.body.dataset.siteMode!=='FORMAL')return;"));
+ assert.doesNotMatch(html,/study1UnifiedPreview|study1Fixture|SIMULATED_SIGN_ONLY/);
+ assert.ok(!html.includes("document.body.dataset.siteMode==='FORMAL')return;"));
+ assert.match(html,/<body data-site-mode="FORMAL">/);
+ assert.doesNotMatch(html,/(?:demo\.study1@example\.invalid|00000000|<script[^>]+src=)/);
  for(const f of files.filter(f=>f.type==='SERVER_JS'&&f.name!=='Study1PdfLib'))
   assert.doesNotMatch(f.source,/\bstudy1(?:UnifiedPreview|Fixture)\w*\s*\(/);
  assert.throws(()=>core.publicRpcSurface([...files,
   {name:'Study1Flow',type:'SERVER_JS',source:'function study1UnifiedPreviewGet(){}'}]),
   /non-deployable synthetic executable/);
  const bad=files.map(f=>f.name==='Study1Visitor'?
-  {...f,source:f.source.replace("document.body.dataset.siteMode==='FORMAL')return;",
-   "document.body.dataset.siteMode==='OTHER')return;")}:f);
- assert.throws(()=>core.publicRpcSurface(bad),/not mutually gated/);
+  {...f,source:f.source.replace("document.body.dataset.siteMode!=='FORMAL')return;",
+   "document.body.dataset.siteMode!=='UNSAFE')return;")}:f);
+ assert.throws(()=>core.publicRpcSurface(bad),/formal visitor is not isolated/);
+ const injected=files.map(f=>f.name==='Study1Visitor'?
+  {...f,source:f.source+'\nstudy1UnifiedPreviewGet();'}:f);
+ assert.throws(()=>core.publicRpcSurface(injected),/formal visitor is not isolated/);
 });

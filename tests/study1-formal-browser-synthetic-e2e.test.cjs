@@ -4,9 +4,9 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const crypto=require('node:crypto');
 const html=fs.readFileSync(path.join(__dirname,'../gas/Study1Visitor.html'),'utf8');
 const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses");
-const end=html.indexOf("\n})();\n\n(function(){",start);
+const end=html.indexOf("\n})();\n</script>",start);
 assert.ok(start>0&&end>start,'original single visitor formal branch missing');
-const script=html.slice(start,end+5);
+const script=html.slice(start,end+6);
 function simulate(readiness,options={}){
  const nodes=new Map(),queries=new Map(),calls=[],rendered=[],errors=[];
  function node(id){

@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const gate=require('../scripts/study1-gas-backend-allowlist.cjs');
-const html=fs.readFileSync(path.join(__dirname,'../gas/Study1Visitor.html'),'utf8');
+const html=fs.readFileSync(path.join(__dirname,'fixtures/Study1Visitor.demo.html'),'utf8');
 const website=fs.readFileSync(path.join(__dirname,'../gas/Website.js'),'utf8');
 const auto=fs.readFileSync(path.join(__dirname,'../scripts/study1-gas-auto-index.cjs'),'utf8');
 const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-gas-auto-index.yml'),'utf8');

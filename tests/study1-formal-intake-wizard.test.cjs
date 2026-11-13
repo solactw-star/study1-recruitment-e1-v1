@@ -10,15 +10,15 @@ test('Formal E1 entry is canonical; deprecated demo alias is owner-locked and us
  assert.match(website,/view==='apply'\)\{const t=HtmlService\.createTemplateFromFile\('Study1Visitor'\)/);
  assert.match(website,/t\.flowMode='FORMAL'/);
  assert.match(website,/t\.evaluate\(\)/);
- assert.match(visitor,/<body data-site-mode="<\?= flowMode \?>">/);
- assert.match(website,/view==='demo'\)\{study1AdminOwnerRequired_\(\);const t=HtmlService\.createTemplateFromFile\('Study1Visitor'\)/);
+ assert.match(visitor,/<body data-site-mode="FORMAL">/);
+ assert.match(website,/\['admin','team','preview','demo'\]\.includes\(e\.parameter\.view\)/);
  assert.doesNotMatch(website,/HtmlService\.createHtmlOutputFromFile\('Study1Visitor'\)/);
  assert.doesNotMatch(website,/view==='apply'\)\{study1AdminOwnerRequired_\(\)/);
 });
 test('Formal controller runs only for explicit FORMAL body tag and aborts old demo controller',()=>{
  const formal=visitor.indexOf("document.body.dataset.siteMode!=='FORMAL'");
- const demo=visitor.indexOf("document.body.dataset.siteMode==='FORMAL')return;");
- assert.ok(formal>0&&demo>formal);
+ assert.ok(formal>0);
+ assert.doesNotMatch(visitor,/study1UnifiedPreviewGet|SIMULATED_SIGN_ONLY/);
  assert.match(visitor,/study1ParticipantReadiness\(\)/);
  assert.match(visitor,/rpc\('study1ParticipantBegin'/);
  assert.match(visitor,/rpc\('study1ParticipantSendOtp'/);
@@ -48,7 +48,7 @@ test('No email or PII entry until independently approved public gate',()=>{
  assert.match(visitor,/if\(el\(id\)\)el\(id\)\.disabled=!state\.ready/);
 });
 test('Real OTP never invokes test command or demo code; email is not student verification',()=>{
- assert.match(visitor,/document\.body\.dataset\.siteMode==='FORMAL'\)return;/);
+ assert.doesNotMatch(visitor,/document\.body\.dataset\.siteMode==='FORMAL'\)return;/);
  assert.match(visitor,/if\(sampleCode\)sampleCode\.hidden=true/);
  assert.match(visitor,/if\(el\('otpPaste'\)\)el\('otpPaste'\)\.hidden=true/);
  assert.match(visitor,/資格依本人勾選自陳/);
@@ -65,11 +65,11 @@ test('Real OTP never invokes test command or demo code; email is not student ver
  assert.match(intake,/EMAIL_PROOF_SIGNATURE_INVALID/);
 });
 test('Original V05/V08 and summary/consent step order remain unchanged',()=>{
- assert.match(visitor,/const phases=\['choose','screen','otp','slots','confirm','consent','done'\]/);
+ assert.match(visitor,/const state=\{ready:false,app:null,mail:null/);
  for(const id of ['v05Dates','v05Month','v08WaitBox','v08ManageReview',
   'v06Summary','officialPdfViewer','officialSignedPdfDownload','visitorSignaturePreview'])
   assert.match(visitor,new RegExp('id="'+id+'"'));
- assert.match(visitor,/SIMULATED_SIGN_ONLY/);
+ assert.doesNotMatch(visitor,/SIMULATED_SIGN_ONLY/);
  assert.doesNotMatch(visitor,/<script[^>]+src=|\.innerHTML\s*=\s*|localStorage/);
  assert.doesNotMatch(website,/function requestOtp\([^)]*\)\{return study1ParticipantOtpSend_/);
  assert.match(website,/function requestOtp\(\)\{return rejectIntake_\(\);\}/);

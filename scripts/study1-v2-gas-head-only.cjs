@@ -54,8 +54,9 @@ function publicRpcSurface(files){
   'non-deployable synthetic executable in formal GAS source inventory');
  const visitor=files.find(f=>f.name==='Study1Visitor'&&f.type==='HTML')?.source||'';
  require_(visitor.includes("document.body.dataset.siteMode!=='FORMAL')return;")&&
-  visitor.includes("document.body.dataset.siteMode==='FORMAL')return;"),
-  'formal E1 and synthetic visitor controllers are not mutually gated');
+  !visitor.includes("document.body.dataset.siteMode==='FORMAL')return;")&&
+  !/study1UnifiedPreview|SIMULATED_SIGN_ONLY|function v08Preview_/.test(visitor),
+  'formal visitor is not isolated from synthetic controller');
  for(const f of files.filter(f=>f.type==='SERVER_JS'&&f.name!=='Study1PdfLib'))
   require_(!/\bstudy1(?:UnifiedPreview|Fixture)[A-Za-z0-9_]*\s*\(/.test(f.source),
    'formal server depends on retired synthetic runtime: '+f.name);

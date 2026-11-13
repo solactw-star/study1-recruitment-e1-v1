@@ -18,7 +18,7 @@ const backendSource=[
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js'
 ].map(name=>fs.readFileSync(path.join(gasDir,name),'utf8')).join('\n');
 const teamHtml=fs.readFileSync(path.join(gasDir,'Study1Team.html'),'utf8');
-const demoHtml=fs.readFileSync(path.join(gasDir,'Study1Visitor.html'),'utf8');
+const demoHtml=fs.readFileSync(path.join(__dirname,'fixtures/Study1Visitor.demo.html'),'utf8');
 const scriptOf=html=>{
  const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
  assert.equal(scripts.length,1,'one inline site script, no network scripts');

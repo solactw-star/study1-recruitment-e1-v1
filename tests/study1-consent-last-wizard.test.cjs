@@ -6,7 +6,7 @@ const path=require('node:path');
 const root=path.join(__dirname,'..');
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
 const home=()=>read('gas/Index.html');
-const visitor=()=>read('gas/Study1Visitor.html');
+const visitor=()=>read('tests/fixtures/Study1Visitor.demo.html');
 
 test('§70-S public information homepage cannot expose direct signing or actual enrollment',()=>{
  const html=home();

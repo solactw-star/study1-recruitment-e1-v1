@@ -294,3 +294,10 @@
 - WRITE_OWNER：僅新 V2 Repo；NEXT_ACTION：CI 成功後再將 Visitor Demo 控制器轉為純測試檔，確認其他依賴解除後才物理刪除舊執行程式。BLOCKERS：歷史 Team/Unified 測試大量交互依賴尚待逐段搬遷；PI 核准正式 E1 Slots／預簽完整 PDF、Google OAuth／GAS 同步／真實 UI 未核實。
 - SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；沒有修改任何舊 GitHub／GAS、正式 Sheets、REC 或真人收件。
 - DEPENDENCY_REVIEW_ADDENDUM：另核對現存 `scripts/study1-gas-auto-index.cjs`、`scripts/study1-gas-backend-allowlist.cjs`、`scripts/study1-gas-public-release.cjs`、`scripts/study1-gas-owner-preview-deploy.cjs` 仍引用舊 Unified／Team HTML 或其歷史打包名稱；此屬 Legacy 流程唯讀相容來源，不是 V2 `study1-v2-gas-head-only.cjs` 的正式可執行依賴，不可自行重新啟動、用其同步舊 GAS 或因清除而破壞既有測試。現階段不刪除依賴未解除之檔案。
+
+## 2026-11-13｜V2 E1 Visitor Demo 控制器正式退出 GAS（CI 待同 SHA 核對）
+- TASK_DOMAIN=`Study1_V2_VISITOR_FORMAL_ONLY_PRUNE`; SOURCE_ID/PATH=新 V2 main `solactw-star/study1-recruitment-e1-v1`，§70-S.34–36；PRE_MAIN_SHA=`6c280301704ddf2860a67fcf12713364c1165ae5`。
+- COMPLETED：原 `gas/Study1Visitor.html` 只保留 FORMAL 控制器，實際移除第二段 `study1UnifiedPreviewGet/Command` 合成執行 JavaScript；固定 FORMAL 模式，更新曾帶有示範信箱／假 OTP／虛構預約與同意字樣的正式畫面文案，預設關閉歷史示範結果元件；原七步正式 DOM、原 Slots/Reservations、本人 OTP、完整 PDF 與七步結果核驗程式保留。
+- TEST_ONLY_ARCHIVE：原完整 Visitor Demo HTML 原樣保存在 `tests/fixtures/Study1Visitor.demo.html`，僅供隔離 VM 回歸參照，不列 GAS 正式來源；Team／Visitor／V06 舊測試改讀此 fixture，不改原正式 GAS 同意／預約／通知核心。
+- TESTS：原 V2 公開安全及 HEAD-only 負測要求正式 HTML 不含 Preview/Fixture 呼叫且只有 FORMAL 門檻；原正式 Browser E2E 調整讀取單一控制器邊界。保留既有 CI，並回讀對應 SHA，失敗不得假通過。
+- LAST_VERIFIED_STEP=`CI_PENDING`；WRITE_OWNER=唯一新 V2 GitHub；NEXT_ACTION=驗證新 main CI 並核對是否仍可實體搬離四個合成 GAS 元件；BLOCKERS=正式 E1 核定資料／OAuth／真正 UI；`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`。
