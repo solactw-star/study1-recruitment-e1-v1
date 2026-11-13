@@ -122,3 +122,17 @@ test('missing consent registry revision fails closed without writes',()=>{
  assert.throws(()=>h.scope.study1OwnerE1ConsentBookingAudit(),/OWNER_E1_BOOKING_AUDIT_SOURCE_INVALID/);
  assert.equal(h.writes(),0);
 });
+
+test('two formal consents bound to the same original reservation both remain UNKNOWN without writes',()=>{
+ const h=setup();
+ h.registry.records[1].binding.reservationId='R_01';
+ h.registry.records[1].binding.applicantId='APP_01';
+ h.registry.records[1].binding.slotId='SLOT_01';
+ const result=h.scope.study1OwnerE1ConsentBookingAudit();
+ for(const i of [0,1]){
+  assert.equal(result.records[i].bookingStatus,'UNKNOWN');
+  assert.equal(result.records[i].bookingConfirmed,false);
+ }
+ assert.equal(result.records[6].bookingConfirmed,true);
+ assert.equal(h.reads(),1);assert.equal(h.writes(),0);
+});
