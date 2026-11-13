@@ -163,6 +163,16 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <p id="e1PdfSignedStatus" role="status" aria-live="polite">尚未查核 OWNER 完整 PDF 索引；簽署成功不代表預約已 CONFIRMED。</p>
 </section>
 
+
+<section id="e1OwnerOperations" aria-labelledby="e1OwnerOperationsTitle">
+ <h2 id="e1OwnerOperationsTitle">E1 正式營運狀態｜本人簽署、原預約與通知唯讀核對</h2>
+ <p>此處逐筆核對原同意索引、原 Reservations 與 Notifications outbox，不寫回、不重送郵件、不以已簽 PDF 推定預約成立，亦不將寄件服務接受當成已送達。</p>
+ <button type="button" class="secondary" id="e1OpsRead">唯讀核對 E1 預約及通知狀態</button>
+ <p id="e1OpsStatus" role="status" aria-live="polite">尚未核對；原預約與通知必須分開核實。</p>
+ <div id="e1OpsResults" class="booking-table-wrap" role="region" tabindex="0" aria-label="E1 正式預約與通知核對結果"></div>
+ <p><small>狀態不明或資料不一致必須人工核對原始紀錄；不得直接重送郵件、再簽署、重建預約或啟用真人收件。</small></p>
+</section>
+
 <section id="staffWithdrawal" aria-labelledby="staffWithdrawalTitle">
 <h2 id="staffWithdrawalTitle">E1 撤回後資料處置｜OWNER 唯讀核對</h2>
 <button type="button" class="secondary" id="staffWithdrawalLoad">唯讀核對撤回後資料處置待辦</button>
@@ -946,6 +956,96 @@ function e1OwnerPresignSetup_(){
  controls();
 }
 e1OwnerPresignSetup_();
+
+
+function e1OwnerOperationsSetup_(){
+ const button=$('e1OpsRead'),statusNode=$('e1OpsStatus'),out=$('e1OpsResults');
+ if(!button||!statusNode||!out||typeof button.addEventListener!=='function')return;
+ let request=0;
+ const bookingStates=new Set(['CONFIRMED','HELD','EXPIRED','CANCELLED','UNKNOWN']);
+ const noticeStates=new Set(['NOT_QUEUED','PROVIDER_ACCEPTED_NOT_DELIVERED',
+  'UNKNOWN_REQUIRES_STAFF_REVIEW','SOURCE_MISMATCH']);
+ const consentStates=new Set(['ISSUED','CONFIRMED','WITHDRAWN']);
+ function clear(){while(out.firstChild)out.removeChild(out.firstChild);}
+ function fail(message){
+  clear();button.disabled=false;
+  statusNode.textContent='正式營運狀態未能完整核對，禁止推定完成：'+
+   String(message&&message.message||message);
+ }
+ function validate(payload,source){
+  if(!payload||payload.readOnly!==true||payload.source!==source||
+     !Number.isSafeInteger(payload.consentRevision)||payload.consentRevision<0||
+     !Array.isArray(payload.records)||payload.records.length>3000)
+   throw Error('OWNER_E1_OPERATIONS_SOURCE_INVALID');
+  const ids=new Set();
+  for(const row of payload.records){
+   if(!row||typeof row.id!=='string'||!/^[-a-f0-9]{30,40}$/i.test(row.id)||
+      ids.has(row.id))throw Error('OWNER_E1_OPERATIONS_DUPLICATE_ID');
+   ids.add(row.id);
+   if(source==='ORIGINAL_RESERVATIONS'&&
+      (!bookingStates.has(row.bookingStatus)||
+       row.bookingConfirmed!==(row.bookingStatus==='CONFIRMED')))
+    throw Error('OWNER_E1_OPERATIONS_BOOKING_STATUS_INVALID');
+   if(source==='ORIGINAL_NOTIFICATIONS'&&
+      (!noticeStates.has(row.noticeStatus)||!consentStates.has(row.consentState)))
+    throw Error('OWNER_E1_OPERATIONS_NOTICE_STATUS_INVALID');
+  }
+  return new Map(payload.records.map(x=>[x.id,x]));
+ }
+ const bookingText={
+  CONFIRMED:'已由原 Reservations 核實',HELD:'僅暫留，非已完成',
+  EXPIRED:'暫留已到期',CANCELLED:'已取消',UNKNOWN:'來源不明，須人工核對'};
+ const noticeText={
+  NOT_QUEUED:'無通知紀錄（不得推定已通知）',
+  PROVIDER_ACCEPTED_NOT_DELIVERED:'郵件服務已接受（非實際送達證明）',
+  UNKNOWN_REQUIRES_STAFF_REVIEW:'結果未知，禁止重送',
+  SOURCE_MISMATCH:'紀錄不一致，禁止重送'};
+ function render(booking,notice){
+  const b=validate(booking,'ORIGINAL_RESERVATIONS');
+  const n=validate(notice,'ORIGINAL_NOTIFICATIONS');
+  if(booking.consentRevision!==notice.consentRevision||b.size!==n.size||
+     [...b.keys()].some(id=>!n.has(id)))
+   throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
+  clear();
+  const table=document.createElement('table'),caption=document.createElement('caption');
+  caption.textContent='正式 E1 同意、原預約及通知出站狀態（僅 OWNER 唯讀）';
+  table.appendChild(caption);
+  const head=document.createElement('thead'),hr=document.createElement('tr');
+  for(const title of ['同意紀錄 ID','本人同意狀態','原預約核對','通知 outbox']){
+   const th=document.createElement('th');th.textContent=title;hr.appendChild(th);
+  }
+  head.appendChild(hr);table.appendChild(head);
+  const body=document.createElement('tbody');
+  for(const [id,book] of b){
+   const noticeRow=n.get(id),tr=document.createElement('tr');
+   for(const value of [id,noticeRow.consentState,
+     bookingText[book.bookingStatus],noticeText[noticeRow.noticeStatus]]){
+    const td=document.createElement('td');td.textContent=value;tr.appendChild(td);
+   }
+   body.appendChild(tr);
+  }
+  table.appendChild(body);out.appendChild(table);
+  button.disabled=false;
+  statusNode.textContent='已依相同同意索引版號 '+booking.consentRevision+
+   ' 核對 '+b.size+' 筆；預約、PDF 和郵件送達仍是獨立證據。';
+ }
+ button.addEventListener('click',()=>{
+  const current=++request;button.disabled=true;clear();
+  statusNode.textContent='正在分別讀取原 Reservations 與 Notifications（不寫入、不寄信）…';
+  const failed=error=>{if(current===request)fail(error);};
+  google.script.run.withFailureHandler(failed).withSuccessHandler(booking=>{
+   if(current!==request)return;
+   try{validate(booking,'ORIGINAL_RESERVATIONS');}
+   catch(error){fail(error);return;}
+   google.script.run.withFailureHandler(failed).withSuccessHandler(notice=>{
+    if(current!==request)return;
+    try{render(booking,notice);}catch(error){fail(error);}
+   }).study1OwnerE1NotificationAudit();
+  }).study1OwnerE1ConsentBookingAudit();
+ });
+}
+e1OwnerOperationsSetup_();
+
 
 function staffWithdrawalSetup_(){
  const button=$('staffWithdrawalLoad'),out=$('staffWithdrawalResults');

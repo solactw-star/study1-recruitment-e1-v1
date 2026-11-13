@@ -333,3 +333,13 @@
 - BLOCKERS：本輪僅 GitHub 程式清理與離線 CI，尚無同一 V2 GAS 遠端 SOURCE_SYNC 實際回讀；Google 一般帳號真 UI、PI 核定 E1 Slots/政策、研究者預簽正式 PDF、PI／研究行政 REC 適用結論與正式營運 UAT 仍不具新核實證據；歷史 `scripts/study1-gas-*` 僅能封存唯讀，不得由此恢復舊部署。
 - NEXT_ACTION：不再將舊 Demo 當成 E1 MVP 工程；後續依唯一 V2 main 聚焦五項正式營運端到端及獨立授權的 GAS 同步／公開唯讀部署／真人 UAT。除非有新的正式相依證據，不恢復四個淘汰模組。
 - SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`（限本 SHA）；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，`OPEN=false`、`CONSENT_READY=false`、`E2_OPEN=false`。
+
+
+## 2026-11-13｜V2 E1 正式流程跨檔案核對與 OWNER 讀取營運狀態增量
+- TASK_DOMAIN=`Study1_V2_E1_END_TO_END_OPERATIONS_AUDIT`；PRE_MAIN_SHA=`79229ac6bf1ea5127988b166dd284fad9011e649`；SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1` 的唯一正式 `main`、`docs/study1-system-spec.md` §70-S.34–36、本 `docs/V2-MIGRATION-STATUS.md`。
+- DEPENDENCY_TRACE：E1 `Study1Visitor.html` → `Study1ParticipantIntake.js` 原 Applicants/Screenings/Verification／OTP（不以學生證核身）→ `Study1FormalBooking.js` 原 Slots/Reservations HELD/CONFIRMED/UNKNOWN → `Study1FormalConsent.js` 原研究者預簽受保護 PDF 與同意憑證 → `AdminSandbox.js` 本人最後手寫加簽、完整 PDF SHA/PRIVATE 索引，獨立 finalize 原 Reservations → `Study1ParticipantIntake.js` Notifications A:I 的 DISPATCHING/PROVIDER_ACCEPTED/UNKNOWN 至多一次通知。原 `study1ParticipantBookingNotice_` 已由本人簽署成功路徑實際呼叫，非未連線死碼；簽署與預約不同交易，不把 PDF CONFIRMED 直接等同預約確認。
+- REAL_GAP：現有 OWNER `AdminConsole.html` 只有預簽 PDF／已簽副本、原場次與合成測試預約；缺少可直接對照正式 E1 每筆同意、原 Reservations 狀態與 Notifications outbox 的唯讀營運清單，UNKNOWN 需人工核對且不能當已送達。不能只靠舊 Team Demo 偽造 OWNER 完整管理。
+- CODE_DIFF：`gas/Study1ParticipantIntake.js` 同原 Notifications A:I 來源新增 `study1OwnerE1NotificationAudit`，公共版先拒絕、OWNER 雙重驗證及 ScriptLock、兩次來源一致性快照、行／job HMAC／attempts／provider status 防變動；只回傳正式同意 ID、同意狀態與 `NOT_QUEUED/PROVIDER_ACCEPTED_NOT_DELIVERED/UNKNOWN_REQUIRES_STAFF_REVIEW/SOURCE_MISMATCH`，無 Email／個資／Drive URL，不觸發寄信或寫入。原 `AdminConsole.html` 新增 OWNER 唯讀營運區，依原 `study1OwnerE1ConsentBookingAudit` 與新 outbox RPC 比對同一 registry revision、完整 ID 集合，失配 fail-closed，不以任何通知狀態推定寄達。新合成安全/失敗負測與既有 V2 公開 CI 一併執行。
+- WRITE_OWNER=僅新 V2 GitHub；LAST_VERIFIED_STEP=`CI_PENDING_NEW_SHA`，需同 SHA CI 及 blob/readback；BLOCKERS=目前公開 V2 全部私人 RPC 一律拒絕、實際 OWNER/Google OAuth UAT 及 PI/REC 核准 E1 Slots/預簽 PDF 尚未核實，不能宣稱正式可營運。
+- NEXT_ACTION=回讀 CI、修正測試與狀態，後續按正式 MVP 最短路徑補 OWNER 原預約與簽署後狀態人工核對；不額外建立通知寄件入口、不重送失敗郵件。
+- SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；不操作舊 Repo/GAS、正式 Sheets、REC 或真人收件。

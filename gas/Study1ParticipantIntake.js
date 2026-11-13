@@ -619,3 +619,89 @@ function study1ParticipantBookingNotice_(verifiedApplicantEmail,consentId){
   return {attempted:true,status:updated[4],jobId};
  }finally{lock.releaseLock();}
 }
+/**
+ * E1 OWNER read-only notification outbox reconciliation.
+ * This is NOT a send/resend endpoint. Provider acceptance is not delivery.
+ * The identity, original reservation and PDF are audited independently;
+ * never expose an applicant email or any original Sheet row to the UI.
+ */
+function study1OwnerE1NotificationAudit(){
+ if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ const lock=LockService.getScriptLock();
+ if(!lock||typeof lock.tryLock!=='function'||lock.tryLock(10000)!==true)
+  throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_BUSY');
+ try{
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_LOST');
+  study1AdminOwnerRequired_();
+  const registry=study1EConsentRegistry_();
+  if(!registry||!Number.isSafeInteger(registry.revision)||
+     !Array.isArray(registry.records))
+   throw Error('OWNER_E1_NOTICE_CONSENT_SOURCE_INVALID');
+  const entries=registry.records.filter(x=>x&&
+   x.channel==='FORMAL_E1'&&x.experiment==='E1'&&
+   x.researcherPresigned===true);
+  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
+  const source=study1WizardTable_(book,'Notifications',
+   STUDY1_E1_NOTIFICATION_HEADERS_);
+  const read=()=>source.n===1?[]:
+   source.tab.getRange(2,1,source.n-1,9).getValues();
+  const first=read(),second=read();
+  if(!Array.isArray(first)||!Array.isArray(second)||
+     first.length!==source.n-1||
+     JSON.stringify(first)!==JSON.stringify(second))
+   throw Error('OWNER_E1_NOTICE_DOUBLE_SNAPSHOT_CHANGED');
+  const byReservation=new Map();
+  for(const row of first){
+   if(!Array.isArray(row)||row.length!==9)
+    throw Error('OWNER_E1_NOTICE_ROW_INVALID');
+   if(row[3]!=='E1_RESERVATION_CONFIRMED')continue;
+   if(typeof row[2]!=='string'||!row[2])
+    throw Error('OWNER_E1_NOTICE_ROW_INVALID');
+   const matches=byReservation.get(row[2])||[];
+   matches.push(row);byReservation.set(row[2],matches);
+  }
+  const seenIds=new Set(),seenReservationIds=new Set();
+  const records=entries.map(entry=>{
+   if(typeof entry.id!=='string'||!entry.id||
+      seenIds.has(entry.id))
+    throw Error('OWNER_E1_NOTICE_CONSENT_NOT_UNIQUE');
+   seenIds.add(entry.id);
+   const bound=entry.binding;
+   const outcome={id:entry.id,
+    consentState:typeof entry.state==='string'?entry.state:'UNKNOWN',
+    noticeStatus:'SOURCE_MISMATCH'};
+   if(!bound||bound.experiment!=='E1'||
+      typeof bound.applicantId!=='string'||!bound.applicantId||
+      typeof bound.reservationId!=='string'||!bound.reservationId||
+      seenReservationIds.has(bound.reservationId))
+    return outcome;
+   seenReservationIds.add(bound.reservationId);
+   const rows=byReservation.get(bound.reservationId)||[];
+   if(!rows.length){outcome.noticeStatus='NOT_QUEUED';return outcome;}
+   if(rows.length!==1)return outcome;
+   const row=rows[0],job='NTF_'+study1BindingHmac_([
+    'E1_BOOKING_CONFIRMATION_NOTICE_V1',entry.id,bound.applicantId,
+    bound.reservationId]).slice(0,28);
+   if(row[0]!==job||row[1]!==bound.applicantId||
+      row[2]!==bound.reservationId||row[5]!==1||
+      typeof row[6]!=='string'||!Number.isFinite(Date.parse(row[6]))||
+      !['DISPATCHING','UNKNOWN','PROVIDER_ACCEPTED'].includes(row[4]))
+    return outcome;
+   if(row[4]==='PROVIDER_ACCEPTED'){
+    if(typeof row[7]!=='string'||!Number.isFinite(Date.parse(row[7]))||
+       row[8]!=='')return outcome;
+    outcome.noticeStatus='PROVIDER_ACCEPTED_NOT_DELIVERED';
+   }else{
+    if(row[7]!==''||
+       (row[4]==='UNKNOWN'&&row[8]!=='MAIL_PROVIDER_OUTCOME_UNKNOWN')||
+       (row[4]==='DISPATCHING'&&row[8]!==''))return outcome;
+    outcome.noticeStatus='UNKNOWN_REQUIRES_STAFF_REVIEW';
+   }
+   return outcome;
+  });
+  if(lock.hasLock()!==true)throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_LOST');
+  return {readOnly:true,source:'ORIGINAL_NOTIFICATIONS',
+   consentRevision:registry.revision,records};
+ }finally{lock.releaseLock();}
+}
