@@ -576,13 +576,23 @@ function study1OwnerE1ConsentBookingAudit(){if(typeof study1V2PublicRpcDeny_==='
    const group=matched.get(row[0])||[];
    group.push(row);matched.set(row[0],group);
   }
-  const records=registry.records.filter(x=>x&&x.channel==='FORMAL_E1'&&
-   x.experiment==='E1').map(x=>{
+  const formal=registry.records.filter(x=>x&&x.channel==='FORMAL_E1'&&
+   x.experiment==='E1');
+  // A reservation cannot independently confirm more than one consent record.
+  // Ambiguous bindings remain UNKNOWN; never pick a winner by row order.
+  const bindingCounts=new Map();
+  for(const entry of formal){
+   const b=entry.binding;
+   if(b&&typeof b.reservationId==='string')
+    bindingCounts.set(b.reservationId,(bindingCounts.get(b.reservationId)||0)+1);
+  }
+  const records=formal.map(x=>{
     const unknown={id:x.id,bookingStatus:'UNKNOWN',bookingConfirmed:false};
     const b=x.binding;
     if(!b||b.experiment!=='E1'||typeof b.reservationId!=='string'||
        typeof b.applicantId!=='string'||typeof b.slotId!=='string')
      return unknown;
+    if(bindingCounts.get(b.reservationId)!==1)return unknown;
     const found=matched.get(b.reservationId)||[];
     if(found.length!==1)return unknown;
     const row=found[0];
