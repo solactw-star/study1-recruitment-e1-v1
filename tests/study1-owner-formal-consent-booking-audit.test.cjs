@@ -92,3 +92,17 @@ test('owner UI must show booking as independently unverified until audit returns
  assert.match(ownerUi,/預約尚未獨立核對/);
  assert.match(ownerUi,/id="eConsentLegacyStaffControls" hidden/);
 });
+
+test('public deployment guard denies audit before OWNER and source reads',()=>{
+ const h=setup();let ownerChecks=0;
+ h.scope.study1AdminOwnerRequired_=()=>{ownerChecks++;};
+ h.scope.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
+ assert.throws(()=>h.scope.study1OwnerE1ConsentBookingAudit(),/PUBLIC_RPC_DENIED/);
+ assert.equal(ownerChecks,0);
+ assert.equal(h.reads(),0);assert.equal(h.writes(),0);
+});
+test('malformed original reservation rows fail closed without any write',()=>{
+ const h=setup();h.rows[0]=h.rows[0].slice(0,9);
+ assert.throws(()=>h.scope.study1OwnerE1ConsentBookingAudit(),/OWNER_E1_BOOKING_AUDIT_ROW_INVALID/);
+ assert.equal(h.writes(),0);
+});
