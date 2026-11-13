@@ -765,8 +765,12 @@ function study1OwnerE1OperationsAudit(){if(typeof study1V2PublicRpcDeny_==='func
      notice.records.some(x=>!bookingIds.has(x.id)))
    throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
   if(lock.hasLock()!==true)throw Error('OWNER_E1_OPERATIONS_LOCK_LOST');
+  // Snapshot observations do not authorize later writes. External writers
+  // may race AFTER the last pass (or perform an undetectable A->B->A change).
+  // A repair still requires its own fresh server-side preflight and CAS.
   return {readOnly:true,source:'ORIGINAL_E1_OPERATIONS',
-   snapshotConsistency:'SAME_LOCK_DOUBLE_READ',asOfUtc,
+   snapshotConsistency:'SAME_LOCK_DOUBLE_READ',
+   actionAuthority:'NONE',externalWriterGuarantee:false,asOfUtc,
    consentRevision:consentA.revision,booking,notice};
  }finally{lock.releaseLock();}
 }

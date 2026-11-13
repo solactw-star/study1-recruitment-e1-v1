@@ -168,7 +168,8 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
  <h2 id="e1OwnerOperationsTitle">E1 正式營運狀態｜本人簽署、原預約與通知唯讀核對</h2>
  <p>此處逐筆核對原同意索引、原 Reservations 與 Notifications outbox，不寫回、不重送郵件、不以已簽 PDF 推定預約成立，亦不將寄件服務接受當成已送達。</p>
  <button type="button" class="secondary" id="e1OpsRead">唯讀核對 E1 預約及通知狀態</button>
- <p id="e1OpsStatus" role="status" aria-live="polite">尚未核對；原預約與通知必須分開核實。</p>
+ <p id="e1OpsStatus" role="status" aria-live="polite">尚未核對；請先唯讀核實原預約與通知。</p>
+ <p id="e1OpsObservationLimit"><small>此處顯示的是查核時間點的原始來源觀察，不是可授權寫入的交易快照。外部無鎖寫入、查核結束後更新或 A→B→A 變化可能無法偵測。人工處置前須重新查原始來源及已簽 PDF／SHA；通知結果 UNKNOWN 不得補寄。</small></p>
  <div id="e1OpsResults" class="booking-table-wrap" role="region" tabindex="0" aria-label="E1 正式預約與通知核對結果"></div>
  <p><small>狀態不明或資料不一致必須人工核對原始紀錄；不得直接重送郵件、再簽署、重建預約或啟用真人收件。</small></p>
  <h3>OWNER 手動核對已簽 PDF 與原預約（禁止自動重試）</h3>
@@ -1013,6 +1014,8 @@ function e1OwnerOperationsSetup_(){
   if(!combined||combined.readOnly!==true||
      combined.source!=='ORIGINAL_E1_OPERATIONS'||
      combined.snapshotConsistency!=='SAME_LOCK_DOUBLE_READ'||
+     combined.actionAuthority!=='NONE'||
+     combined.externalWriterGuarantee!==false||
      !Number.isSafeInteger(combined.consentRevision)||
      typeof combined.asOfUtc!=='string'||
      !Number.isFinite(Date.parse(combined.asOfUtc))||
@@ -1027,7 +1030,7 @@ function e1OwnerOperationsSetup_(){
    throw Error('OWNER_E1_OPERATIONS_REVISION_OR_KEYS_CHANGED');
   clear();
   const table=document.createElement('table'),caption=document.createElement('caption');
-  caption.textContent='正式 E1 同意、原預約及通知出站狀態（僅 OWNER 唯讀）';
+  caption.textContent='正式 E1 同意、原預約及通知查核時觀察（OWNER 唯讀，不授權後續寫入）';
   table.appendChild(caption);
   const head=document.createElement('thead'),hr=document.createElement('tr');
   for(const title of ['同意紀錄 ID','同意索引狀態（非PDF逐檔核驗）','原預約核對','通知 outbox','跨來源處置']){
@@ -1046,11 +1049,11 @@ function e1OwnerOperationsSetup_(){
    else if(noticeRow.consentState!=='CONFIRMED')
     crossStatus='同意索引未完成，不能推定正式報名成立';
    else if(book.bookingStatus!=='CONFIRMED')
-    crossStatus='同意索引已確認，但原預約未確認；不得重送';
+    crossStatus='同意索引已確認，但原預約未確認；不得重送。若仍 HELD，必須另外預檢完整已簽 PDF／OTP／原 Reservations';
    else if(noticeRow.noticeStatus==='NOT_QUEUED')
-    crossStatus='原預約已確認，但未見通知；禁止自動補寄';
+    crossStatus='原預約已確認，但未見通知；禁止自動補寄。先人工查核原 outbox 與服務商結果';
    else if(noticeRow.noticeStatus==='UNKNOWN_REQUIRES_STAFF_REVIEW')
-    crossStatus='原預約已確認，寄送結果 UNKNOWN；禁止重寄';
+    crossStatus='原預約已確認，寄送結果 UNKNOWN；禁止重寄。交研究團隊核對服務商及原 outbox';
    else
     crossStatus='原預約已確認；寄件服務接受不等於送達';
    if(crossStatus!=='原預約已確認；寄件服務接受不等於送達')reviewCount++;
@@ -1065,7 +1068,8 @@ function e1OwnerOperationsSetup_(){
   button.disabled=false;
   statusNode.textContent='已在同一鎖內雙重回讀，依相同同意索引版號 '+booking.consentRevision+
    ' 核對 '+b.size+' 筆，需人工查核 '+reviewCount+
-   ' 筆；同意索引不代替完整PDF逐檔SHA，預約與郵件送達仍是獨立證據。';
+   ' 筆；觀察時間 UTC '+combined.asOfUtc+
+   '。同意索引不代替完整PDF逐檔SHA；外部寫入及 ABA 不受此查核保證。處置前重新唯讀核對，不得憑此表直接操作。';
  }
  button.addEventListener('click',()=>{
   const current=++request;button.disabled=true;clear();
@@ -1079,6 +1083,17 @@ function e1OwnerOperationsSetup_(){
 }
 e1OwnerOperationsSetup_();
 
+/** A joined audit is an observation, not an action authorization.
+ * Any repair/preflight makes the previous displayed observation stale.
+ */
+function e1OwnerOperationsInvalidate_(reason){
+ const out=$('e1OpsResults'),status=$('e1OpsStatus');
+ if(out)while(out.firstChild)out.removeChild(out.firstChild);
+ if(status)status.textContent='先前同鎖跨來源查核畫面已失效：'+
+  (reason||'人工處置狀態已變更')+
+  '。若要查看目前狀態，請手動重新唯讀查核；不可依舊結果寄信或重送預約。';
+}
+
 /** Manual OWNER reconciliation is separate from read-only operations audit.
  * It never auto-retries the POST and never calls MailApp or PDF signing.
  */
@@ -1087,16 +1102,21 @@ function e1OwnerBookingRepairSetup_(){
   attest=$('e1RepairAttest'),commit=$('e1RepairCommit'),status=$('e1RepairStatus');
  if(!id||!read||!attest||!commit||!status||
     typeof read.addEventListener!=='function')return;
- let pending=null,busy=false;
+ let pending=null,busy=false,selectionEpoch=0;
+ // Per-page anti-replay latch: even a response UNKNOWN is a submitted action.
+ // Re-reading a HELD row never silently grants a second POST of this case.
+ const submitted=new Set();
  function reset(){
   pending=null;attest.checked=false;attest.disabled=true;commit.disabled=true;
  }
  function control(){
   commit.disabled=busy||!pending||!attest.checked||
-   id.value.trim()!==pending.consentId;
+   id.value.trim()!==pending.consentId||
+   submitted.has(pending.consentId);
  }
  id.addEventListener('input',()=>{
-  reset();status.textContent='同意紀錄 ID 已變更，請重新唯讀預檢。';
+  selectionEpoch++;reset();
+  status.textContent='同意紀錄 ID 已變更，舊預檢已失效；請重新唯讀核對。';
  });
  attest.addEventListener('change',control);
  read.addEventListener('click',()=>{
@@ -1106,13 +1126,23 @@ function e1OwnerBookingRepairSetup_(){
   if(!/^[A-Za-z0-9_-]{8,64}$/.test(consentId)){
    status.textContent='同意紀錄 ID 格式不合法，不讀取私人紀錄。';return;
   }
+  const epoch=selectionEpoch;
+  e1OwnerOperationsInvalidate_('已開始單筆 PDF／原預約人工預檢');
   busy=true;read.disabled=true;
   status.textContent='正在唯讀核對原簽署 PDF、OTP、HELD 與 PI 核定場次…';
   const done=()=>{busy=false;read.disabled=false;control();};
   google.script.run.withFailureHandler(e=>{
    reset();done();
-   status.textContent='核對失敗／原因果未知，禁止收尾：'+String(e&&e.message||e);
+   status.textContent=selectionEpoch!==epoch||
+    id.value.trim()!==consentId?
+    '選取案件已變更，舊預檢回應作廢；請重新核對。':
+    '核對失敗／原因果未知，禁止收尾：'+String(e&&e.message||e);
   }).withSuccessHandler(x=>{
+   if(selectionEpoch!==epoch||id.value.trim()!==consentId){
+    reset();done();
+    status.textContent='選取案件已變更，舊預檢回應作廢；請重新核對。';
+    return;
+   }
    try{
     if(!x||x.readOnly!==true||x.consentId!==consentId||
        !Number.isSafeInteger(x.consentRevision)||x.consentRevision<0||
@@ -1129,17 +1159,24 @@ function e1OwnerBookingRepairSetup_(){
     }else if(x.disposition==='REPAIRABLE_HELD'&&
        x.bookingConfirmed===false&&x.bookingStatus==='HELD'&&
        typeof x.receipt==='string'&&/^[a-f0-9]{64}$/.test(x.receipt)){
-     pending={consentId,consentRevision:x.consentRevision,receipt:x.receipt};
-     attest.disabled=false;
-     status.textContent='原始證據與有效 HELD 唯讀預檢通過，仍非 CONFIRMED；OWNER 獨立確認後才可單次收尾。';
+     if(submitted.has(consentId)){
+      status.textContent='本頁對此案件已提交過一次，即使原來源仍為 HELD 也禁止第二次 POST。請交研究團隊獨立核對原紀錄與上一筆結果。';
+     }else{
+      pending={consentId,consentRevision:x.consentRevision,receipt:x.receipt};
+      attest.disabled=false;
+      status.textContent='原始證據與有效 HELD 唯讀預檢通過，仍非 CONFIRMED；OWNER 獨立確認後才可單次收尾。';
+     }
     }else throw Error('OWNER_E1_REPAIR_PREFLIGHT_INCONSISTENT');
    }catch(e){reset();status.textContent='預檢不一致，禁止收尾：'+String(e.message||e);}
    done();
   }).study1OwnerE1SignedBookingPreflight(consentId);
  });
  commit.addEventListener('click',()=>{
-  if(busy||!pending||!attest.checked||id.value.trim()!==pending.consentId)return;
+  if(busy||!pending||!attest.checked||id.value.trim()!==pending.consentId||
+     submitted.has(pending.consentId))return;
   const once={...pending};
+  submitted.add(once.consentId);
+  e1OwnerOperationsInvalidate_('OWNER 已送出一次原預約收尾，結果須重新獨立核對');
   reset();busy=true;read.disabled=true;
   status.textContent='已由 OWNER 明確送出一次；在原始資料唯讀回查前結果仍可能 UNKNOWN。';
   const done=()=>{busy=false;read.disabled=false;commit.disabled=true;};

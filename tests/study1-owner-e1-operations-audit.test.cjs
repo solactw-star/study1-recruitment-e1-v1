@@ -166,6 +166,7 @@ function browser(booking,notice,override={}){
     if(notice instanceof Error)return this.fail(notice);
     this.done({...{readOnly:true,source:'ORIGINAL_E1_OPERATIONS',
      snapshotConsistency:'SAME_LOCK_DOUBLE_READ',
+     actionAuthority:'NONE',externalWriterGuarantee:false,
      asOfUtc:'2026-11-13T12:00:00.000Z',consentRevision:4,
      booking,notice},...override});}
   }}}
@@ -184,6 +185,8 @@ test('OWNER UI combines booking and outbox only after same revision and exact ID
  assert.deepEqual(b.calls,['combined']);
  assert.equal(b.elements.get('e1OpsRead').disabled,false);
  assert.match(b.elements.get('e1OpsStatus').textContent,/相同同意索引版號 4/);
+ assert.match(b.elements.get('e1OpsStatus').textContent,/觀察時間 UTC 2026-11-13T12:00:00.000Z/);
+ assert.match(b.elements.get('e1OpsStatus').textContent,/外部寫入及 ABA 不受此查核保證/);
  const view=JSON.stringify(b.elements.get('e1OpsResults'));
  assert.match(view,/郵件服務已接受（非實際送達證明）/);
  assert.match(view,/已由原 Reservations 核實/);
@@ -220,6 +223,8 @@ test('OWNER UI rejects revision drift, missing row, booking ambiguity and privat
 test('OWNER UI refuses joined metadata that is not verified within one lock and two reads',()=>{
  for(const override of [
   {snapshotConsistency:'SEPARATE_RPCS'},
+  {actionAuthority:'REPAIR_ALLOWED'},
+  {externalWriterGuarantee:true},
   {source:'ORIGINAL_NOTIFICATIONS'},
   {consentRevision:5},
   {asOfUtc:'INVALID'},
@@ -239,25 +244,40 @@ test('public OWNER interface remains closed and contains no notification send/re
  assert.doesNotMatch(uiSource,/MailApp|\.sendEmail\(|\.setValues\(|\.appendRow\(|\.innerHTML\s*=/);
 });
 
+const invalidationStart=ownerHtml.indexOf('function e1OwnerOperationsInvalidate_(reason){');
+const invalidationEnd=ownerHtml.indexOf('\n/** Manual OWNER reconciliation',invalidationStart);
+assert.ok(invalidationStart>0&&invalidationEnd>invalidationStart,
+ 'OWNER review must invalidate earlier joined audit at human action boundary');
+const invalidationCode=ownerHtml.slice(invalidationStart,invalidationEnd);
 const repairStart=ownerHtml.indexOf('function e1OwnerBookingRepairSetup_(){');
 const repairEnd=ownerHtml.indexOf('\ne1OwnerBookingRepairSetup_();',repairStart);
 assert.ok(repairStart>0&&repairEnd>repairStart,
  'OWNER must expose explicit signed-PDF/original-booking repair UI');
 const repairCode=ownerHtml.slice(repairStart,repairEnd+
  '\ne1OwnerBookingRepairSetup_();'.length);
-function repairBrowser(preflightResult,repairResult){
+function repairBrowser(preflightResult,repairResult,opts={}){
  const ids=['e1RepairConsentId','e1RepairPreflight','e1RepairAttest',
-  'e1RepairCommit','e1RepairStatus'];
+  'e1RepairCommit','e1RepairStatus','e1OpsStatus','e1OpsResults'];
  const nodes=new Map(ids.map(id=>[id,{id,value:'',checked:false,disabled:false,
-  textContent:'',listeners:{},addEventListener(type,fn){this.listeners[type]=fn;}}]));
+  textContent:'',listeners:{},children:[],
+  addEventListener(type,fn){this.listeners[type]=fn;},
+  removeChild(child){this.children.splice(this.children.indexOf(child),1);return child;},
+  get firstChild(){return this.children[0]||null;}
+ }]));
  const requests=[];
  const runner={
   withFailureHandler(cb){this.fail=cb;return this;},
   withSuccessHandler(cb){this.done=cb;return this;},
   study1OwnerE1SignedBookingPreflight(id){
    requests.push({type:'read',id});
-   if(preflightResult instanceof Error)this.fail(preflightResult);
-   else this.done(preflightResult);
+   const fail=this.fail,done=this.done;
+   if(opts.deferPreflight){
+    this.pending=()=>preflightResult instanceof Error?
+     fail(preflightResult):done(preflightResult);
+    return;
+   }
+   if(preflightResult instanceof Error)fail(preflightResult);
+   else done(preflightResult);
   },
   study1OwnerE1SignedBookingRepair(value){
    requests.push({type:'commit',value});
@@ -268,9 +288,11 @@ function repairBrowser(preflightResult,repairResult){
  const scope={google:{script:{run:runner}},
   document:{getElementById:id=>nodes.get(id)},
   $:id=>nodes.get(id)};
- vm.createContext(scope);vm.runInContext(repairCode,scope);
+ vm.createContext(scope);
+ vm.runInContext(invalidationCode,scope);
+ vm.runInContext(repairCode,scope);
  const fire=(id,event='click')=>nodes.get(id).listeners[event]();
- return {nodes,requests,fire};
+ return {nodes,requests,fire,flushPreflight:()=>runner.pending?.()};
 }
 const targetId='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const targetReservation='RSV_OWNER_1234567890';
@@ -332,10 +354,60 @@ test('changing selected consent invalidates the prior preflight and lost repair 
  h.fire('e1RepairCommit');
  assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
 });
+test('UNKNOWN commit latches the same consent against another POST despite a fresh HELD read',()=>{
+ const h=repairBrowser(preflight,new Error('ORIGINAL_SHEET_RESPONSE_UNKNOWN'));
+ const n=h.nodes;
+ n.get('e1OpsResults').children.push({id:'previous-joined-observation'});
+ n.get('e1OpsStatus').textContent='old CONFIRMED';
+ n.get('e1RepairConsentId').value=targetId;
+ h.fire('e1RepairPreflight');
+ assert.equal(n.get('e1OpsResults').children.length,0);
+ assert.match(n.get('e1OpsStatus').textContent,/已失效/);
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+ assert.match(n.get('e1RepairStatus').textContent,/UNKNOWN/);
+ h.fire('e1RepairPreflight');
+ assert.equal(h.requests.filter(x=>x.type==='read').length,2);
+ assert.match(n.get('e1RepairStatus').textContent,/已提交過一次/);
+ assert.equal(n.get('e1RepairAttest').disabled,true);
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+});
+test('success reply also latches one case; another case does not inherit its latch',()=>{
+ const h=repairBrowser(preflight,repaired),n=h.nodes;
+ n.get('e1RepairConsentId').value=targetId;
+ h.fire('e1RepairPreflight');
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ h.fire('e1RepairCommit');
+ h.fire('e1RepairPreflight');
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ assert.match(n.get('e1RepairStatus').textContent,/已提交過一次/);
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+});
+test('selection changes while preflight RPC is in flight invalidate even a same-ID late result',()=>{
+ const h=repairBrowser(preflight,repaired,{deferPreflight:true}),n=h.nodes;
+ n.get('e1RepairConsentId').value=targetId;
+ h.fire('e1RepairPreflight');
+ n.get('e1RepairConsentId').value='OTHER_CONSENT_12345678';
+ h.fire('e1RepairConsentId','input');
+ n.get('e1RepairConsentId').value=targetId;
+ h.fire('e1RepairConsentId','input');
+ h.flushPreflight();
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ assert.equal(n.get('e1RepairAttest').disabled,true);
+ assert.match(n.get('e1RepairStatus').textContent,/舊預檢回應作廢/);
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,0);
+});
 test('OWNER repair UI contains only explicit preflight and one guarded RPC, no email, signing or automatic retry',()=>{
  assert.match(ownerHtml,/id="e1RepairPreflight"/);
  assert.match(ownerHtml,/id="e1RepairAttest"/);
  assert.match(ownerHtml,/id="e1RepairCommit"/);
+ assert.match(ownerHtml,/id="e1OpsObservationLimit"/);
+ assert.match(repairCode,/submitted\.add\(once\.consentId\)/);
+ assert.match(repairCode,/e1OwnerOperationsInvalidate_\(/);
  assert.match(repairCode,/\.study1OwnerE1SignedBookingPreflight\(consentId\)/);
  assert.match(repairCode,/\.study1OwnerE1SignedBookingRepair\(once\)/);
  assert.doesNotMatch(repairCode,/MailApp|\.sendEmail\(|study1EConsentSignPdf\(|\.appendRow\(|\.setValues\(|\.innerHTML\s*=/);
@@ -361,7 +433,7 @@ function joinedHarness(opts={}){
   '2026-11-14T08:00:00.000Z',1,'CYCU','OPEN','PI',
   '2026-11-13T04:00:00.000Z'];
  const stableNotice=row();
- let noticeRows=[stableNotice],nowLocked=()=>lockHeld;
+ let noticeRows=[stableNotice],nowLocked=()=>lockHeld,abaTransitions=0;
  const deep=x=>JSON.parse(JSON.stringify(x));
  const ctx={
   study1AdminOwnerRequired_:()=>{ownerChecks++;if(opts.denied)throw Error('OWNER_REQUIRED');},
@@ -383,6 +455,11 @@ function joinedHarness(opts={}){
    if(bookingReads===2&&opts.bookingDrift)result.reservations.rows[0][9]='2026-11-13T05:46:00.000Z';
    if(bookingReads===2&&opts.slotDrift)result.slots.rows[0][5]='CLOSED';
    if(opts.missingHeaders)delete result.slots.headers;
+   if(bookingReads===1&&opts.externalABA){
+    // An unsynchronized external A->B->A writer can escape both observations.
+    stableReservation[3]='CANCELLED';abaTransitions++;
+    stableReservation[3]='CONFIRMED';abaTransitions++;
+   }
    return result;
   },
   study1FormalValidateSnapshot_:()=>{if(opts.invalidSchema)throw Error('ORIGINAL_SCHEMA_INVALID');},
@@ -423,8 +500,13 @@ function joinedHarness(opts={}){
  scope.study1FormalSnapshot_=readOriginalSnapshot;
  scope.study1FormalValidateSnapshot_=validateOriginalSnapshot;
  vm.runInContext(src,scope);
- return {scope,stats:()=>({ownerChecks,consentReads,bookingReads,noticeReads,
-  noticeMetadata,locks,unlocks,privateOpens,writes,mailCalls})};
+ return {scope,
+  simulateExternalChangeAfterRead:()=>{
+   stableReservation[3]='CANCELLED';
+   noticeRows[0][4]='UNKNOWN';
+  },
+  stats:()=>({ownerChecks,consentReads,bookingReads,noticeReads,
+   noticeMetadata,locks,unlocks,privateOpens,writes,mailCalls,abaTransitions})};
 }
 
 test('joined OWNER audit returns one coherent read under one lock and same consent revision',()=>{
@@ -432,6 +514,8 @@ test('joined OWNER audit returns one coherent read under one lock and same conse
  assert.equal(result.readOnly,true);
  assert.equal(result.source,'ORIGINAL_E1_OPERATIONS');
  assert.equal(result.snapshotConsistency,'SAME_LOCK_DOUBLE_READ');
+ assert.equal(result.actionAuthority,'NONE');
+ assert.equal(result.externalWriterGuarantee,false);
  assert.equal(result.consentRevision,7);
  assert.equal(result.booking.consentRevision,result.notice.consentRevision);
  assert.deepEqual(JSON.parse(JSON.stringify(result.booking.records)),
@@ -479,6 +563,24 @@ test('schema/lock failures prohibit joined result and never send, write or retry
   assert.throws(()=>h.scope.study1OwnerE1OperationsAudit(),error);
   assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
  }
+});
+test('an external A-to-B-to-A write cannot be proved absent by matching double reads',()=>{
+ const h=joinedHarness({externalABA:true});
+ const result=h.scope.study1OwnerE1OperationsAudit();
+ assert.equal(h.stats().abaTransitions,2);
+ assert.equal(result.booking.records[0].bookingStatus,'CONFIRMED');
+ assert.equal(result.actionAuthority,'NONE');
+ assert.equal(result.externalWriterGuarantee,false);
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+});
+test('external writes after the last observation cannot authorize any later OWNER action',()=>{
+ const h=joinedHarness(),result=h.scope.study1OwnerE1OperationsAudit();
+ h.simulateExternalChangeAfterRead();
+ assert.equal(result.booking.records[0].bookingStatus,'CONFIRMED');
+ assert.equal(result.notice.records[0].noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');
+ assert.equal(result.actionAuthority,'NONE');
+ assert.equal(result.externalWriterGuarantee,false);
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
 });
 test('joined public RPC denied BEFORE owner and private reads; non-owner denied before lock',()=>{
  for(const opts of [{publicDenied:true},{denied:true}]){
