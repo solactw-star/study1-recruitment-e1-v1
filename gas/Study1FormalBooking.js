@@ -495,10 +495,33 @@ function study1FormalMove(input){if(typeof study1V2PublicRpcDeny_==='function')s
  * This is a deliberately one-way, idempotent repairable transaction; it does
  * NOT change the HELD/quote policy or silently resurrect expired bookings.
  */
-function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken){
+/** Private original-source HMAC receipt for one OWNER consent/booking preflight. */
+function study1FormalReconcileReceipt_(registry,entry,original){
+ if(!Number.isSafeInteger(registry.revision)||registry.revision<0||
+    !entry||!entry.binding||!Array.isArray(original)||original.length!==10)
+  throw Error('FORMAL_BOOKING_RECONCILE_SOURCE_INVALID');
+ return study1BindingHmac_(['E1_OWNER_SIGNED_BOOKING_RECONCILE_V1',
+  registry.revision,entry.id,entry.tokenHash,entry.documentSha,
+  entry.documentVersion,entry.binding.digest,...original]);
+}
+function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken,ownerAction){
  // OWNER can reconcile legacy records; a valid participant token can only
  // close its own already-signed, owner-uploaded pre-signed E1 PDF transaction.
  const participantPath=typeof capabilityToken==='string';
+ if(ownerAction!==undefined){
+  if(participantPath||!ownerAction||typeof ownerAction!=='object'||
+     Array.isArray(ownerAction)||!['PREFLIGHT','COMMIT'].includes(ownerAction.mode))
+   throw Error('FORMAL_BOOKING_RECONCILE_MODE_INVALID');
+  const keys=Object.keys(ownerAction).sort().join(',');
+  if(ownerAction.mode==='PREFLIGHT'&&keys!=='mode')
+   throw Error('FORMAL_BOOKING_RECONCILE_MODE_INVALID');
+  if(ownerAction.mode==='COMMIT'&&
+     (keys!=='consentRevision,mode,receipt'||
+      !Number.isSafeInteger(ownerAction.consentRevision)||
+      ownerAction.consentRevision<0||
+      !/^[a-f0-9]{64}$/.test(ownerAction.receipt||'')))
+   throw Error('FORMAL_BOOKING_RECONCILE_MODE_INVALID');
+ }
  if(!participantPath)study1AdminOwnerRequired_();
  study1FormalConsentGate_();
  study1BindingId_(consentId);
@@ -513,6 +536,12 @@ function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken){
   const matches=registry.records.filter(x=>x.id===consentId);
   if(matches.length!==1)throw Error('FORMAL_BOOKING_CONSENT_NOT_UNIQUE');
   const entry=matches[0],bound=entry.binding;
+  // A conflicting consent bound to the same original reservation cannot
+  // silently pick a winner, even if one record has valid PDF evidence.
+  if(bound&&registry.records.some(x=>x&&x.id!==entry.id&&
+      x.channel==='FORMAL_E1'&&x.experiment==='E1'&&x.binding&&
+      x.binding.reservationId===bound.reservationId))
+   throw Error('FORMAL_BOOKING_RESERVATION_CONSENT_NOT_UNIQUE');
   const researcherPreSigned=entry.researcherPresigned===true;
   if(participantPath){
    const holder=study1EConsentEntry_(capabilityToken,registry);
@@ -520,7 +549,8 @@ function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken){
       !researcherPreSigned)throw Error('FORMAL_BOOKING_OWNER_OR_SELF_TOKEN_REQUIRED');
   }
   if(entry.state!=='CONFIRMED'||entry.channel!=='FORMAL_E1'||
-     entry.experiment!=='E1'||!bound||bound.experiment!=='E1'||
+     entry.experiment!=='E1'||entry.researcherPresigned!==true||
+     !bound||bound.experiment!=='E1'||
      !entry.signature||!entry.confirmation||!entry.participantSignedPdf||
      !entry.signedPdf)
    throw Error('FORMAL_BOOKING_DUAL_PDF_NOT_CONFIRMED');
@@ -560,15 +590,37 @@ function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken){
   if(original[3]==='CONFIRMED'){
    if(!original[7]||original[8])
     throw Error('FORMAL_BOOKING_CONFIRMATION_INCONSISTENT');
+   if(ownerAction&&ownerAction.mode==='PREFLIGHT')
+    return {readOnly:true,disposition:'ALREADY_CONFIRMED',
+     bookingConfirmed:true,bookingStatus:'CONFIRMED',
+     consentId:entry.id,reservationId:original[0],
+     consentRevision:registry.revision};
    return {bookingConfirmed:true,reason:'ALREADY_CONFIRMED',
     reservationId:original[0],bookingStatus:'CONFIRMED',readOnlyReplay:true};
   }
-  if(original[3]!=='HELD'||study1BindingUtc_(original[4])<=Date.now())
+  if(original[3]!=='HELD'||study1BindingUtc_(original[4])<=Date.now()){
+   if(ownerAction&&ownerAction.mode==='PREFLIGHT')
+    return {readOnly:true,disposition:'MANUAL_REVIEW_ONLY',
+     bookingConfirmed:false,bookingStatus:original[3]==='HELD'?'EXPIRED':original[3],
+     consentId:entry.id,reservationId:original[0],
+     consentRevision:registry.revision};
    throw Error('FORMAL_BOOKING_HELD_EXPIRED_OR_CHANGED');
+  }
   // Verify the actual self-reported applicant and consumed Email OTP afresh.
   const adapter=study1EConsentBindingAdapter_('PUBLIC_E1');
   study1BindingRecheck_(bound,doc,adapter,nowUtc,lock);
   if(lock.hasLock()!==true)throw Error('FORMAL_BOOKING_FINALIZE_LOCK_LOST');
+  if(ownerAction){
+   const receipt=study1FormalReconcileReceipt_(registry,entry,original);
+   if(ownerAction.mode==='PREFLIGHT')
+    return {readOnly:true,disposition:'REPAIRABLE_HELD',
+     bookingConfirmed:false,bookingStatus:'HELD',
+     consentId:entry.id,reservationId:original[0],
+     consentRevision:registry.revision,receipt};
+   if(registry.revision!==ownerAction.consentRevision||
+      receipt!==ownerAction.receipt)
+    throw Error('FORMAL_BOOKING_RECONCILE_PREFLIGHT_STALE');
+  }
   const changed=original.slice();
   changed[3]='CONFIRMED';changed[7]=nowUtc;changed[9]=nowUtc;
   study1FormalWriteExisting_(ctx,original,changed);
@@ -646,4 +698,35 @@ function study1OwnerE1ConsentBookingAudit(){if(typeof study1V2PublicRpcDeny_==='
   return {readOnly:true,source:'ORIGINAL_RESERVATIONS',
    consentRevision:registry.revision,asOfUtc,records};
  }finally{lock.releaseLock();}
+}
+
+/** No writes: OWNER verifies exact signed PDF/event chain, OTP, current PI
+ * slot and original Reservations. A candidate is never an actual booking.
+ */
+function study1OwnerE1SignedBookingPreflight(consentId){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();study1BindingId_(consentId);
+ return study1FormalFinalizeSignedE1Booking_(consentId,undefined,{mode:'PREFLIGHT'});
+}
+/** Explicit OWNER only, one original HELD -> CONFIRMED CAS with current receipt.
+ * Does not re-sign, rebook, or send/resend a notification. Ambiguous response:
+ * STOP and independently read original Reservations; never POST automatically.
+ */
+function study1OwnerE1SignedBookingRepair(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ if(!input||typeof input!=='object'||Array.isArray(input)||
+    Object.keys(input).sort().join(',')!=='consentId,consentRevision,receipt'||
+    !Number.isSafeInteger(input.consentRevision)||input.consentRevision<0||
+    typeof input.receipt!=='string'||!/^[a-f0-9]{64}$/.test(input.receipt))
+  throw Error('OWNER_E1_SIGNED_BOOKING_REPAIR_REQUEST_INVALID');
+ study1BindingId_(input.consentId);
+ const result=study1FormalFinalizeSignedE1Booking_(
+  input.consentId,undefined,{mode:'COMMIT',
+   consentRevision:input.consentRevision,receipt:input.receipt});
+ if(result.bookingConfirmed!==true||result.bookingStatus!=='CONFIRMED')
+  throw Error('OWNER_E1_SIGNED_BOOKING_REPAIR_NOT_CONFIRMED');
+ return {bookingConfirmed:true,bookingStatus:'CONFIRMED',
+  consentId:input.consentId,reservationId:result.reservationId,
+  readOnlyReplay:result.readOnlyReplay===true,
+  notification:'NOT_SENT_BY_RECONCILIATION',
+  next:'VERIFY_ORIGINAL_RESERVATIONS_AND_OUTBOX'};
 }

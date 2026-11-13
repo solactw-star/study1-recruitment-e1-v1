@@ -171,6 +171,15 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
  <p id="e1OpsStatus" role="status" aria-live="polite">尚未核對；原預約與通知必須分開核實。</p>
  <div id="e1OpsResults" class="booking-table-wrap" role="region" tabindex="0" aria-label="E1 正式預約與通知核對結果"></div>
  <p><small>狀態不明或資料不一致必須人工核對原始紀錄；不得直接重送郵件、再簽署、重建預約或啟用真人收件。</small></p>
+ <h3>OWNER 手動核對已簽 PDF 與原預約（禁止自動重試）</h3>
+ <p>只允許完整研究者預簽 PDF 與本人手寫已簽 PDF 均經伺服器驗證、原 Reservations 唯一有效 HELD 的同一筆。先執行唯讀預檢；核對無誤後才能明確操作一次。過期、取消與任何來源變動不得恢復。</p>
+ <label for="e1RepairConsentId">原簽署 PDF 的 E1 同意紀錄 ID</label>
+ <input type="text" id="e1RepairConsentId" autocomplete="off" maxlength="64" placeholder="請從上方唯讀索引抄錄並核對 ID">
+ <button id="e1RepairPreflight" type="button" class="secondary">唯讀預檢完整簽署 PDF、OTP 及原 HELD</button>
+ <label><input type="checkbox" id="e1RepairAttest" disabled> 我已獨立核對本人完整簽署 PDF、SHA 及原 Reservations，確認此案有資格安全收尾。</label>
+ <button id="e1RepairCommit" type="button" disabled>OWNER 明確執行單次原 HELD 預約收尾</button>
+ <p id="e1RepairStatus" role="status" aria-live="polite">尚未唯讀預檢；不會自動修改、重新簽署或寄送通知。</p>
+ <p><small>無論成功、逾時或錯誤，均須重新唯讀查原 Reservations 與 Notifications；禁止盲目重送、再簽署、補寄或自行啟用真人收件。</small></p>
 </section>
 
 <section id="staffWithdrawal" aria-labelledby="staffWithdrawalTitle">
@@ -1045,6 +1054,90 @@ function e1OwnerOperationsSetup_(){
  });
 }
 e1OwnerOperationsSetup_();
+
+/** Manual OWNER reconciliation is separate from read-only operations audit.
+ * It never auto-retries the POST and never calls MailApp or PDF signing.
+ */
+function e1OwnerBookingRepairSetup_(){
+ const id=$('e1RepairConsentId'),read=$('e1RepairPreflight'),
+  attest=$('e1RepairAttest'),commit=$('e1RepairCommit'),status=$('e1RepairStatus');
+ if(!id||!read||!attest||!commit||!status||
+    typeof read.addEventListener!=='function')return;
+ let pending=null,busy=false;
+ function reset(){
+  pending=null;attest.checked=false;attest.disabled=true;commit.disabled=true;
+ }
+ function control(){
+  commit.disabled=busy||!pending||!attest.checked||
+   id.value.trim()!==pending.consentId;
+ }
+ id.addEventListener('input',()=>{
+  reset();status.textContent='同意紀錄 ID 已變更，請重新唯讀預檢。';
+ });
+ attest.addEventListener('change',control);
+ read.addEventListener('click',()=>{
+  if(busy)return;
+  reset();
+  const consentId=id.value.trim();
+  if(!/^[A-Za-z0-9_-]{8,64}$/.test(consentId)){
+   status.textContent='同意紀錄 ID 格式不合法，不讀取私人紀錄。';return;
+  }
+  busy=true;read.disabled=true;
+  status.textContent='正在唯讀核對原簽署 PDF、OTP、HELD 與 PI 核定場次…';
+  const done=()=>{busy=false;read.disabled=false;control();};
+  google.script.run.withFailureHandler(e=>{
+   reset();done();
+   status.textContent='核對失敗／原因果未知，禁止收尾：'+String(e&&e.message||e);
+  }).withSuccessHandler(x=>{
+   try{
+    if(!x||x.readOnly!==true||x.consentId!==consentId||
+       !Number.isSafeInteger(x.consentRevision)||x.consentRevision<0||
+       typeof x.reservationId!=='string'||
+       !/^[A-Za-z0-9_-]{8,64}$/.test(x.reservationId))
+     throw Error('OWNER_E1_REPAIR_PREFLIGHT_INVALID');
+    if(x.disposition==='ALREADY_CONFIRMED'&&x.bookingConfirmed===true&&
+       x.bookingStatus==='CONFIRMED'){
+     status.textContent='原 Reservations 已核實 CONFIRMED，不得再次寫入；另查通知 outbox。';
+    }else if(x.disposition==='MANUAL_REVIEW_ONLY'&&
+       x.bookingConfirmed===false&&
+       ['EXPIRED','CANCELLED','WAITLISTED','UNKNOWN'].includes(x.bookingStatus)){
+     status.textContent='原預約 '+x.bookingStatus+' 無資格收尾；僅交研究團隊人工核對。';
+    }else if(x.disposition==='REPAIRABLE_HELD'&&
+       x.bookingConfirmed===false&&x.bookingStatus==='HELD'&&
+       typeof x.receipt==='string'&&/^[a-f0-9]{64}$/.test(x.receipt)){
+     pending={consentId,consentRevision:x.consentRevision,receipt:x.receipt};
+     attest.disabled=false;
+     status.textContent='原始證據與有效 HELD 唯讀預檢通過，仍非 CONFIRMED；OWNER 獨立確認後才可單次收尾。';
+    }else throw Error('OWNER_E1_REPAIR_PREFLIGHT_INCONSISTENT');
+   }catch(e){reset();status.textContent='預檢不一致，禁止收尾：'+String(e.message||e);}
+   done();
+  }).study1OwnerE1SignedBookingPreflight(consentId);
+ });
+ commit.addEventListener('click',()=>{
+  if(busy||!pending||!attest.checked||id.value.trim()!==pending.consentId)return;
+  const once={...pending};
+  reset();busy=true;read.disabled=true;
+  status.textContent='已由 OWNER 明確送出一次；在原始資料唯讀回查前結果仍可能 UNKNOWN。';
+  const done=()=>{busy=false;read.disabled=false;commit.disabled=true;};
+  google.script.run.withFailureHandler(e=>{
+   done();status.textContent='預約收尾回應 UNKNOWN／失敗：'+
+    String(e&&e.message||e)+
+    '。不得重送；請重新唯讀預檢原 Reservations 與通知 outbox。';
+  }).withSuccessHandler(x=>{
+   done();
+   if(!x||x.consentId!==once.consentId||
+      x.bookingConfirmed!==true||x.bookingStatus!=='CONFIRMED'||
+      x.notification!=='NOT_SENT_BY_RECONCILIATION'){
+    status.textContent='原預約結果未核實；不能宣稱已完成，請唯讀回查。';return;
+   }
+   status.textContent=x.readOnlyReplay===true?
+    '原 Reservations 已確認為 CONFIRMED（唯讀回放）；請另核對 outbox。':
+    '單次原 HELD 收尾回報 CONFIRMED；仍須重新唯讀核對 Reservations 和通知 outbox（不會補寄）。';
+  }).study1OwnerE1SignedBookingRepair(once);
+ });
+ reset();
+}
+e1OwnerBookingRepairSetup_();
 
 
 function staffWithdrawalSetup_(){

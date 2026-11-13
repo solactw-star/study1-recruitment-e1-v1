@@ -308,9 +308,10 @@ test('V08 partial move failure never claims success, never retries destructive s
 
 
 /**
- * Synthetic OWNER researcher's online second signature has already committed
- * in a separate immutable PDF registry. Its consent state NEVER by itself
- * grants a seat: only this second original Reservations CAS can do that.
+ * Synthetic original researcher-PRESIGNED full PDF plus the participant's
+ * one final electronic signature has already committed to the private registry.
+ * The consent state NEVER grants a seat by itself; the original Reservations
+ * CAS is a separately verified transaction.
  */
 function signedConsentFixture(h,person,held){
  const consentId='CONSENT_E1_ONLINE_12345678',docId='REC_SYNTH_DOC_12345678';
@@ -325,12 +326,13 @@ function signedConsentFixture(h,person,held){
   otpUsedAtUtc:person.verifiedAtUtc,holdUntilUtc:row[4],digest:''
  };
  binding.digest=h.ctx.study1BindingDigest_(binding);
+ const pdf={id:'E1_PRESIGNED_AND_PARTICIPANT_123456',sha:'e'.repeat(64)};
  const x={id:consentId,state:'CONFIRMED',channel:'FORMAL_E1',
-  experiment:'E1',documentSha:'a'.repeat(64),documentVersion:'REC_V02',
+  experiment:'E1',researcherPresigned:true,tokenHash:'a'.repeat(64),
+  documentSha:'a'.repeat(64),documentVersion:'REC_V02',
   binding,signature:{id:'SIGNATURE_123456789',sha:'b'.repeat(64)},
   confirmation:{id:'CONFIRM_123456789',sha:'c'.repeat(64)},
-  participantSignedPdf:{id:'PART_SIGNED_123456789',sha:'d'.repeat(64)},
-  signedPdf:{id:'DOUBLE_SIGNED_123456789',sha:'e'.repeat(64)}
+  participantSignedPdf:pdf,signedPdf:pdf
  };
  let owner=true, pdfChecks=0,bindingChecks=0;
  h.ctx.study1AdminOwnerRequired_=()=>{if(!owner)throw Error('OWNER_REQUIRED')};
@@ -339,13 +341,17 @@ function signedConsentFixture(h,person,held){
   consentDocumentId:docId,consentDocumentSha256:'a'.repeat(64)});
  h.ctx.study1EConsentReadyDocument_=exp=>{
   if(exp!=='E1')throw Error('EXPERIMENT_NOT_OPEN');
-  return {id:docId,experiment:'E1',version:'REC_V02',sha256:'a'.repeat(64)};
+  return {id:docId,experiment:'E1',version:'REC_V02',
+   researcherPresigned:true,sha256:'a'.repeat(64)};
  };
- h.ctx.study1EConsentRegistry_=()=>({records:[x]});
+ const registry={schemaVersion:1,revision:7,records:[x]};
+ h.ctx.study1EConsentRegistry_=()=>registry;
  h.ctx.study1EConsentEvent_=(ref,entry,kind)=>{
   assert.equal(entry,x);
   if(kind==='SIGNATURE')return {data:{signedPdfSha256:x.participantSignedPdf.sha}};
   if(kind==='CONFIRMATION')return {data:{
+   mode:'RESEARCHER_PRESIGNED_SOURCE',
+   researcherSignedSourceSha256:x.documentSha,
    signatureHash:x.signature.sha,
    participantSignedPdfSha256:x.participantSignedPdf.sha,
    researcherSignedPdfSha256:'e'.repeat(64)}};
@@ -363,7 +369,7 @@ function signedConsentFixture(h,person,held){
   assert.equal(doc.sha256,'a'.repeat(64));assert.ok(adapter);
   assert.equal(typeof utc,'string');bindingChecks++;return b;
  };
- return {x,consentId,setOwner:v=>{owner=v;},
+ return {x,consentId,registry,setOwner:v=>{owner=v;},
   get pdfChecks(){return pdfChecks},get bindingChecks(){return bindingChecks}};
 }
 test('§70-S.23 original reservation finalization requires valid online dual-PDF and OWNER',()=>{
@@ -522,4 +528,150 @@ test('signed HOLD readback refuses tampered quote, other requester and false sta
  assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:b,
   slotId:h.S1,requestId,quote:signed}),/QUOTE_INVALID/);
  assert.equal(h.mutations.length,count);
+});
+
+test('OWNER signed-PDF preflight is read-only and only offers current original HELD to manual operator',()=>{
+ const h=harness(),person=h.person('A'),proof=h.proof(person),
+  held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+ const before=h.mutations.length;
+ const result=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+ assert.equal(result.readOnly,true);assert.equal(result.bookingConfirmed,false);
+ assert.equal(result.bookingStatus,'HELD');assert.equal(result.disposition,'REPAIRABLE_HELD');
+ assert.equal(result.consentRevision,c.registry.revision);
+ assert.equal(result.reservationId,held.reservationId);
+ assert.match(result.receipt,/^[a-f0-9]{64}$/);
+ assert.equal(result.consentId,c.consentId);
+ assert.equal(h.tables.Reservations.rows[0][3],'HELD');
+ assert.equal(h.mutations.length,before);
+ assert.ok(c.pdfChecks>=2);assert.equal(c.bindingChecks,1);
+ assert.equal(JSON.stringify(result).includes(person.email),false);
+});
+test('explicit OWNER repair takes exact fresh preflight then confirms original Reservations ONCE; never sends notice',()=>{
+ const h=harness(),person=h.person('A'),proof=h.proof(person),
+  held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+ const candidate=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+ const req={consentId:c.consentId,consentRevision:candidate.consentRevision,receipt:candidate.receipt};
+ const before=h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length;
+ const confirmed=h.ctx.study1OwnerE1SignedBookingRepair(req);
+ assert.equal(confirmed.bookingConfirmed,true);assert.equal(confirmed.bookingStatus,'CONFIRMED');
+ assert.equal(confirmed.reservationId,held.reservationId);
+ assert.equal(confirmed.notification,'NOT_SENT_BY_RECONCILIATION');
+ assert.equal(confirmed.readOnlyReplay,false);
+ assert.equal(h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length,before+1);
+ const after=h.mutations.length;
+ const checked=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+ assert.equal(checked.disposition,'ALREADY_CONFIRMED');
+ assert.equal(checked.readOnly,true);
+ const replay=h.ctx.study1OwnerE1SignedBookingRepair(req);
+ assert.equal(replay.readOnlyReplay,true);
+ assert.equal(h.mutations.length,after);
+});
+test('stale preflight consent revision, HMAC, slot/hold row change and forged owner receipt cannot mutate',()=>{
+ const bads=[
+  (h,c,req)=>{req.receipt='0'.repeat(64);},
+  (h,c,req)=>{req.consentRevision++;},
+  (h,c,req)=>{c.registry.revision++;},
+  (h,c,req)=>{h.tables.Reservations.rows[0][5]='STOLEN_OR_MUTATED_IDEMPOTENCY_KEY';},
+  (h,c,req)=>{h.tables.Slots.rows[0][3]=2;}
+ ];
+ for(const alter of bads){
+  const h=harness(),person=h.person('A'),proof=h.proof(person),
+   held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+  const p=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+  const req={consentId:c.consentId,consentRevision:p.consentRevision,receipt:p.receipt};
+  const writes=h.mutations.length;alter(h,c,req);
+  assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair(req),
+   /PREFLIGHT_STALE|SLOT_REGISTRY|SLOT.*HMAC|SLOT.*TAMPER|SLOT.*CHANGED|RESERVATION|IDEMPOTENCY|KEY/);
+  assert.equal(h.tables.Reservations.rows[0][3],'HELD');
+  assert.equal(h.mutations.length,writes);
+ }
+});
+test('preflight expired/cancelled HELD returns review-only, never issues a receipt or writes',()=>{
+ for(const kind of ['EXPIRED','CANCELLED']){
+  const h=harness(),person=h.person('A'),proof=h.proof(person),
+   held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+  if(kind==='EXPIRED')h.clock.now+=11*60000;
+  else{
+   const row=h.tables.Reservations.rows[0];
+   row[3]='CANCELLED';row[8]=new Date(h.clock.now).toISOString();
+   row[9]=row[8];
+  }
+  const before=h.mutations.length;
+  const p=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+  assert.equal(p.disposition,'MANUAL_REVIEW_ONLY');
+  assert.equal(p.bookingStatus,kind);
+  assert.equal(p.bookingConfirmed,false);
+  assert.equal(p.receipt,undefined);
+  assert.equal(h.mutations.length,before);
+  assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair({
+   consentId:c.consentId,consentRevision:p.consentRevision,receipt:'a'.repeat(64)}),
+   /HELD_EXPIRED_OR_CHANGED/);
+  assert.equal(h.mutations.length,before);
+ }
+});
+test('public and non-OWNER repair RPCs deny before private registry or Reservations reads',()=>{
+ const h=harness(),person=h.person('A'),proof=h.proof(person),
+  held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+ const before=h.mutations.length;
+ c.setOwner(false);
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId),/OWNER_REQUIRED/);
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair({
+  consentId:c.consentId,consentRevision:7,receipt:'a'.repeat(64)}),/OWNER_REQUIRED/);
+ c.setOwner(true);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId),/PUBLIC_RPC_DENIED/);
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair({
+  consentId:c.consentId,consentRevision:7,receipt:'a'.repeat(64)}),/PUBLIC_RPC_DENIED/);
+ assert.equal(h.mutations.length,before);
+});
+test('non-presigned, inconsistent signed PDF or wrong slot stays blocked before any manual booking repair',()=>{
+ for(const corrupt of ['researcherPresigned','signedPdf','slot']){
+  const h=harness(),person=h.person('A'),proof=h.proof(person),
+   held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+  const count=h.mutations.length;
+  if(corrupt==='researcherPresigned')c.x.researcherPresigned=false;
+  if(corrupt==='signedPdf')c.x.signedPdf.sha='f'.repeat(64);
+  if(corrupt==='slot')c.x.binding.slotId='SLOT_DIFFERENT_12345';
+  assert.throws(()=>h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId),
+   /DUAL_PDF|HASH_MISMATCH|IDENTITY_SLOT_CHANGED/);
+  assert.equal(h.mutations.length,count);
+ }
+});
+
+test('a second FORMAL_E1 consent bound to the same reservation blocks preview and repair',()=>{
+ const h=harness(),person=h.person('A'),proof=h.proof(person),
+  held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+ c.registry.records.push({...c.x,id:'OTHER_CONSENT_1234567890'});
+ const before=h.mutations.length;
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId),
+  /RESERVATION_CONSENT_NOT_UNIQUE/);
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair({
+  consentId:c.consentId,consentRevision:c.registry.revision,receipt:'a'.repeat(64)}),
+  /RESERVATION_CONSENT_NOT_UNIQUE/);
+ assert.equal(h.tables.Reservations.rows[0][3],'HELD');
+ assert.equal(h.mutations.length,before);
+});
+test('lost CAS response after original Reservations CONFIRMED is resolved by read-only preflight without replaying original write',()=>{
+ const h=harness(),person=h.person('A'),proof=h.proof(person),
+  held=h.holdSlot(proof,h.S1),c=signedConsentFixture(h,person,held);
+ const p=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+ const originalAfter=h.ctx.study1FormalAfterMutation_;
+ h.ctx.study1FormalAfterMutation_=(...args)=>{
+  originalAfter(...args);
+  throw Error('SYNTHETIC_ORIGINAL_CONFIRMATION_RESPONSE_UNKNOWN');
+ };
+ const writesBefore=h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length;
+ assert.throws(()=>h.ctx.study1OwnerE1SignedBookingRepair({
+  consentId:c.consentId,consentRevision:p.consentRevision,receipt:p.receipt}),
+  /SYNTHETIC_ORIGINAL_CONFIRMATION_RESPONSE_UNKNOWN/);
+ assert.equal(h.tables.Reservations.rows[0][3],'CONFIRMED');
+ const after=h.mutations.length;
+ const read=h.ctx.study1OwnerE1SignedBookingPreflight(c.consentId);
+ assert.equal(read.disposition,'ALREADY_CONFIRMED');
+ assert.equal(read.readOnly,true);
+ assert.equal(read.bookingConfirmed,true);
+ assert.equal(read.receipt,undefined);
+ assert.equal(h.mutations.length,after);
+ assert.equal(h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length,
+  writesBefore+1);
 });

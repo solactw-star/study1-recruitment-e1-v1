@@ -193,3 +193,105 @@ test('public OWNER interface remains closed and contains no notification send/re
  assert.match(backend,/if\(typeof study1V2PublicRpcDeny_==='function'\)study1V2PublicRpcDeny_\(\);\s*study1AdminOwnerRequired_\(\);/);
  assert.doesNotMatch(uiSource,/MailApp|\.sendEmail\(|\.setValues\(|\.appendRow\(|\.innerHTML\s*=/);
 });
+
+const repairStart=ownerHtml.indexOf('function e1OwnerBookingRepairSetup_(){');
+const repairEnd=ownerHtml.indexOf('\ne1OwnerBookingRepairSetup_();',repairStart);
+assert.ok(repairStart>0&&repairEnd>repairStart,
+ 'OWNER must expose explicit signed-PDF/original-booking repair UI');
+const repairCode=ownerHtml.slice(repairStart,repairEnd+
+ '\ne1OwnerBookingRepairSetup_();'.length);
+function repairBrowser(preflightResult,repairResult){
+ const ids=['e1RepairConsentId','e1RepairPreflight','e1RepairAttest',
+  'e1RepairCommit','e1RepairStatus'];
+ const nodes=new Map(ids.map(id=>[id,{id,value:'',checked:false,disabled:false,
+  textContent:'',listeners:{},addEventListener(type,fn){this.listeners[type]=fn;}}]));
+ const requests=[];
+ const runner={
+  withFailureHandler(cb){this.fail=cb;return this;},
+  withSuccessHandler(cb){this.done=cb;return this;},
+  study1OwnerE1SignedBookingPreflight(id){
+   requests.push({type:'read',id});
+   if(preflightResult instanceof Error)this.fail(preflightResult);
+   else this.done(preflightResult);
+  },
+  study1OwnerE1SignedBookingRepair(value){
+   requests.push({type:'commit',value});
+   if(repairResult instanceof Error)this.fail(repairResult);
+   else this.done(repairResult);
+  }
+ };
+ const scope={google:{script:{run:runner}},
+  document:{getElementById:id=>nodes.get(id)},
+  $:id=>nodes.get(id)};
+ vm.createContext(scope);vm.runInContext(repairCode,scope);
+ const fire=(id,event='click')=>nodes.get(id).listeners[event]();
+ return {nodes,requests,fire};
+}
+const targetId='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const targetReservation='RSV_OWNER_1234567890';
+const preflight={readOnly:true,disposition:'REPAIRABLE_HELD',
+ bookingConfirmed:false,bookingStatus:'HELD',consentId:targetId,
+ reservationId:targetReservation,consentRevision:9,receipt:'e'.repeat(64)};
+const repaired={bookingConfirmed:true,bookingStatus:'CONFIRMED',
+ consentId:targetId,reservationId:targetReservation,readOnlyReplay:false,
+ notification:'NOT_SENT_BY_RECONCILIATION'};
+test('OWNER manual UI refuses submit until signed original preflight and explicit acknowledgment',()=>{
+ const h=repairBrowser(preflight,repaired),n=h.nodes;
+ h.fire('e1RepairCommit');assert.equal(h.requests.length,0);
+ n.get('e1RepairConsentId').value=targetId;
+ h.fire('e1RepairPreflight');
+ assert.equal(h.requests.length,1);assert.equal(h.requests[0].type,'read');
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ assert.equal(n.get('e1RepairAttest').disabled,false);
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ assert.equal(n.get('e1RepairCommit').disabled,false);
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.length,2);
+ assert.equal(h.requests[1].type,'commit');
+ assert.deepEqual(JSON.parse(JSON.stringify(h.requests[1].value)),
+  {consentId:targetId,consentRevision:9,receipt:'e'.repeat(64)});
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.length,2,'no second POST from same original preflight');
+ assert.match(n.get('e1RepairStatus').textContent,/重新唯讀核對|另核對/);
+});
+test('OWNER manual UI fails closed on stale ID, cancelled HELD or incomplete source',()=>{
+ for(const p of [
+  {...preflight,disposition:'MANUAL_REVIEW_ONLY',bookingStatus:'CANCELLED',receipt:undefined},
+  {...preflight,consentId:'OTHER_CONSENT_12345678'},
+  {...preflight,receipt:'FORGED'}
+ ]){
+  const h=repairBrowser(p,repaired),n=h.nodes;
+  n.get('e1RepairConsentId').value=targetId;
+  h.fire('e1RepairPreflight');
+  n.get('e1RepairAttest').checked=true;
+  h.fire('e1RepairAttest','change');
+  assert.equal(n.get('e1RepairCommit').disabled,true);
+  h.fire('e1RepairCommit');
+  assert.equal(h.requests.filter(x=>x.type==='commit').length,0);
+ }
+});
+test('changing selected consent invalidates the prior preflight and lost repair outcome never automatically POSTs twice',()=>{
+ const h=repairBrowser(preflight,new Error('ORIGINAL_SHEET_RESPONSE_UNKNOWN')),n=h.nodes;
+ n.get('e1RepairConsentId').value=targetId;h.fire('e1RepairPreflight');
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ n.get('e1RepairConsentId').value='CONSENT_CHANGED_123456';
+ h.fire('e1RepairConsentId','input');
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ n.get('e1RepairConsentId').value=targetId;h.fire('e1RepairPreflight');
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+ assert.match(n.get('e1RepairStatus').textContent,/UNKNOWN/);
+ assert.equal(n.get('e1RepairCommit').disabled,true);
+ h.fire('e1RepairCommit');
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+});
+test('OWNER repair UI contains only explicit preflight and one guarded RPC, no email, signing or automatic retry',()=>{
+ assert.match(ownerHtml,/id="e1RepairPreflight"/);
+ assert.match(ownerHtml,/id="e1RepairAttest"/);
+ assert.match(ownerHtml,/id="e1RepairCommit"/);
+ assert.match(repairCode,/\.study1OwnerE1SignedBookingPreflight\(consentId\)/);
+ assert.match(repairCode,/\.study1OwnerE1SignedBookingRepair\(once\)/);
+ assert.doesNotMatch(repairCode,/MailApp|\.sendEmail\(|study1EConsentSignPdf\(|\.appendRow\(|\.setValues\(|\.innerHTML\s*=/);
+});
