@@ -418,3 +418,14 @@
 - WRITE_OWNER=唯一 V2 GitHub main。BLOCKERS：遠端 V2 GAS HEAD 未做來源同步／版本部署，現有私人 V1 不變；尚未完成真人 OWNER 受控 UI、PI 核定原 E1 Slots／研究者預簽完整 PDF、真 MailApp/Turnstile、PI／研究行政 REC 適用結論及真人營運授權。此修復是 GitHub 程式，不代表實際研究資料已修復或任何真人資料被確認。
 - NEXT_ACTION：維持所有真人收件關閉；之後可在 V2 GitHub 離線測本人端 PDF 副本與 OWNER 綜合審核跨來源時間漂移；若未來單獨授權 GAS 同步/部署，須備份及完整回讀、真角色 UI/安全驗收，不能以此 CI 自行啟用收件。
 - SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`（僅 `4f0f9f0d9e37d229421721e1a2f2181317682955`）；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`OPEN=false`、`CONSENT_READY=false`；`CONTEXT_SYNC_VERIFIED=false`（本輪沒有變更來源角色／研究上下文）。
+
+
+## 2026-11-13｜V2 招募網站 Agent 工作指引增量（使用者要求繼續強化 Agent）
+- TASK_DOMAIN=`Study1_V2_E1_AGENT_GUIDANCE`；SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1`／新增根目錄 `AGENTS.md`；正式網站規格仍為原 `docs/study1-system-spec.md`，網站唯一進度仍為本檔。
+- SOURCE_VERSION/SHA：本輪開始已回讀 `main=604000024926c80d9500d50dc1b42d5e7d1a04be`，同版 GitHub Actions [Run #43417574558](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43417574558) `completed/success`；本輪新增 `AGENTS.md` commit `9fe2fef81564da2dbeb9d1913ac49b56b95b83d0`，Git blob `e833b6af5160d9d5ca4e686b2b12fb8ff8568c66` 已從原 `main` 重新下載確認。
+- COMPLETED：新 `AGENTS.md` 僅提供 Agent 來源導航、授權與競寫流程、最新 SHA/同版 CI 核驗、E1 五項 MVP 優先與已完成成果不重做、資料不明不重 POST、舊 Repo/GAS 唯讀封存、GAS/版本/部署/真人 UAT 分離等操作指引；**不另立正式規格或研究規則**，不新增正式 GAS 執行來源。文件更新不代表模型權重已訓練，亦不代表每小時排程 prompt 已改；每輪 Agent 仍須主動讀取最新來源。
+- LAST_VERIFIED_STEP：已確認 `AGENTS.md` GitHub 真實新檔、原檔 SHA、只更動該檔的提交 diff 及 `main` 指向 `9fe2fef...`；原程式基線 CI 274 tests／274 PASS／0 FAIL／0 SKIP；新增文件提交後未見同 SHA CI，**不得用舊 SHA 的 274 PASS 冒稱新 SHA 已驗證**。本進度文件新增後仍須回讀最後的 main 與 CI。
+- WRITE_OWNER：唯一新 V2 GitHub；未讀寫舊 Github／GAS、遠端 V2 GAS HEAD、正式 Sheets、REC、研究個資、原研究者簽署 PDF、Script Properties；未同步 GAS、建立版本或部署、未傳送真人信件或啟用收件。
+- BLOCKERS：現行遠端 V2 GAS 同 SHA source sync／私人 OWNER 和公版實際 UI 仍未核實；PI 核定 Slots、正式預簽 PDF、REC 適用性及真人營運授權不因 Agent 指引新增而成立。Automations 當輪讀取工具不可用，原每小時排程未變更也未重新驗證其 prompt。
+- NEXT_ACTION：按最新 V2 main 由 Agent 增量檢視 E1 本人 PDF 副本／OWNER 同意、原 Reservations、Email outbox 的跨來源時間漂移與 UNKNOWN 人工處置，優先補安全負測及真實缺口；需要 OAuth、GAS 同步、部署或真人 UAT 時分別核對授權、備份及完整回讀，不重做已通過合成核心。
+- SYNC_STATUS：`AGENT_GUIDANCE_GITHUB_READBACK_VERIFIED=true`；`MAIN_CODE_CI_VERIFIED=true` 僅指更新前 `6040000...` 程式基線，`AGENT_GUIDANCE_POST_DOC_CI_PENDING=true`；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`OPEN=false`、`CONSENT_READY=false`。
