@@ -343,3 +343,5 @@
 - WRITE_OWNER=僅新 V2 GitHub；LAST_VERIFIED_STEP=`CI_PENDING_NEW_SHA`，需同 SHA CI 及 blob/readback；BLOCKERS=目前公開 V2 全部私人 RPC 一律拒絕、實際 OWNER/Google OAuth UAT 及 PI/REC 核准 E1 Slots/預簽 PDF 尚未核實，不能宣稱正式可營運。
 - NEXT_ACTION=回讀 CI、修正測試與狀態，後續按正式 MVP 最短路徑補 OWNER 原預約與簽署後狀態人工核對；不額外建立通知寄件入口、不重送失敗郵件。
 - SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；不操作舊 Repo/GAS、正式 Sheets、REC 或真人收件。
+
+- CI_REPAIR_2026-11-13：程式 SHA `10be9d0a975773deda5d0bdffed86a181aa38241` 的 Run #43400450407 實際 `243 tests / 234 PASS / 9 FAIL`，源於安全掃描要求所有可被 GAS 直接呼叫的 OWNER RPC 在函式起始立即執行 public deny（原新 RPC 換行未符合 scanner），以及新 Node VM 測試未注入既有 `STUDY1_E1_NOTIFICATION_HEADERS_` 常數；已做最小修正，不放寬 scanner、沒有取消測試或改正式資料，下一新 SHA 必須回讀。

@@ -46,6 +46,9 @@ function harness(opts={}){
     ['E1_BOOKING_CONFIRMATION_NOTICE_V1',RID,APP,RSV]);
    return 'a'.repeat(64);
   },
+  STUDY1_E1_NOTIFICATION_HEADERS_:[
+   'job_id','applicant_id','reservation_id','notice_type','status',
+   'attempts','created_at_utc','sent_at_utc','last_error_code'],
   MailApp:{sendEmail:()=>{mailCalls++;}}
  };
  if(opts.publicDenied)ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};

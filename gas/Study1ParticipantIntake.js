@@ -625,8 +625,7 @@ function study1ParticipantBookingNotice_(verifiedApplicantEmail,consentId){
  * The identity, original reservation and PDF are audited independently;
  * never expose an applicant email or any original Sheet row to the UI.
  */
-function study1OwnerE1NotificationAudit(){
- if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
  const lock=LockService.getScriptLock();
  if(!lock||typeof lock.tryLock!=='function'||lock.tryLock(10000)!==true)
