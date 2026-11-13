@@ -279,8 +279,9 @@ test('§70-S.23 consent is online-only without a 15-minute countdown or booking 
  assert.match(html,/請閱讀研究者事先完成簽名/);
  assert.match(formal,/researcherPresigned/);
  assert.match(formal,/研究者已先簽署完整PDF/);
- assert.match(formal,/a dual-signed PDF is NOT a booking confirmation/);
- assert.match(formal,/rpc\('study1FormalStatus',state\.emailProof,booking/);
+ assert.match(formal,/function formalReceiptRefresh_\(/);
+ assert.match(formal,/rpc\('study1FormalStatus',state\.emailProof,finish,\(\)=>finish\(null\)\)/);
+ assert.match(formal,/formalReceiptVerified=\{token,sha:result\.sha/);
 });
 
 test('§70-S.24 MVP: researcher presigns source before upload; participant signs once without staff second signature',async()=>{

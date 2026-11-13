@@ -484,3 +484,6 @@
 - LIMITATIONS：這是離線合成來源與 GitHub 程式級恢復，瀏覽器 session 結束後既有 bearer/EmailProof 不會被保存，重新載入或換裝置仍需研究團隊另行核對；單一 GAS ScriptLock + double read 並非可防所有外部無鎖寫入、ABA 或跨儲存 ACID。未宣稱真人本人的 PDF 真實保管權或實際通知送達。
 - WRITE_OWNER=僅唯一新 V2 GitHub 現有 `gas/`、原 `tests/`、原進度主檔；LAST_VERIFIED_STEP=`PENDING_NEW_MAIN_SHA_CI`；NEXT_ACTION=同一 main 原子提交後取得最新原完整 tree／blob／diff，執行受影響正負測與公版安全 CI，按同一 SHA 原始日誌修正所有失敗，再回填成功紀錄。未做遠端 V2 GAS HEAD 同步、版本建立、部署／真人 UI UAT、正式 Google Sheets/REC/PI PDF 的任何寫入或真人信件。
 - BLOCKERS：PI 核定 E1 Slots、研究者預簽正式 PDF／REC 適用核實、真 Google 帳號及 Chrome 本人／OWNER UI、實際 V2 GAS 同版同步與安全部署未取得本輪授權及回讀。SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`；不要以本次合成 CI 冒稱正式營運驗收。
+
+
+- CI_REPAIR_2026-11-13：首筆 SHA `88311daf941f11baf7aad3792f286d8309696c55` 的 [Run #43438587027](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43438587027)、Job #131930016411 原始日誌 `301 tests / 297 PASS / 4 FAIL / 0 SKIP`。兩項舊靜態斷言仍要求原 `study1FormalStatus` 直接內嵌於 PDF callback；現改成可按鍵唯讀重查的 `formalReceiptRefresh_`，因此在原測試增驗新的 GET/UNKNOWN fallback/SHA 驗證，而未刪安全檢查。另兩項 OWNER 新合成測試將 revision=7 的原 registry 投入預設 revision=4 的前端 mock，原前端嚴格拒絕混版是正確結果，測試改為同 revision 證據。生產安全條件無更動；需新 SHA CI 回讀。

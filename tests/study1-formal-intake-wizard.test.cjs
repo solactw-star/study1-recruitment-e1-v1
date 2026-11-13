@@ -90,8 +90,11 @@ test('FORMAL seventh stage exists and does not expose demo results or premature 
  assert.match(visitor,/function formalDoneRender_\(/);
  assert.match(visitor,/show\('done'\)/);
  assert.match(visitor,/const result=await formalVerifySigned_\(copy\)/);
- assert.match(visitor,/rpc\('study1FormalStatus',state\.emailProof,booking=>/);
- assert.match(visitor,/formalDoneRender_\(outcome,result\.sha,copy\.taipeiDate,reservationId\)/);
+ assert.match(visitor,/function formalReceiptRefresh_\(/);
+ assert.match(visitor,/rpc\('study1FormalStatus',state\.emailProof,finish,\(\)=>finish\(null\)\)/);
+ assert.match(visitor,/formalDoneRender_\(result,v\.sha,v\.taipeiDate,v\.reservationId\)/);
+ assert.match(visitor,/formalReceiptVerified=\{token,sha:result\.sha/);
+ assert.match(visitor,/id="formalDoneRefresh"/);
  assert.match(visitor,/formalConsent\.confirmed/);
  assert.match(visitor,/status\('已簽PDF完整性核對失敗，禁止提供副本/);
 });

@@ -618,7 +618,7 @@ test('E1 confirmed consent index with original HELD and NO outbox remains an unc
  assert.equal(x.booking.records[0].bookingConfirmed,false);
  assert.equal(x.notice.records[0].consentState,'CONFIRMED');
  assert.equal(x.notice.records[0].noticeStatus,'NOT_QUEUED');
- const owner=browser(x.booking,x.notice);
+ const owner=browser(x.booking,x.notice,{consentRevision:x.consentRevision});
  owner.click();
  assert.match(JSON.stringify(owner.elements.get('e1OpsResults')),
   /同意索引已確認，但原預約未確認；不得重送/);
@@ -631,7 +631,8 @@ test('E1 original CONFIRMED with UNKNOWN outbox never becomes delivered after a 
  const x=h.scope.study1OwnerE1OperationsAudit();
  assert.equal(x.booking.records[0].bookingStatus,'CONFIRMED');
  assert.equal(x.notice.records[0].noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');
- const owner=browser(x.booking,x.notice);owner.click();
+ const owner=browser(x.booking,x.notice,{consentRevision:x.consentRevision});
+ owner.click();
  const table=JSON.stringify(owner.elements.get('e1OpsResults'));
  assert.match(table,/已由原 Reservations 核實/);
  assert.match(table,/寄送結果 UNKNOWN；禁止重寄/);
