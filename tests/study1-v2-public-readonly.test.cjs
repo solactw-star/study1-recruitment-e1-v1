@@ -3,10 +3,10 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const core=require('../scripts/study1-v2-gas-head-only.cjs');
 const folder=path.join(__dirname,'../gas'),files=core.localSources();
-test('login-only ANYONE with deploying identity and full 31-file RPC closure',()=>{
+test('login-only ANYONE with deploying identity and formal 27-file RPC closure',()=>{
  const m=JSON.parse(fs.readFileSync(path.join(folder,'appsscript.json'),'utf8'));
  assert.equal(m.webapp.access,'ANYONE');assert.equal(m.webapp.executeAs,'USER_DEPLOYING');
- assert.equal(files.length,31);assert.ok(core.publicRpcSurface(files)>=35);
+ assert.equal(files.length,27);assert.ok(core.publicRpcSurface(files)>=35);
  assert.equal(files.some(f=>f.name==='程式碼'),false,'retired myFunction file removed');
 });
 test('public viewer can only see research info and closed FORMAL page, not OWNER routes or PDF',()=>{
@@ -40,4 +40,26 @@ test('old system and private deployment URL are not hard-coded as public links',
   assert.ok(!html.includes('AKfycbwJv-Gne_31fj'));
   assert.ok(!html.includes('AKfycbzrtJEzhKT_'));
  }
+});
+
+test('Unified/Team/Fixture synthetic sources cannot ship with formal E1 HEAD',()=>{
+ for(const id of ['Study1FixtureAdapter','Study1Team','Study1Flow','Study1Unified'])
+  assert.equal(files.some(f=>f.name===id),false,id);
+ for(const fname of ['Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js'])
+  assert.ok(fs.existsSync(path.join(folder,fname)),'offline test-only source retained: '+fname);
+ const html=fs.readFileSync(path.join(folder,'Study1Visitor.html'),'utf8');
+ const split=html.indexOf('\n})();\n\n(function(){');
+ assert.ok(split>0);
+ assert.doesNotMatch(html.slice(0,split),/study1UnifiedPreview|study1Fixture/);
+ assert.match(html,/document\.body\.dataset\.siteMode==='FORMAL'\)return;/);
+ assert.match(html,/document\.body\.dataset\.siteMode!=='FORMAL'\)return;/);
+ for(const f of files.filter(f=>f.type==='SERVER_JS'&&f.name!=='Study1PdfLib'))
+  assert.doesNotMatch(f.source,/\bstudy1(?:UnifiedPreview|Fixture)\w*\s*\(/);
+ assert.throws(()=>core.publicRpcSurface([...files,
+  {name:'Study1Flow',type:'SERVER_JS',source:'function study1UnifiedPreviewGet(){}'}]),
+  /non-deployable synthetic executable/);
+ const bad=files.map(f=>f.name==='Study1Visitor'?
+  {...f,source:f.source.replace("document.body.dataset.siteMode==='FORMAL')return;",
+   "document.body.dataset.siteMode==='OTHER')return;")}:f);
+ assert.throws(()=>core.publicRpcSurface(bad),/not mutually gated/);
 });

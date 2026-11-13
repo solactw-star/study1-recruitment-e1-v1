@@ -22,6 +22,7 @@ on:
       - 'tests/study1-admin-console-interaction.test.cjs'
       - 'tests/study1-owner-formal-consent-booking-audit.test.cjs'
       - 'tests/study1-rec-202604EM033-authority.test.cjs'
+      - 'docs/V2-MIGRATION-STATUS.md'
       - '.github/workflows/study1-v2-public-readonly-ci.yml'
   workflow_dispatch:
 permissions:

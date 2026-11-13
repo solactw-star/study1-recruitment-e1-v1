@@ -9,15 +9,20 @@ const REPO = 'solactw-star/study1-recruitment-e1-v1';
 const SID = '1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f';
 const CONFIRM = 'I_AUTHORIZE_STUDY1_V2_HEAD_ONLY';
 const TYPES = Object.freeze({'.js':'SERVER_JS','.gs':'SERVER_JS','.html':'HTML','.json':'JSON'});
+// The retired synthetic UI/fixture modules remain in the repo for historical
+// offline test imports, but must never be executable in formal E1 GAS HEAD.
+const TEST_ONLY_NONDEPLOYABLE=Object.freeze([
+ 'Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js'
+]);
 // Frozen, reviewed source inventory: newly added GAS code must be explicitly reviewed.
 const APPROVED = Object.freeze([
  'AdminConsole','AdminSandbox','BookingCancelHoldPreflight','BookingCore',
  'BookingHoldTransaction','BookingReadOnlyLock','BookingReadOnlyLocked',
  'BookingReadOnlySheet','BookingReschedulePreflight','Index','OtpCore',
  'OtpThrottle','OtpTransaction','Study1EConsentBinding','Study1EConsentOtpAdapter',
- 'Study1FixtureAdapter','Study1FormalBooking','Study1FormalConsent',
+ 'Study1FormalBooking','Study1FormalConsent',
  'Study1ParticipantIntake','Study1ParticipantTrust','Study1PdfLib',
- 'Study1PdfStampCore','Study1SelfReportAuthority','Study1Team','Study1Flow','Study1Unified',
+ 'Study1PdfStampCore','Study1SelfReportAuthority',
  'Study1Visitor','Study1WizardEnrollment','Study1WizardP0Bridge','Website',
  'appsscript'
 ].sort());
@@ -43,6 +48,17 @@ function canonical(files) {
 const digest = files => sha(canonical(files));
 /** Reject public source releases unless every callable private RPC is deny-gated. */
 function publicRpcSurface(files){
+ // Explicit fail-closed check even when this inventory is supplied by a caller.
+ const legacy=['Study1FixtureAdapter','Study1Team','Study1Unified','Study1Flow'];
+ require_(!files.some(f=>legacy.includes(f.name)),
+  'non-deployable synthetic executable in formal GAS source inventory');
+ const visitor=files.find(f=>f.name==='Study1Visitor'&&f.type==='HTML')?.source||'';
+ require_(visitor.includes("document.body.dataset.siteMode!=='FORMAL')return;")&&
+  visitor.includes("document.body.dataset.siteMode==='FORMAL')return;"),
+  'formal E1 and synthetic visitor controllers are not mutually gated');
+ for(const f of files.filter(f=>f.type==='SERVER_JS'&&f.name!=='Study1PdfLib'))
+  require_(!/\bstudy1(?:UnifiedPreview|Fixture)[A-Za-z0-9_]*\s*\(/.test(f.source),
+   'formal server depends on retired synthetic runtime: '+f.name);
  const w=files.find(f=>f.name==='Website'&&f.type==='SERVER_JS')?.source||'';
  require_(w.includes("function study1V2PublicRpcDeny_(){throw new Error('STUDY1_V2_PUBLIC_READ_ONLY');}"),
   'missing public RPC deny helper');
@@ -107,7 +123,8 @@ function localSources(root=path.join(__dirname,'..','gas')){
  const clasp=JSON.parse(fs.readFileSync(path.join(root,'.clasp.json'),'utf8'));
  require_(clasp.scriptId===SID,'local .clasp.json points to a different Script ID');
  const filenames=fs.readdirSync(root,{withFileTypes:true}).filter(x=>x.isFile() && x.name!=='.clasp.json');
- const files=filenames.map(x=>{
+ // Synthetic sources are kept only for offline tests, never sent to GAS.
+ const files=filenames.filter(x=>!TEST_ONLY_NONDEPLOYABLE.includes(x.name)).map(x=>{
   const ext=path.extname(x.name);
   require_(Object.hasOwn(TYPES,ext),'unrecognized GAS source extension: '+x.name);
   const name=x.name==='Study1Unified.js'?'Study1Flow':path.basename(x.name,ext);
