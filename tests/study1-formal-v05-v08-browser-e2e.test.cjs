@@ -6,7 +6,7 @@ const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses
 const end=html.indexOf("\n})();\n</script>",start);
 assert.ok(start>0&&end>start,'formal controller must remain inside original IIFE');
 const formal=html.slice(start,end+6);
-function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none',consentIssueMode='none'){
+function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none',consentIssueMode='none',options={}){
  const nodes=new Map(),calls=[],errors=[],reservations=[],uuid=()=>crypto.randomBytes(8).toString('hex');
  const now=Date.now(),S1='SLOT_E1_BROWSER_A_12345678',S2='SLOT_E1_BROWSER_B_12345678';
  const base=[{slotId:S1,startAtUtc:new Date(now+86400000).toISOString(),endAtUtc:new Date(now+90000000).toISOString(),capacity:1,remaining:1,waitlistCount:0,bookable:true},
@@ -73,7 +73,11 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
     if(holdMode==='after_commit')throw Error('OFFLINE_HOLD_RESPONSE_LOST');
     return {held:true,reservationId:r.reservationId};
   },
-  study1FormalStatus:()=>({experiment:'E1',reservations:reservations.map(x=>({...x}))}),
+  study1FormalStatus:()=>{
+   if(options.bookingReadFailureAfterSigned&&staffConfirmed)
+    throw Error('SYNTHETIC_ORIGINAL_RESERVATIONS_NETWORK_UNKNOWN');
+   return {experiment:'E1',reservations:reservations.map(x=>({...x}))};
+  },
   study1FormalHoldOutcome:input=>{
    const rows=reservations.filter(x=>x.requestId===input.requestId);
    if(rows.length!==1)return {resolved:false,status:'UNKNOWN'};
@@ -145,8 +149,16 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
    assert.equal(req.token,token);assert.equal(req.documentSha,pdfSha);
    assert.equal(req.read,true);assert.equal(req.answerAcknowledged,true);
    if(!staffExplained&&!researcherPresigned)throw Error('RESEARCHER_EXPLANATION_MISSING');
+   if(options.signMode==='before_commit')
+    throw Error('SYNTHETIC_SIGNATURE_POST_UNKNOWN_BEFORE_COMMIT');
    consent=researcherPresigned?'CONFIRMED':'SIGNED';
    if(researcherPresigned)staffConfirmed=true;
+   if(options.bookingStatusAfterSigned&&reservations.length)
+    reservations[0].status=options.bookingStatusAfterSigned;
+   if(options.signMode==='after_commit')
+    throw Error('SYNTHETIC_SIGNATURE_POST_RESPONSE_LOST');
+   if(options.signMode==='invalid_reply')
+    return {state:'INVALID',experiment:'E1',documentSha256:pdfSha};
    return {state:consent,experiment:'E1',documentSha256:pdfSha,signedPdfSha256:signedSha,
     taipeiDate,signedAt,researcherPreSigned:researcherPresigned};
   },
@@ -154,7 +166,8 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
    assert.equal(sessionToken,token);
    if(!staffConfirmed)throw Error('STAFF_CONFIRM_REQUIRED');
    return {experiment:'E1',version:'V1',sourceSha256:pdfSha,
-    signedPdfSha256:signedSha,signedAt,taipeiDate,dualSigned:true,
+    signedPdfSha256:options.copyCorruptSha?'f'.repeat(64):signedSha,
+    signedAt,taipeiDate,dualSigned:true,
     participantSignedPdfSha256:researcherPresigned?signedSha:'f'.repeat(64),
     researcherSignedAt:researcherPresigned?null:signedAt,
     researcherTaipeiDate:researcherPresigned?null:taipeiDate,
@@ -344,4 +357,98 @@ test('FORMAL missing consent issue cannot be replayed even when user clicks agai
  assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentBegin').length,1);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentIssueState').length,2);
  assert.equal(h.calls.some(x=>x.name==='study1EConsentSignPdf'),false);
+});
+
+/** Use the synthetic application's original reservation state throughout.
+ * The browser must never infer booking confirmation from a signed PDF alone.
+ */
+async function finishSignedSynthetic(h){
+ h.enter();h.click('hold');h.act('核對本人暫留並進入最後知情同意');
+ for(let i=0;i<60&&h.node('officialPdfDownload').hidden;i++)
+  await new Promise(resolve=>setTimeout(resolve,5));
+ assert.equal(h.node('officialPdfDownload').hidden,false);
+ const c=h.node('visitorSignaturePreview');
+ c.handlers.get('pointerdown')({clientX:20,clientY:20,pointerId:1});
+ c.handlers.get('pointermove')({clientX:60,clientY:40,pointerId:1});
+ c.handlers.get('pointerup')({clientX:60,clientY:40,pointerId:1});
+ h.node('readPdf').checked=true;h.node('readPdf').handlers.get('change')();
+ h.node('agree').checked=true;h.node('agree').handlers.get('change')();
+ assert.equal(h.node('finish').disabled,false);
+ assert.equal(h.click('finish'),true);
+}
+const pause=()=>new Promise(resolve=>setTimeout(resolve,5));
+test('E1 signed PDF remains downloadable and original Reservations is UNKNOWN after network failure',async()=>{
+ const h=simulate(undefined,true,true,'none','none',{bookingReadFailureAfterSigned:true});
+ await finishSignedSynthetic(h);
+ for(let i=0;i<80&&h.node('formalDonePdfDownload').hidden;i++)await pause();
+ assert.equal(h.node('formalDonePdfDownload').hidden,false);
+ assert.equal(h.node('officialSignedPdfDownload').hidden,false);
+ assert.equal(h.node('step-done').hidden,false,'show the signed PDF receipt even if booking GET failed');
+ assert.match(h.node('formalDoneBooking').textContent,/UNKNOWN/);
+ assert.equal(h.node('formalDonePdfSha').textContent,h.signedSha);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalStatus').length>=2,true);
+ assert.equal(h.click('finish'),false);
+ assert.equal(h.click('formalDoneRefresh'),true);
+ assert.equal(h.node('formalDoneBooking').textContent.includes('UNKNOWN'),true);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.some(x=>x.name==='study1ParticipantBookingNotice_'),false);
+});
+test('E1 lost signature response recovers original confirmed PDF through read-only registry, no second signature POST',async()=>{
+ const h=simulate(undefined,true,true,'none','none',{signMode:'after_commit'});
+ await finishSignedSynthetic(h);
+ for(let i=0;i<80&&h.node('formalDonePdfDownload').hidden;i++)await pause();
+ assert.equal(h.node('formalDonePdfDownload').hidden,false);
+ assert.equal(h.node('step-done').hidden,false);
+ assert.match(h.node('formalDoneBooking').textContent,/HELD/);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.some(x=>x.name==='study1FormalConsentStatus'),true);
+ assert.equal(h.calls.some(x=>x.name==='study1EConsentSignedPdfCopy'),true);
+ assert.equal(h.click('finish'),false);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+});
+test('E1 sign POST before commit UNKNOWN is never reissued, even if server says invitation ISSUED',async()=>{
+ const h=simulate(undefined,true,true,'none','none',{signMode:'before_commit'});
+ await finishSignedSynthetic(h);
+ for(let i=0;i<10;i++)await pause();
+ assert.equal(h.node('officialSignedPdfDownload').hidden,true);
+ assert.equal(h.node('finish').disabled,true);
+ assert.equal(h.click('finish'),false);
+ assert.match(h.node('status').textContent,/UNKNOWN|不.*次|不得/);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentStatus').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignedPdfCopy').length,0);
+});
+test('E1 invalid signature response triggers original registry GET instead of second POST',async()=>{
+ const h=simulate(undefined,true,true,'none','none',{signMode:'invalid_reply'});
+ await finishSignedSynthetic(h);
+ for(let i=0;i<80&&h.node('formalDonePdfDownload').hidden;i++)await pause();
+ assert.equal(h.node('formalDonePdfDownload').hidden,false);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentStatus').length,1);
+});
+test('E1 signed PDF SHA forgery cannot create a download or a confirmed booking receipt',async()=>{
+ const h=simulate(undefined,true,true,'none','none',{copyCorruptSha:true,bookingStatusAfterSigned:'CONFIRMED'});
+ await finishSignedSynthetic(h);
+ for(let i=0;i<20;i++)await pause();
+ assert.equal(h.node('officialSignedPdfDownload').hidden,true);
+ assert.equal(h.node('formalDonePdfDownload').hidden,true);
+ assert.equal(h.node('step-done').hidden,true);
+ assert.match(h.node('status').textContent,/完整性核對失敗|SHA/);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalStatus').length,1,
+  'only the initial original status query; no receipt after forged PDF');
+});
+test('E1 signed PDF and Reservations confirm independently; status refresh never signs or books',async()=>{
+ const h=simulate(undefined,true,true);
+ await finishSignedSynthetic(h);
+ for(let i=0;i<80&&h.node('formalDonePdfDownload').hidden;i++)await pause();
+ assert.match(h.node('formalDoneBooking').textContent,/HELD/);
+ h.reservations[0].status='CONFIRMED'; // synthetic original source changes independently
+ assert.equal(h.click('formalDoneRefresh'),true);
+ assert.match(h.node('formalDoneBooking').textContent,/CONFIRMED/);
+ assert.equal(h.node('formalDonePdfSha').textContent,h.signedSha);
+ assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalFinalizeSignedE1Booking_').length,0);
+ assert.equal(h.calls.filter(x=>x.name==='study1ParticipantBookingNotice_').length,0);
 });

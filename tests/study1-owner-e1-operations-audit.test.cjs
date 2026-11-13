@@ -433,7 +433,21 @@ function joinedHarness(opts={}){
   '2026-11-14T08:00:00.000Z',1,'CYCU','OPEN','PI',
   '2026-11-13T04:00:00.000Z'];
  const stableNotice=row();
- let noticeRows=[stableNotice],nowLocked=()=>lockHeld,abaTransitions=0;
+ if(opts.bookingState==='HELD'){
+  stableReservation[3]='HELD';
+  stableReservation[4]=new Date(Date.now()+600000).toISOString();
+  stableReservation[7]='';stableReservation[8]='';
+  stableReservation[9]='2026-11-13T05:00:00.000Z';
+ }
+ if(opts.bookingState==='CANCELLED'){
+  stableReservation[3]='CANCELLED';
+  stableReservation[7]='';stableReservation[8]='2026-11-13T05:45:00.000Z';
+ }
+ let noticeRows=opts.noticeAbsent?[]:[stableNotice],
+  nowLocked=()=>lockHeld,abaTransitions=0;
+ if(opts.noticeUnknown){
+  noticeRows=[row('UNKNOWN')];
+ }
  const deep=x=>JSON.parse(JSON.stringify(x));
  const ctx={
   study1AdminOwnerRequired_:()=>{ownerChecks++;if(opts.denied)throw Error('OWNER_REQUIRED');},
@@ -592,4 +606,45 @@ test('joined public RPC denied BEFORE owner and private reads; non-owner denied 
   assert.equal(s.noticeReads,0);assert.equal(s.privateOpens,0);
   assert.equal(s.writes,0);assert.equal(s.mailCalls,0);
  }
+});
+
+test('E1 confirmed consent index with original HELD and NO outbox remains an unconfirmed booking across OWNER sources',()=>{
+ const h=joinedHarness({bookingState:'HELD',noticeAbsent:true});
+ const x=h.scope.study1OwnerE1OperationsAudit();
+ assert.equal(x.readOnly,true);
+ assert.equal(x.actionAuthority,'NONE');
+ assert.equal(x.externalWriterGuarantee,false);
+ assert.equal(x.booking.records[0].bookingStatus,'HELD');
+ assert.equal(x.booking.records[0].bookingConfirmed,false);
+ assert.equal(x.notice.records[0].consentState,'CONFIRMED');
+ assert.equal(x.notice.records[0].noticeStatus,'NOT_QUEUED');
+ const owner=browser(x.booking,x.notice);
+ owner.click();
+ assert.match(JSON.stringify(owner.elements.get('e1OpsResults')),
+  /同意索引已確認，但原預約未確認；不得重送/);
+ assert.match(JSON.stringify(owner.elements.get('e1OpsResults')),
+  /無通知紀錄（不得推定已通知）/);
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+});
+test('E1 original CONFIRMED with UNKNOWN outbox never becomes delivered after a joined read',()=>{
+ const h=joinedHarness({noticeUnknown:true});
+ const x=h.scope.study1OwnerE1OperationsAudit();
+ assert.equal(x.booking.records[0].bookingStatus,'CONFIRMED');
+ assert.equal(x.notice.records[0].noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');
+ const owner=browser(x.booking,x.notice);owner.click();
+ const table=JSON.stringify(owner.elements.get('e1OpsResults'));
+ assert.match(table,/已由原 Reservations 核實/);
+ assert.match(table,/寄送結果 UNKNOWN；禁止重寄/);
+ assert.doesNotMatch(table,/實際送達已證明/);
+ assert.equal(x.actionAuthority,'NONE');assert.equal(x.externalWriterGuarantee,false);
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+});
+test('E1 signed consent with CANCELLED original booking and absent notice stays review-only',()=>{
+ const h=joinedHarness({bookingState:'CANCELLED',noticeAbsent:true});
+ const x=h.scope.study1OwnerE1OperationsAudit();
+ assert.equal(x.booking.records[0].bookingStatus,'CANCELLED');
+ assert.equal(x.booking.records[0].bookingConfirmed,false);
+ assert.equal(x.notice.records[0].noticeStatus,'NOT_QUEUED');
+ assert.equal(x.actionAuthority,'NONE');
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
 });

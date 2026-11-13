@@ -187,6 +187,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
  </dl>
  <a id="formalDonePdfDownload" class="pdf" rel="noopener" hidden download="Study1_E1_Signed_Consent.pdf">下載已核實完整簽署PDF</a>
  <p id="formalDoneNotice" class="help">PDF簽署與預約成立須分別核實。狀態不明時請勿重送申請或簽名。</p>
+ <button type="button" id="formalDoneRefresh" class="secondary">唯讀重新查核本人原 Reservations 狀態</button>
  <button type="button" id="formalDoneBack" class="ghost">返回查看已簽PDF與唯讀核對狀態</button>
 </div>
 </section>
@@ -600,11 +601,13 @@ function formalV05Read_(){
  * AND an explicitly recorded researcher explanation on the same fixed PDF.
  */
 let formalConsent=null,formalPdfUrl=null,formalSignedUrl=null,formalInk=false;
+let formalSignSubmitted=false,formalReceiptVerified=null,formalReceiptEpoch=0;
 const formalDoneNode=el('formalDoneResult');
 if(formalDoneNode)formalDoneNode.hidden=false;
 if(el('formalDoneBack'))el('formalDoneBack').addEventListener('click',()=>{
  show('consent');formalConsentStatus_();
 });
+if(el('formalDoneRefresh'))el('formalDoneRefresh').addEventListener('click',formalReceiptRefresh_);
 /** Pure adjudication: never infer CONFIRMED from consent or HELD. */
 function formalReceiptOutcome_(booking,reservationId,slotId,nowMs){
  if(!booking||booking.experiment!=='E1'||!Array.isArray(booking.reservations)||
@@ -658,6 +661,7 @@ function formalRevoke_(url){
 function formalConsentReset_(){
  formalRevoke_(formalPdfUrl);formalRevoke_(formalSignedUrl);
  formalPdfUrl=null;formalSignedUrl=null;formalInk=false;formalConsent=null;
+ formalSignSubmitted=false;formalReceiptVerified=null;formalReceiptEpoch++;
  for(const id of ['officialPdfDownload','officialSignedPdfDownload','formalDonePdfDownload']){
   const n=el(id);if(n){n.hidden=true;if(typeof n.removeAttribute==='function')n.removeAttribute('href');}
  }
@@ -690,7 +694,8 @@ function formalConsentRender_(){
  const x=formalConsent,ready=!!(x&&x.originalVerified&&x.researcherPresigned===true);
  if(el('review'))el('review').disabled=!ready;
  if(el('finish'))el('finish').disabled=!ready||!formalInk||
-  !el('readPdf').checked||!el('agree').checked||x.signed===true||state.busy;
+  !el('readPdf').checked||!el('agree').checked||x.signed===true||
+   formalSignSubmitted||state.busy;
  if(el('consentStatus'))el('consentStatus').textContent=
   !x?'尚未核對E1本人有效預約。':
   x.signed?'已在線上簽署；請核對完整PDF副本與原預約狀態。':
@@ -741,8 +746,14 @@ function formalConsentStatus_(){
   formalConsent.signed=result.signatureAccepted===true;
   formalConsent.confirmed=result.staffConfirmed===true;
   if(result.copyAvailable===true&&formalConsent.confirmed)formalConsentCopy_();
+  else if(formalSignSubmitted)
+   status('本人簽署交易結果仍 UNKNOWN；已停用再次提交，只能從原同意索引唯讀核對或聯絡研究團隊。');
   else status(formalConsent.signed?'完整PDF已保存，正在核對本人副本與原預約結果。':
    '請閱讀研究者預簽完整PDF並手寫本人簽名。');
+  formalConsentRender_();
+ },()=>{
+  if(!formalConsent||formalConsent.token!==token)return;
+  status('本人簽署狀態唯讀查詢失敗，因果 UNKNOWN；不得再次簽署或重新送件。');
   formalConsentRender_();
  });
 }
@@ -776,6 +787,25 @@ async function formalVerifySigned_(copy){
  if(sha!==copy.signedPdfSha256)throw Error('FORMAL_SIGNED_PDF_SHA_INVALID');
  return {bytes,sha};
 }
+/** SHA-verified participant PDF and original Reservations are independent.
+ * No POST, no re-sign, no automatic MailApp or booking retry.
+ */
+function formalReceiptRefresh_(){
+ const v=formalReceiptVerified,c=formalConsent;
+ if(!v||!c||!c.confirmed||c.token!==v.token||
+    c.reservationId!==v.reservationId||c.slotId!==v.slotId){
+  status('請先核實已簽完整PDF位元組與SHA，再唯讀核對原預約。');return;
+ }
+ const epoch=++formalReceiptEpoch;
+ const finish=booking=>{
+  if(epoch!==formalReceiptEpoch||!formalConsent||
+     formalConsent.token!==v.token||formalReceiptVerified!==v)return;
+  const result=formalReceiptOutcome_(booking,v.reservationId,v.slotId,Date.now());
+  formalDoneRender_(result,v.sha,v.taipeiDate,v.reservationId);
+ };
+ if(!state.emailProof){finish(null);return;}
+ rpc('study1FormalStatus',state.emailProof,finish,()=>finish(null));
+}
 function formalConsentCopy_(){
  if(!formalConsent||state.busy)return;
  const token=formalConsent.token;
@@ -802,28 +832,15 @@ function formalConsentCopy_(){
     '研究者事先簽名的原PDF與本人線上筆跡已整合，完成簽署PDF及臺灣日期、SHA回讀通過；研究者可於後台下載。':
     '研究人員已在原核准PDF獨立欄位簽名（臺灣日期 '+copy.researcherTaipeiDate+'）；完整雙簽PDF、參與者臺灣日期與SHA回讀通過，可下載本人副本。';
    status('完整線上雙簽PDF與本人副本已核對；原預約是否成立，仍須獨立核對Reservations。');
-   // §70-S.23: a dual-signed PDF is NOT a booking confirmation.
-   // Read only the authenticated applicant's original reservation status;
-   // never update Reservations here or infer CONFIRMED from consent.
-   // The signed PDF is verified independently above. The original booking
-   // must be read separately; a valid PDF cannot imply a confirmed booking.
-   if(!state.emailProof||!formalConsent.slotId){
-    formalDoneRender_('UNKNOWN',result.sha,copy.taipeiDate,formalConsent.reservationId);
-    return;
-   }
-   const reservationId=formalConsent.reservationId,slotId=formalConsent.slotId;
-   const verifiedToken=token;
-   rpc('study1FormalStatus',state.emailProof,booking=>{
-    if(!formalConsent||formalConsent.token!==verifiedToken||
-       formalConsent.reservationId!==reservationId||
-       formalConsent.slotId!==slotId)return;
-    const outcome=formalReceiptOutcome_(booking,reservationId,slotId,Date.now());
-    formalDoneRender_(outcome,result.sha,copy.taipeiDate,reservationId);
-   });
+   // Keep the SHA-verified participant PDF available when the separate
+   // original Reservations read fails, times out or returns UNKNOWN.
+   formalReceiptVerified={token,sha:result.sha,taipeiDate:copy.taipeiDate,
+    reservationId:formalConsent.reservationId,slotId:formalConsent.slotId};
+   formalReceiptRefresh_();
   }catch(e){
    status('已簽PDF完整性核對失敗，禁止提供副本：'+String(e.message||e));
   }
- });
+ },()=>status('完整簽署PDF唯讀取得失敗；不可重簽。請使用副本唯讀查詢或聯絡研究團隊。'));
 }
 function formalConsentAdopt_(reservation,result){
  if(!result||result.state!=='ISSUED'||result.experiment!=='E1'||
@@ -922,8 +939,13 @@ function formalConsentWire_(){
  if(!capability||typeof capability.addEventListener!=='function'){
   el('finish').disabled=true;return; // degraded browser/VM: never sign
  }
- const refresh=formalButton_('更新研究人員說明／簽署及副本狀態',formalConsentStatus_);
+ const refresh=formalButton_('唯讀更新本人簽署及PDF副本狀態',formalConsentStatus_);
  el('step-consent').appendChild(refresh);
+ el('step-consent').appendChild(formalButton_('唯讀重新取得已簽完整PDF',()=>{
+  if(!formalConsent)return;
+  if(formalConsent.confirmed)formalConsentCopy_();
+  else formalConsentStatus_();
+ }));
  const withdrawal=document.createElement('div');
  withdrawal.className='box';
  const label=document.createElement('label');label.textContent='正式撤回原因（研究同意完成後才可提交）';
@@ -958,7 +980,7 @@ function formalConsentWire_(){
  for(const id of ['readPdf','agree'])el(id).addEventListener('change',formalConsentRender_);
  el('finish').addEventListener('click',()=>{
   if(!formalConsent||formalConsent.researcherPresigned!==true||
-     !formalConsent.originalVerified||!formalInk||state.busy||
+     !formalConsent.originalVerified||!formalInk||formalSignSubmitted||state.busy||
      !el('readPdf').checked||!el('agree').checked)return;
   const canvas=el('visitorSignaturePreview');
   if(!canvas||typeof canvas.toDataURL!=='function'){
@@ -968,6 +990,7 @@ function formalConsentWire_(){
   if(!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)){
    status('本人簽名影像格式不合法。');return;
   }
+  formalSignSubmitted=true;
   el('finish').disabled=true;
   const token=formalConsent.token;
   rpc('study1EConsentSignPdf',{token,signature:image.split(',')[1],
@@ -976,7 +999,8 @@ function formalConsentWire_(){
    if(!formalConsent||formalConsent.token!==token)return;
    if(!result||!['SIGNED','CONFIRMED'].includes(result.state)||
       result.experiment!=='E1'||result.documentSha256!==formalConsent.documentSha256){
-    status('無法證明完整簽署PDF已產生，請勿重送，改查詢研究團隊。');return;
+    status('本人簽署回應無法證實；僅唯讀查核原同意索引，不可再送簽署。');
+    formalConsentStatus_();return;
    }
    formalConsent.signed=true;
    formalConsent.confirmed=result.state==='CONFIRMED'&&
@@ -986,6 +1010,10 @@ function formalConsentWire_(){
     status('研究者已先簽署，本人線上簽名PDF已保存，請核對PDF副本及原預約狀態。');
     formalConsentCopy_();
    }else status('已儲存簽署PDF，需核對研究者與原預約確認狀態。');
+  },()=>{
+   if(!formalConsent||formalConsent.token!==token)return;
+   status('本人簽署提交回應 UNKNOWN；禁止再次送件，只讀核對原同意索引。');
+   formalConsentStatus_();
   });
  });
  formalInkInit_();formalConsentRender_();
