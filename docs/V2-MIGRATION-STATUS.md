@@ -319,3 +319,17 @@
 - CLEANUP_FINAL_UI_2026-11-13：已驗證 `1e477a4463a0b9e6364c44b3370bc30ac0ecd778` Run #43397869494 的 Job public-safety #131793126185，原始日誌 `237 PASS / 0 FAIL / 0 SKIP`，完整原 4 份 test-only fixture SHA 與正式 27 files 均成功。額外移除正式 `gas/Study1Visitor.html` 中已隱藏且無 E1 依賴的 Demo Done 結果與 V07/V08 TEST 因果卡 HTML、其僅負責隱藏的 dead JS，正式 `formalDoneResult`、`formalVerifySigned_`、`formalReceiptOutcome_` 保留；加強靜態負測。這是原 GAS HTML 的無依賴清理而非 GAS 部署，須回讀下個新 SHA CI。
 
 - CI_REPAIR_FINAL_UI_2026-11-13：正式 HTML 精簡提交 `f1e6ce14077d6ae2bc444e8479ff7821b89fa3ff` Run #43398365889 實際 `236 PASS / 1 FAIL`，原因是舊靜態測試仍強制要求已確認只屬 Demo 管理卡的 `id=v08ManageReview`。測試改核對原正式 E1 的 `formalDoneResult`、原 V05/V08 時段必要節點與正式 RPC，不恢復已淘汰 Demo DOM 或減少測試數。下個 SHA CI 結果須重新核對。
+
+
+### 2026-11-13｜本輪結案回讀：V2 FORMAL E1／TEST 相依隔離與已淘汰執行程式清除
+- TASK_DOMAIN=`Study1_V2_E1_SYNTHETIC_DEPENDENCY_PRUNE_COMPLETED`
+- SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1`／`docs/study1-system-spec.md` §70-S.34–36／`docs/V2-MIGRATION-STATUS.md`，`SOURCE_VERSION/SHA=1ebe91cffa30c2ce72210c859cc813df711b789f`。
+- LAST_VERIFIED_STEP：2026-11-13（Asia/Taipei），新 V2 GitHub Actions Run [#43398477846](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43398477846) `completed/success`，Job `public-safety` #131795111104 原始日誌 `237 tests / 237 PASS / 0 FAIL / 0 SKIP`，Run 的 HEAD 正是上列程式 SHA；當輪最後進度紀錄純文件更新後，需另核對最新 main SHA 與該 SHA CI，不以本 SHA 代替文件提交後結果。
+- COMPLETED：原 `gas/Study1Unified.js`、`Study1Unified.html`、`Study1Team.html`、`Study1FixtureAdapter.js` 四個合成執行來源**已從正式 gas 根目錄實體刪除**，原 Git blob SHA 分別 `ef489b01d25a81c9f71af15476b55df7dec63f3f`、`15f50b46aa01e520208f6b7c01846fa5dea935a6`、`066f086b302793f82280c007166d0f427a632003`、`2230b704fd7ce560b0691ac4314b7a99c749e5d8`，完整保留在 `tests/fixtures/legacy-gas/` 並逐份 SHA 負測；不得將此保存當成 GAS 或正式 Roster。
+- COMPLETED：`gas/Study1Visitor.html` 正式 FORMAL 控制器獨立保留；舊 Demo 第二 IIFE（約 64 KB）以及無正式依賴的 Demo Done/V07 TEST 結果 DOM（約 2.6 KB）已實體移除；原完整 Demo HTML 唯一保存於 `tests/fixtures/Study1Visitor.demo.html` 供舊離線回歸。正式 `formalVerifySigned_`、`formalReceiptOutcome_`、E1 報名／OTP／正式 Slots/Reservations、完整預簽 PDF／本人簽署與 OWNER 下載／撤回安全核心保留。
+- COMPLETED：正式 `scripts/study1-v2-gas-head-only.cjs` 僅認 27 個審查過的 GAS source，且**禁止再次加入**任何四個已淘汰模組；`tests/study1-legacy-quarantine.test.cjs`、既有 V2 安全、正式 Browser E2E、原合成 OTP adapter 負測均進入同一 CI，未刪減測試、未以 skip／假成功處理。
+- VERIFIED_BLOB_SHA：`gas/Study1Visitor.html`=`489dcb48c29a378fa40c72f64ba62da627c7c034`；`scripts/study1-v2-gas-head-only.cjs`=`5fece6f15d35fabfbc7a68c1cb82d690282d5433`；`tests/study1-legacy-quarantine.test.cjs`=`ca46c910a7a77320e15a67ce4f8950cc8360b6ed`。
+- WRITE_OWNER=僅新 V2 GitHub。舊 GitHub／PR #133／舊 GAS、正式個資及場次 Sheets、REC、正式研究刺激及 RIF Context 均未寫入、未讀取私人內容；沒有執行 OAuth、GAS HEAD PUT、版本／部署、真人 Email、OTP 或任何正式收件。
+- BLOCKERS：本輪僅 GitHub 程式清理與離線 CI，尚無同一 V2 GAS 遠端 SOURCE_SYNC 實際回讀；Google 一般帳號真 UI、PI 核定 E1 Slots/政策、研究者預簽正式 PDF、PI／研究行政 REC 適用結論與正式營運 UAT 仍不具新核實證據；歷史 `scripts/study1-gas-*` 僅能封存唯讀，不得由此恢復舊部署。
+- NEXT_ACTION：不再將舊 Demo 當成 E1 MVP 工程；後續依唯一 V2 main 聚焦五項正式營運端到端及獨立授權的 GAS 同步／公開唯讀部署／真人 UAT。除非有新的正式相依證據，不恢復四個淘汰模組。
+- SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`（限本 SHA）；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`，`OPEN=false`、`CONSENT_READY=false`、`E2_OPEN=false`。
