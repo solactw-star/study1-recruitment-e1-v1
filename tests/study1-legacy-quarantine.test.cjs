@@ -28,6 +28,7 @@ test('FORMAL E1 GAS inventory has only reviewed 27 sources and cannot read fixtu
  const visitor=files.find(x=>x.name==='Study1Visitor').source;
  assert.ok(visitor.includes("document.body.dataset.siteMode!=='FORMAL')return;"));
  assert.doesNotMatch(visitor,/study1UnifiedPreviewGet|study1UnifiedPreviewCommand|SIMULATED_SIGN_ONLY/);
+ assert.doesNotMatch(visitor,/demoDoneDetails|v07Result|v08UnknownBoundary|receiptId/);
 });
 test('legacy offline VM helpers do not become public RPCs or bypass server-side deny',()=>{
  const files=core.localSources();

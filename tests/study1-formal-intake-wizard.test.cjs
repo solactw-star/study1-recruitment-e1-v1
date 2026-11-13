@@ -83,9 +83,9 @@ test('FORMAL seventh stage exists and does not expose demo results or premature 
  assert.ok(visitor.includes("const result=await formalVerifySigned_(copy)"));
  assert.ok(visitor.includes("finalLink.href=url;finalLink.download="));
  assert.ok(visitor.indexOf("finalLink.href=url;finalLink.download=")>visitor.indexOf("const result=await formalVerifySigned_(copy)"));
- assert.match(visitor,/id="demoDoneDetails"/);
- assert.match(visitor,/if\(formalDemoDone\)formalDemoDone\.hidden=true/);
- assert.match(visitor,/if\(formalTestResult\)formalTestResult\.hidden=true/);
+ assert.doesNotMatch(visitor,/id="demoDoneDetails"/);
+ assert.doesNotMatch(visitor,/formalDemoDone|formalTestResult/);
+ assert.doesNotMatch(visitor,/id="v07Result"|id="v08UnknownBoundary"/);
  assert.match(visitor,/function formalReceiptOutcome_\(/);
  assert.match(visitor,/function formalDoneRender_\(/);
  assert.match(visitor,/show\('done'\)/);

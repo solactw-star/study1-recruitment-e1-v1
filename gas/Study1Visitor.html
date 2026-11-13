@@ -189,36 +189,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
  <p id="formalDoneNotice" class="help">PDF簽署與預約成立須分別核實。狀態不明時請勿重送申請或簽名。</p>
  <button type="button" id="formalDoneBack" class="ghost">返回查看已簽PDF與唯讀核對狀態</button>
 </div>
-<div id="demoDoneDetails" hidden aria-hidden="true"><div class="receipt"><span class="tag">已完成示範</span><h2 id="doneHeading">報名流程已完成</h2>
-<p>您已成功體驗與參與者相同的報名、初篩、驗證、預約與同意操作。</p>
-<dl><dt>申請編號</dt><dd id="receiptId">—</dd><dt>研究項目</dt><dd id="receiptStudy">—</dd><dt>預約時段</dt><dd id="receiptSlot">—</dd><dt>通知狀態</dt><dd>示範通知已產生，未發送真實郵件</dd></dl>
-<p class="help">此確認頁面不代表已正式錄取或完成正式研究報名。</p></div>
-<h3>需要變更時間嗎？</h3><label for="moveSlot" class="field">其他可選時段</label><select id="moveSlot"></select>
-<div class="actionrow"><button id="move" class="ghost" type="button">更改示範預約時間</button><button id="cancel" class="ghost" type="button">取消示範預約</button><button id="v08Refresh" class="ghost" type="button" disabled>重新核對原GAS預約（唯讀）</button><button id="newStart" type="button">體驗另一項實驗</button></div>
-<div id="v08ManageReview" class="box warn" role="region" aria-label="V08虛構預約改期與取消二次確認" hidden>
-<strong>V08｜虛構預約變更前核對</strong>
-<dl aria-label="虛構預約變更摘要">
-<dt>操作</dt><dd id="v08Action">尚未核對</dd>
-<dt>原場次</dt><dd id="v08From">尚未核對</dd>
-<dt>變更後</dt><dd id="v08To">尚未核對</dd>
-</dl>
-<p id="v08ManageStatus" class="help" role="status" aria-live="polite">來源尚未核實，不得提交。</p>
-<label class="check"><input type="checkbox" id="v08Ack"><span>我已核對上述虛構預約與時間，了解此操作不是正式預約，也不寄送真實通知。</span></label>
-<div class="actionrow"><button id="v08Commit" type="button" disabled>確認執行這筆虛構變更</button>
-<button id="v08Back" type="button" class="ghost">返回，不變更</button></div>
-</div>
-<p id="e2Hint" class="help" hidden>實驗二正式研究包含八週安排；本 Demo 展示前期報名與時段預約，後續團課、居家練習與分組將依核准研究流程安排。</p></div></section>
-<div class="box warn" hidden aria-hidden="true" aria-label="已停用測試結果元件">
-<strong>V07｜虛構預約結果與安全回讀</strong>
-<p id="v07Result" role="status" aria-live="polite">尚未送出虛構預約；待人工審核狀態未接入，不得視為已核准。</p>
-<button id="v07Rescan" type="button" class="ghost" disabled>重新核對原GAS狀態（不重送）</button>
-<p class="help">網路中斷不代表寫入成功或失敗；只顯示原GAS已核對的目前狀態。再次核對是唯讀操作，不接真人資料或付款。</p>
-<div id="v08UnknownBoundary" class="box warn" role="region" aria-label="因果未知的TEST新操作基準" hidden>
-<strong>V08｜原操作因果仍未知</strong>
-<p>只有在連續兩次獨立OWNER GET的原始TEST資料、修訂版、候補FIFO與B02/B04有限歷程完全一致後，才可以明確建立新操作基準。這不代表先前的改期或取消由該次點擊成功完成；不得重送原requestId。</p>
-<label class="check"><input type="checkbox" id="v08UnknownAck"><span>我理解原交易因果永遠不能由目前狀態倒推，只同意從新GET快照開始另一個獨立TEST操作，不重送舊操作。</span></label>
-<button id="v08UnknownRecover" type="button" class="ghost" disabled>核對兩次OWNER GET，明確建立新TEST基準（不重送）</button>
-</div></div>
+</section>
 <div id="status" role="status" aria-live="polite">正在確認正式報名服務狀態…</div>
 </div></main><footer>Study1 · NSTC 115-2410-H-033-015｜正式報名以核准程序與公告為準</footer>
 <script>
@@ -606,11 +577,8 @@ function formalV05Read_(){
  * AND an explicitly recorded researcher explanation on the same fixed PDF.
  */
 let formalConsent=null,formalPdfUrl=null,formalSignedUrl=null,formalInk=false;
-const formalDemoDone=el('demoDoneDetails'),formalDoneNode=el('formalDoneResult');
-if(formalDemoDone)formalDemoDone.hidden=true;
+const formalDoneNode=el('formalDoneResult');
 if(formalDoneNode)formalDoneNode.hidden=false;
-const formalTestResult=document.querySelector('[aria-label="V07虛構預約結果核對"]');
-if(formalTestResult)formalTestResult.hidden=true;
 if(el('formalDoneBack'))el('formalDoneBack').addEventListener('click',()=>{
  show('consent');formalConsentStatus_();
 });

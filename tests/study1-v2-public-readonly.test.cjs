@@ -53,6 +53,7 @@ test('Unified/Team/Fixture synthetic sources cannot ship with formal E1 HEAD',()
  const html=fs.readFileSync(path.join(folder,'Study1Visitor.html'),'utf8');
  assert.ok(html.includes("document.body.dataset.siteMode!=='FORMAL')return;"));
  assert.doesNotMatch(html,/study1UnifiedPreview|study1Fixture|SIMULATED_SIGN_ONLY/);
+ assert.doesNotMatch(html,/demoDoneDetails|v07Result|v08UnknownBoundary|receiptId/);
  assert.ok(!html.includes("document.body.dataset.siteMode==='FORMAL')return;"));
  assert.match(html,/<body data-site-mode="FORMAL">/);
  assert.doesNotMatch(html,/(?:demo\.study1@example\.invalid|00000000|<script[^>]+src=)/);

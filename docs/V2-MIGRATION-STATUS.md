@@ -315,3 +315,5 @@
 - LAST_VERIFIED_STEP=`CI_PENDING`，新 SHA 仍須回讀；WRITE_OWNER=新 V2 GitHub。NEXT_ACTION=確認最新 SHA CI 及原 main/檔案清單，必要時修復出錯的 legacy test loader，且**不得刪減或跳過安全測試**。
 - BLOCKERS：舊 `scripts/study1-gas-*` 是歷史／legacy 同步工具，不是 V2 正式操作路線；相關舊部署流程不得啟動。GAS HEAD 未獲同步授權或 OAuth，公開唯讀真實 UI 未驗收；PI 核准場次、正式預簽 PDF 與 REC 適用結論不由本清理作出。
 - SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
+
+- CLEANUP_FINAL_UI_2026-11-13：已驗證 `1e477a4463a0b9e6364c44b3370bc30ac0ecd778` Run #43397869494 的 Job public-safety #131793126185，原始日誌 `237 PASS / 0 FAIL / 0 SKIP`，完整原 4 份 test-only fixture SHA 與正式 27 files 均成功。額外移除正式 `gas/Study1Visitor.html` 中已隱藏且無 E1 依賴的 Demo Done 結果與 V07/V08 TEST 因果卡 HTML、其僅負責隱藏的 dead JS，正式 `formalDoneResult`、`formalVerifySigned_`、`formalReceiptOutcome_` 保留；加強靜態負測。這是原 GAS HTML 的無依賴清理而非 GAS 部署，須回讀下個新 SHA CI。
