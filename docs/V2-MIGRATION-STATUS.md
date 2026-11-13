@@ -373,3 +373,11 @@
 - LAST_VERIFIED_STEP=`CI_PENDING_NEW_SHA`；WRITE_OWNER=新 V2 GitHub `gas/`／既有 `tests/`／原 `docs/V2-MIGRATION-STATUS.md`，一次原子 main commit 後回讀對應 SHA CI；SYNC_STATUS=`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 - BLOCKERS：遠端同一新 V2 GAS HEAD 未同步，真 Google 帳號 UI、PI 原 Slots/正式研究者預簽 PDF、REC 適用結果與真人營運仍須獨立核准及驗證；沒有更動舊 Github/GAS、正式 Sheets、REC、Script Properties、研究刺激或發送真人信件。
 - NEXT_ACTION：回讀新 SHA CI、修復實際負測失敗；再獨立評估 OTP 驗證已消耗但遺失 proof 時如何在不放寬 OTP 驗證前提下由研究團隊安全核對，並驗證跨儲存簽署／Reservations status UNKNOWN 之人工處置。
+
+
+### 2026-11-13｜同一 E1 UNKNOWN 續作的 OTP 已消耗狀態唯讀回查增量
+- SOURCE/PRE_MAIN=`36acb568ba71c1b0a04b2127a3edf48759a71dc2`；Run #43408209076 Job #131827726032 對此基線回讀 `260 tests / 260 PASS / 0 FAIL / 0 SKIP`；不得以此舊 SHA 結果冒稱更新後 CI。
+- FOUND_GAP：`study1ParticipantOtpIssueState_` 先呼叫只准 `Applicants=PENDING_EMAIL` 的共用 loader；原 Verification F:G 已使用、Applicants 已更新 `EMAIL_VERIFIED` 後，查詢 USED 會錯誤拒絕。
+- COMPLETED：共用 `study1ParticipantOtpRows_` 僅新增顯式 `allowVerifiedReadOnly`；只在 `study1ParticipantOtpIssueState_` 使用，容許 `PENDING_EMAIL/EMAIL_VERIFIED` 查原來源；送信及一次性驗證仍須原 `PENDING_EMAIL`，沒有新 token、EmailProof、補寄或資料寫入。若 Applicants 已 EMAIL_VERIFIED 但 F:G 尚未使用，回傳錯誤 `OTP_ISSUE_LOOKUP_CONSUMPTION_INCONSISTENT`，防偽造可用。
+- TESTS：原 `tests/study1-participant-intake.test.cjs` 增兩項負測：核實 F:G 一次性使用後 Applicants EMAIL_VERIFIED 仍可唯讀回 USED，且完全無新增信件／寫入；異常雙來源拒絕及仍不得再發同一 OTP。
+- LAST_VERIFIED_STEP=`CI_PENDING_POST_OTP_FIX`；NEXT_ACTION=新 SHA raw CI 及 main/檔案回讀；`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`。

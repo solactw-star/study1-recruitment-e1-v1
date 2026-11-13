@@ -245,7 +245,7 @@ function study1ParticipantOtpRequest_(input){
  return {applicantId:input.applicantId,screeningId:input.screeningId,
   experiment:'E1',email,requestId:input.requestId};
 }
-function study1ParticipantOtpRows_(r){
+function study1ParticipantOtpRows_(r,allowVerifiedReadOnly){
  const book=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
  const apps=study1WizardTable_(book,'Applicants',STUDY1_BINDING_SCHEMA_.applicants);
  const screens=study1WizardTable_(book,'Screenings',STUDY1_BINDING_SCHEMA_.screenings);
@@ -256,12 +256,14 @@ function study1ParticipantOtpRows_(r){
  const s=study1BindingOtpRow_(screens.tab,si[0],6);
  const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
  if(a[0]!==r.applicantId||study1BindingEmail_(a[2])!==r.email||
-    a[6]!=='PENDING_EMAIL'||
+    (allowVerifiedReadOnly?
+      !['PENDING_EMAIL','EMAIL_VERIFIED'].includes(a[6]):
+      a[6]!=='PENDING_EMAIL')||
     s[0]!==r.screeningId||s[1]!==r.applicantId||
     s[2]!==policy.screeningVersion||s[3]!=='ELIGIBLE'||
     s[5]!=='PARTICIPANT_SELF_REPORT')
   throw Error('OTP_PENDING_APPLICATION_MISMATCH');
- return {book,apps,screens,policy};
+ return {book,apps,screens,policy,applicationState:a[6]};
 }
 function study1ParticipantOtpSend_(input){
  study1ParticipantMailGate_();
@@ -325,7 +327,7 @@ function study1ParticipantOtpIssueState_(request){
  try{
   if(lock.hasLock()!==true)throw Error('OTP_ISSUE_LOOKUP_LOCK_LOST');
   study1ParticipantMailGate_();
-  const data=study1ParticipantOtpRows_(r);
+  const data=study1ParticipantOtpRows_(r,true);
   const state=study1WizardIssueRows_(data.book,r.applicantId,r.email);
   const matches=study1WizardLookup_(state.ref,1,challengeId,true);
   if(matches.length===0)return {found:false,status:'NOT_FOUND'};
@@ -348,6 +350,8 @@ function study1ParticipantOtpIssueState_(request){
    study1BindingUtc_(row[6]);
    return {found:true,status:'USED'};
   }
+  if(data.applicationState==='EMAIL_VERIFIED')
+   throw Error('OTP_ISSUE_LOOKUP_CONSUMPTION_INCONSISTENT');
   if(expires<=now)return {found:true,status:'EXPIRED'};
   if(!Number.isSafeInteger(Number(row[5]))||Number(row[5])<0)
    throw Error('OTP_ISSUE_LOOKUP_ATTEMPTS_INVALID');

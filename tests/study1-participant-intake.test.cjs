@@ -506,3 +506,38 @@ test('applicant outcome readback fails closed before any original personal Sheet
  assert.throws(()=>x.scope.study1ParticipantBeginOutcome(req),/PARTICIPANT_INTAKE_NOT_READY/);
  assert.equal(x.open.length,0);
 });
+
+test('used F:G can be read after applicant EMAIL_VERIFIED with no new OTP or send',()=>{
+ const x=env(),app=x.begin();
+ const request={applicantId:app.applicantId,screeningId:app.screeningId,
+  experiment:'E1',email:x.input.email,requestId:'REQ_OTP_USED_READ_ONLY_123456'};
+ const issued=x.scope.study1ParticipantOtpSend_(request);
+ const code=x.mail[0].body.match(/驗證碼：(\d{8})/)[1];
+ const done=x.scope.study1ParticipantOtpVerify_({
+  applicantId:app.applicantId,screeningId:app.screeningId,
+  experiment:'E1',email:x.input.email,challengeId:issued.challengeId,code
+ });
+ assert.equal(done.verified,true);
+ assert.equal(x.scope.study1ParticipantEmailStatus_(done.emailProof).emailVerified,true);
+ assert.equal(x.records.Applicants[0][6],'EMAIL_VERIFIED');
+ const writes=x.writes.length,mails=x.mail.length;
+ const state=x.scope.study1ParticipantOtpIssueState_(request);
+ assert.equal(state.found,true);assert.equal(state.status,'USED');
+ assert.equal(state.challengeId,undefined);
+ assert.equal(x.writes.length,writes);assert.equal(x.mail.length,mails);
+ assert.throws(()=>x.scope.study1ParticipantOtpSend_(request),/OTP_PENDING_APPLICATION_MISMATCH/);
+ assert.equal(x.writes.length,writes);assert.equal(x.mail.length,mails);
+});
+test('EMAIL_VERIFIED and an unconsumed OTP cannot be returned as pending',()=>{
+ const x=env(),app=x.begin();
+ const request={applicantId:app.applicantId,screeningId:app.screeningId,
+  experiment:'E1',email:x.input.email,requestId:'REQ_OTP_SOURCE_DRIFT_123456'};
+ x.scope.study1ParticipantOtpSend_(request);
+ x.records.Applicants[0][6]='EMAIL_VERIFIED';
+ const writes=x.writes.length,mails=x.mail.length;
+ assert.throws(()=>x.scope.study1ParticipantOtpIssueState_(request),
+  /OTP_ISSUE_LOOKUP_CONSUMPTION_INCONSISTENT/);
+ assert.equal(x.writes.length,writes);assert.equal(x.mail.length,mails);
+ assert.throws(()=>x.scope.study1ParticipantOtpSend_(request),
+  /OTP_PENDING_APPLICATION_MISMATCH/);
+});
