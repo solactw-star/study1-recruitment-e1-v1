@@ -66,7 +66,7 @@ test('Real OTP never invokes test command or demo code; email is not student ver
 });
 test('Original V05/V08 and summary/consent step order remain unchanged',()=>{
  assert.match(visitor,/const state=\{ready:false,app:null,mail:null/);
- for(const id of ['v05Dates','v05Month','v08WaitBox','v08ManageReview',
+ for(const id of ['v05Dates','v05Month','v08WaitBox','formalDoneResult',
   'v06Summary','officialPdfViewer','officialSignedPdfDownload','visitorSignaturePreview'])
   assert.match(visitor,new RegExp('id="'+id+'"'));
  assert.doesNotMatch(visitor,/SIMULATED_SIGN_ONLY/);

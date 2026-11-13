@@ -317,3 +317,5 @@
 - SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。
 
 - CLEANUP_FINAL_UI_2026-11-13：已驗證 `1e477a4463a0b9e6364c44b3370bc30ac0ecd778` Run #43397869494 的 Job public-safety #131793126185，原始日誌 `237 PASS / 0 FAIL / 0 SKIP`，完整原 4 份 test-only fixture SHA 與正式 27 files 均成功。額外移除正式 `gas/Study1Visitor.html` 中已隱藏且無 E1 依賴的 Demo Done 結果與 V07/V08 TEST 因果卡 HTML、其僅負責隱藏的 dead JS，正式 `formalDoneResult`、`formalVerifySigned_`、`formalReceiptOutcome_` 保留；加強靜態負測。這是原 GAS HTML 的無依賴清理而非 GAS 部署，須回讀下個新 SHA CI。
+
+- CI_REPAIR_FINAL_UI_2026-11-13：正式 HTML 精簡提交 `f1e6ce14077d6ae2bc444e8479ff7821b89fa3ff` Run #43398365889 實際 `236 PASS / 1 FAIL`，原因是舊靜態測試仍強制要求已確認只屬 Demo 管理卡的 `id=v08ManageReview`。測試改核對原正式 E1 的 `formalDoneResult`、原 V05/V08 時段必要節點與正式 RPC，不恢復已淘汰 Demo DOM 或減少測試數。下個 SHA CI 結果須重新核對。
