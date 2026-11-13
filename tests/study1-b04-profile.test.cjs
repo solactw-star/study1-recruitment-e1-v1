@@ -1,11 +1,12 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const server=fs.readFileSync(path.join(__dirname,'../gas/Study1Unified.js'),'utf8');
-const page=fs.readFileSync(path.join(__dirname,'../gas/Study1Team.html'),'utf8');
+const server=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1Unified.js'),'utf8');
+const page=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1Team.html'),'utf8');
 const website=fs.readFileSync(path.join(__dirname,'../gas/Website.js'),'utf8');
 function setup(){
  const ctx=vm.createContext({Date,Math,JSON,Array,Object,String,Number,Set,Map,Error});

@@ -305,3 +305,13 @@
 - CI_REPAIR_2026-11-13：新 Visitor FORMAL-only SHA `b73eb852a520f39a1700c8081cb2298f91ba3f67` 的 Run #43396439242 實際 `217 PASS / 1 FAIL`，因原 `study1-signed-pdf-wizard-readback.test.cjs` 仍用正式 GAS 讀取已退出的舊 DEMO `officialSignedPdfVerify_`，非現行 FORMAL 的 `formalVerifySigned_`。修正原測試僅將其既有虛構 PDF 測試來源改指 `tests/fixtures/Study1Visitor.demo.html`，保留所有測試與負例，不恢復舊 DEMO 正式程式。增列 FORMAL intake 的既有靜態檢查入安全 CI。本段更新後以新 SHA CI 回讀，不得宣稱先前失敗 SHA 通過。
 
 - CI_REPAIR_2026-11-13_2：`ec44724c8ce4e15472268c4b0f61e43c0f673f8a` Run #43396600310 實際 `229 PASS / 1 FAIL`（增加 FORMAL 靜態測試後，尚有一條原 Demo 路由單行正規式不符現行已加嚴的 public deny／換行程式）。只更新該測試為符合現行 `e.parameter.view==='apply'` 與輸入換行及已拒絕 Demo 路由的保護契約，不改已通過之正式路由程式；下個 SHA 必須重新回讀 CI。
+
+
+## 2026-11-13｜V2 Unified／Team／Fixture 原 GAS 執行來源實體移除（CI 待新 SHA）
+- TASK_DOMAIN=`Study1_V2_RETIRED_GAS_EXECUTABLE_PHYSICAL_PRUNE`；SOURCE_ID/PATH=`solactw-star/study1-recruitment-e1-v1` 唯一 main，正式規格 §70-S.34–36；PRE_MAIN_SHA=`a5b0507d6d2f8b3e6f1eb1c2bded4fe39029ff0d`。
+- DEPENDENCY_VERIFIED：正式 E1 的 `Study1FormalBooking`、`Study1FormalConsent`、`Study1ParticipantIntake`、`Study1EConsentBinding`、`Study1WizardP0Bridge`、OWNER `AdminSandbox`／`AdminConsole` 均無 Unified／Fixture RPC 正式依賴。原 `Study1Visitor.html` 已於前一輪獨立移除 DEMO 控制器（前一 SHA Run #43396712709 `230 PASS / 0 FAIL`）。
+- COMPLETED：將 `Study1Unified.js`、`Study1Unified.html`、`Study1Team.html`、`Study1FixtureAdapter.js` 四份完整原始位元組搬至 `tests/fixtures/legacy-gas/`，更新引用它們的既有離線 VM／B01–B12／合成測試改讀同一 test-only fixture；從 `gas/` 實體刪除四個原檔。新 V2 `scripts/study1-v2-gas-head-only.cjs` 從「忽略這些程式」改為「一旦重新出現即 fail-closed」，維持**只有 27 個已審查的正式 GAS 來源**。
+- TESTS：新增 V2 `tests/study1-legacy-quarantine.test.cjs` 鎖定四份原始 Git blob SHA、正式 27-file inventory、正式 RPC 伺服器端拒絕、舊 fixture 不能回灌的負測；V2 CI 加入新檢查、原合成 OTP/Booking adapter 離線測試與 fixture 的 JS syntax。保留歷史測試資料及其他未被使用者授權刪除的程式，不操作任何舊 Repo/GAS。
+- LAST_VERIFIED_STEP=`CI_PENDING`，新 SHA 仍須回讀；WRITE_OWNER=新 V2 GitHub。NEXT_ACTION=確認最新 SHA CI 及原 main/檔案清單，必要時修復出錯的 legacy test loader，且**不得刪減或跳過安全測試**。
+- BLOCKERS：舊 `scripts/study1-gas-*` 是歷史／legacy 同步工具，不是 V2 正式操作路線；相關舊部署流程不得啟動。GAS HEAD 未獲同步授權或 OAuth，公開唯讀真實 UI 未驗收；PI 核准場次、正式預簽 PDF 與 REC 適用結論不由本清理作出。
+- SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。

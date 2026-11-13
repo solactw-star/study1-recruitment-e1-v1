@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const crypto=require('node:crypto');
 const fixtureUtilities={
@@ -12,14 +13,14 @@ const fixtureUtilities={
   .update(payload,'utf8').digest()].map(b=>b>127?b-256:b)
 };
 const gasDir=path.join(__dirname,'../gas');
-const serverCode=fs.readFileSync(path.join(gasDir,'OtpCore.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'BookingCore.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'OtpThrottle.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'OtpTransaction.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'BookingHoldTransaction.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'Study1FixtureAdapter.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'AdminSandbox.js'),'utf8')+'\n'+fs.readFileSync(path.join(gasDir,'Study1Unified.js'),'utf8');
-const html=fs.readFileSync(path.join(gasDir,'Study1Unified.html'),'utf8');
+const serverCode=fs.readFileSync(legacySourcePath(gasDir,'OtpCore.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'BookingCore.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'OtpThrottle.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'OtpTransaction.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'BookingHoldTransaction.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'Study1FixtureAdapter.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'AdminSandbox.js'),'utf8')+'\n'+fs.readFileSync(legacySourcePath(gasDir,'Study1Unified.js'),'utf8');
+const html=fs.readFileSync(legacySourcePath(gasDir,'Study1Unified.html'),'utf8');
 const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
 if(scripts.length!==1)throw Error('One unified application script required');
 const src=scripts[0][1],ids=[...new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(x=>x[1]))];

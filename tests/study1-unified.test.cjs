@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const crypto=require('node:crypto'),zlib=require('node:zlib');
 const toBuffer=v=>typeof v==='string'?Buffer.from(v,'utf8'):Buffer.from(v.map(n=>n&255));
@@ -19,14 +20,14 @@ const fixtureUtilities={
   .update(payload,'utf8').digest()].map(b=>b>127?b-256:b)
 };
 const gasDir=path.join(__dirname,'../gas');
-const src=fs.readFileSync(path.join(gasDir,'OtpCore.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'BookingCore.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'OtpThrottle.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'OtpTransaction.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'BookingHoldTransaction.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'Study1FixtureAdapter.js'),'utf8')+'\n'+
- fs.readFileSync(path.join(gasDir,'AdminSandbox.js'),'utf8')+'\n'+fs.readFileSync(path.join(gasDir,'Study1Unified.js'),'utf8');
-const html=fs.readFileSync(path.join(gasDir,'Study1Unified.html'),'utf8');
+const src=fs.readFileSync(legacySourcePath(gasDir,'OtpCore.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'BookingCore.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'OtpThrottle.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'OtpTransaction.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'BookingHoldTransaction.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'Study1FixtureAdapter.js'),'utf8')+'\n'+
+ fs.readFileSync(legacySourcePath(gasDir,'AdminSandbox.js'),'utf8')+'\n'+fs.readFileSync(legacySourcePath(gasDir,'Study1Unified.js'),'utf8');
+const html=fs.readFileSync(legacySourcePath(gasDir,'Study1Unified.html'),'utf8');
 function setup({active='solac.tw@gmail.com',effective='solac.tw@gmail.com',open='false',consent='false'}={}){
  const p=new Map([['OPEN',open],['CONSENT_READY',consent]]);let writes=0,deletes=0;let held=false,locks=0;
  const props={getProperty:k=>p.has(k)?p.get(k):null,setProperty:(k,v)=>{assert.ok(['STUDY1_UNIFIED_FIXTURE_V1','STUDY1_B01_OWNER_LAYOUT_V1'].includes(k));p.set(k,v);writes++;},deleteProperty:k=>{assert.ok(['STUDY1_UNIFIED_FIXTURE_V1','STUDY1_B01_OWNER_LAYOUT_V1'].includes(k));p.delete(k);deletes++;}};

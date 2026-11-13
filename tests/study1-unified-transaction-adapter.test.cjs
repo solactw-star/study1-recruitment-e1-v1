@@ -1,10 +1,11 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),crypto=require('node:crypto'),path=require('node:path');
 const dir=path.join(__dirname,'../gas');
 const names=['OtpCore','BookingCore','OtpThrottle','OtpTransaction',
  'BookingHoldTransaction','Study1FixtureAdapter','Study1Unified'];
-const src=names.map(n=>fs.readFileSync(path.join(dir,n+'.js'),'utf8')).join('\n');
+const src=names.map(n=>fs.readFileSync(legacySourcePath(dir,n+'.js'),'utf8')).join('\n');
 function context(){
  const ctx=vm.createContext({Date,JSON,Map,Set,Error,Number,String,Object,Array,
   Utilities:{Charset:{UTF_8:'UTF-8'},
@@ -48,5 +49,5 @@ test('Booking hold kernel runs only on shadow rows while the external lock is he
  assert.equal(held.held,true);assert.equal(held.reason,'CREATED');
  assert.equal(a.slotId,null,'shadow append must not mutate persistent application');
  assert.throws(()=>c.study1FixtureHold_(s,a,slot,'REQ-SIM-ADAPTER00002',now,{hasLock:()=>false}),/全域鎖/);
- assert.doesNotMatch(fs.readFileSync(path.join(dir,'Study1FixtureAdapter.js'),'utf8'),/\bSpreadsheetApp\s*\.|\bMailApp\s*\.|\bGmailApp\s*\./);
+ assert.doesNotMatch(fs.readFileSync(legacySourcePath(dir,'Study1FixtureAdapter.js'),'utf8'),/\bSpreadsheetApp\s*\.|\bMailApp\s*\.|\bGmailApp\s*\./);
 });

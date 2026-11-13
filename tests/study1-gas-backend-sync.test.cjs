@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const core=require('../scripts/study1-gas-index-preview.cjs');
@@ -7,14 +8,14 @@ const sync=require('../scripts/study1-gas-auto-index.cjs');
 const website=fs.readFileSync(path.join(__dirname,'../gas/Website.js'),'utf8');
 const adminSource=fs.readFileSync(path.join(__dirname,'../gas/AdminSandbox.js'),'utf8');
 const adminHtml=fs.readFileSync(path.join(__dirname,'../gas/AdminConsole.html'),'utf8');
-const unified=fs.readFileSync(path.join(__dirname,'../gas/Study1Unified.js'),'utf8');
-const unifiedHtml=fs.readFileSync(path.join(__dirname,'../gas/Study1Unified.html'),'utf8');
+const unified=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1Unified.js'),'utf8');
+const unifiedHtml=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1Unified.html'),'utf8');
 const otpCore=fs.readFileSync(path.join(__dirname,'../gas/OtpCore.js'),'utf8');
 const bookingCore=fs.readFileSync(path.join(__dirname,'../gas/BookingCore.js'),'utf8');
 const otpThrottle=fs.readFileSync(path.join(__dirname,'../gas/OtpThrottle.js'),'utf8');
 const otpTransaction=fs.readFileSync(path.join(__dirname,'../gas/OtpTransaction.js'),'utf8');
 const bookingHoldTransaction=fs.readFileSync(path.join(__dirname,'../gas/BookingHoldTransaction.js'),'utf8');
-const fixtureAdapter=fs.readFileSync(path.join(__dirname,'../gas/Study1FixtureAdapter.js'),'utf8');
+const fixtureAdapter=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1FixtureAdapter.js'),'utf8');
 const index=fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8');
 function remote(){
  return {files:[

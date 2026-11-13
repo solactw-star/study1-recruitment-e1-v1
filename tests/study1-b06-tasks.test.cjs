@@ -1,11 +1,12 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const zlib=require('node:zlib'),crypto=require('node:crypto');
 const root=path.join(__dirname,'../gas');
 const source=['OtpCore.js','BookingCore.js','OtpThrottle.js','OtpTransaction.js',
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js']
- .map(name=>fs.readFileSync(path.join(root,name),'utf8')).join('\n');
+ .map(name=>fs.readFileSync(legacySourcePath(root,name),'utf8')).join('\n');
 const byteArray=v=>[...v].map(x=>x>127?x-256:x);
 const buff=v=>typeof v==='string'?Buffer.from(v,'utf8'):Buffer.from(v.map(x=>x&255));
 const blob=v=>({getBytes:()=>byteArray(buff(v)),getDataAsString:()=>buff(v).toString('utf8')});
@@ -146,7 +147,7 @@ test('B06 permission and consent gate remain fail closed, no formal sources used
  const opened=setup({consent:'true'});
  assert.throws(()=>opened.cmd('CREATE',opened.fields),/關閉|CONSENT_READY/);
  assert.equal(opened.writes,0);
- const text=fs.readFileSync(path.join(root,'Study1Unified.js'),'utf8');
+ const text=fs.readFileSync(legacySourcePath(root,'Study1Unified.js'),'utf8');
  assert.doesNotMatch(text,/\b(?:MailApp|GmailApp|SpreadsheetApp|DriveApp)\s*\./);
 });
 

@@ -125,7 +125,9 @@ function localSources(root=path.join(__dirname,'..','gas')){
  require_(clasp.scriptId===SID,'local .clasp.json points to a different Script ID');
  const filenames=fs.readdirSync(root,{withFileTypes:true}).filter(x=>x.isFile() && x.name!=='.clasp.json');
  // Synthetic sources are kept only for offline tests, never sent to GAS.
- const files=filenames.filter(x=>!TEST_ONLY_NONDEPLOYABLE.includes(x.name)).map(x=>{
+ require_(!filenames.some(x=>TEST_ONLY_NONDEPLOYABLE.includes(x.name)),
+  'retired synthetic source reintroduced into executable GAS directory');
+ const files=filenames.map(x=>{
   const ext=path.extname(x.name);
   require_(Object.hasOwn(TYPES,ext),'unrecognized GAS source extension: '+x.name);
   const name=x.name==='Study1Unified.js'?'Study1Flow':path.basename(x.name,ext);

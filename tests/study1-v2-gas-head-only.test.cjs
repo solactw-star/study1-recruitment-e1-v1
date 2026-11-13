@@ -48,6 +48,10 @@ test('V2 checked-in gas maps to V2 only and exact expected 27-source formal inve
  const clone=fs.mkdtempSync(path.join(os.tmpdir(),'v2-inventory-'));
  for(const p of fs.readdirSync(dir))fs.copyFileSync(path.join(dir,p),path.join(clone,p));
  fs.writeFileSync(path.join(clone,'EXTRA.js'),'x');assert.throws(()=>m.localSources(clone),/allowlist/);
+ fs.rmSync(path.join(clone,'EXTRA.js'));
+ fs.copyFileSync(path.join(__dirname,'fixtures/legacy-gas/Study1FixtureAdapter.js'),
+  path.join(clone,'Study1FixtureAdapter.js'));
+ assert.throws(()=>m.localSources(clone),/retired synthetic source reintroduced/);
  fs.rmSync(clone,{recursive:true,force:true});
 });
 test('supports old/new clasp OAuth JSON without exposing credentials',()=>{

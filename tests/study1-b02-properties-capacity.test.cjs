@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 /** Regression for B02 owner UAT: TEST fixture filled ScriptProperties before editing,
  * participant progress or cancellation could save. Never reset existing SIM data. */
 const test=require('node:test');
@@ -10,7 +11,7 @@ const crypto=require('node:crypto');
 const zlib=require('node:zlib');
 const source=['OtpCore.js','BookingCore.js','OtpThrottle.js','OtpTransaction.js',
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js']
- .map(name=>fs.readFileSync(path.join(__dirname,'../gas',name),'utf8')).join('\n');
+ .map(name=>fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),name),'utf8')).join('\n');
 function makeBlob(x){
  const data=typeof x==='string'?Buffer.from(x,'utf8'):Buffer.from(x.map(n=>n&255));
  return {getBytes:()=>[...data].map(n=>n>127?n-256:n),

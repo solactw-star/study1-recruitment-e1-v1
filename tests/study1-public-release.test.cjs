@@ -5,7 +5,11 @@ const fs=require('node:fs');
 const path=require('node:path');
 const release=require('../scripts/study1-gas-public-release.cjs');
 const root=path.join(__dirname,'..');
-const source=x=>fs.readFileSync(path.join(root,x),'utf8');
+const source=x=>{
+ const filename=String(x);
+ const archive=/^gas\/(Study1Unified\.(?:js|html)|Study1Team\.html|Study1FixtureAdapter\.js)$/.exec(filename);
+ return fs.readFileSync(archive?path.join(__dirname,'fixtures/legacy-gas',archive[1]):path.join(root,filename),'utf8');
+};
 const privateId=release.PRIVATE_ID;
 const closedEnv={GITHUB_REPOSITORY:'solactw-star/study1-recruitment-gas',
  GITHUB_REPOSITORY_PRIVATE:'true',GITHUB_REF:'refs/heads/main',

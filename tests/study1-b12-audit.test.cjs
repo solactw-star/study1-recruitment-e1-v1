@@ -1,11 +1,12 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const crypto=require('node:crypto'),zlib=require('node:zlib');
 const root=path.join(__dirname,'../gas');
 const source=['OtpCore.js','BookingCore.js','OtpThrottle.js','OtpTransaction.js',
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js']
- .map(n=>fs.readFileSync(path.join(root,n),'utf8')).join('\n');
+ .map(n=>fs.readFileSync(legacySourcePath(root,n),'utf8')).join('\n');
 const bytes=b=>[...b].map(x=>x>127?x-256:x);
 const buff=b=>typeof b==='string'?Buffer.from(b,'utf8'):Buffer.from(b.map(x=>x&255));
 const blob=v=>({getBytes:()=>bytes(buff(v)),getDataAsString:()=>buff(v).toString('utf8')});
@@ -250,7 +251,7 @@ test('B12 refused synthetic transaction logs redacted failure codes, no payloads
  assert.equal(x.locked,false);
 });
 test('B12 contains no formal data provider or unapproved third-party export call',()=>{
- const text=fs.readFileSync(path.join(root,'Study1Unified.js'),'utf8');
+ const text=fs.readFileSync(legacySourcePath(root,'Study1Unified.js'),'utf8');
  assert.doesNotMatch(text,/\b(?:SpreadsheetApp|DriveApp|GmailApp|MailApp|UrlFetchApp)\s*\./);
  assert.match(text,/study1UnifiedRoleAuthorise_\('OWNER','EXPORT_AUDIT'\)/);
  assert.match(text,/STUDY1_B12_DIAGNOSTIC_V1/);
@@ -279,7 +280,7 @@ test('B12 UI newest/oldest ordering uses independent snapshot-bound cursors and 
   snapshotHash:newest.snapshotHash})),/快照/);
  assert.throws(()=>ctx.study1B12AuditPage_(f,b,query(f,b,{
   sort:'REVERSE',module:'B06'})),/參數/);
- const ui=fs.readFileSync(require('node:path').join(root,'Study1Team.html'),'utf8');
+ const ui=fs.readFileSync(legacySourcePath(root,'Study1Team.html'),'utf8');
  assert.match(ui,/id="b12Sort"/);
  assert.match(ui,/sort:\$\('b12Sort'\)\.value/);
  assert.match(ui,/\['b12ModuleFilter','b12Result','b12Limit','b12Sort'\]/);
@@ -380,7 +381,7 @@ test('B12 fails closed on forged B02 codes/dates and never enables a formal expo
  }
  assert.equal(x.writes,0);
  assert.throws(()=>ctx.study1UnifiedB12Export_(),/未獲授權/);
- const html=fs.readFileSync(path.join(root,'Study1Team.html'),'utf8');
+ const html=fs.readFileSync(legacySourcePath(root,'Study1Team.html'),'utf8');
  assert.match(html,/<option value="B02">B02 行事曆<\/option>/);
  assert.match(html,/id="b12Coverage"/);
  assert.match(html,/coverage\.warnings\.map/);

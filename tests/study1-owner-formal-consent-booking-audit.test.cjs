@@ -1,8 +1,9 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../gas/Study1FormalBooking.js'),'utf8');
-const ownerUi=fs.readFileSync(path.join(__dirname,'../gas/Study1Team.html'),'utf8');
+const ownerUi=fs.readFileSync(legacySourcePath(path.join(__dirname,'../gas'),'Study1Team.html'),'utf8');
 function setup(){
  let owner=true,locked=false,reads=0,writes=0,invalid=false;
  const now=Date.now(),iso=n=>new Date(now+n).toISOString();

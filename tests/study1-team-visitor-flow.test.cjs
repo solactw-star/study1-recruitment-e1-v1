@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 /**
  * Browser-shaped E1/E2 site-management acceptance.
  * Executes real Study1Team.html and Study1Visitor.html inline scripts
@@ -16,8 +17,8 @@ const gasDir=path.join(__dirname,'../gas');
 const backendSource=[
  'OtpCore.js','BookingCore.js','OtpThrottle.js','OtpTransaction.js',
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js'
-].map(name=>fs.readFileSync(path.join(gasDir,name),'utf8')).join('\n');
-const teamHtml=fs.readFileSync(path.join(gasDir,'Study1Team.html'),'utf8');
+].map(name=>fs.readFileSync(legacySourcePath(gasDir,name),'utf8')).join('\n');
+const teamHtml=fs.readFileSync(legacySourcePath(gasDir,'Study1Team.html'),'utf8');
 const demoHtml=fs.readFileSync(path.join(__dirname,'fixtures/Study1Visitor.demo.html'),'utf8');
 const scriptOf=html=>{
  const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];

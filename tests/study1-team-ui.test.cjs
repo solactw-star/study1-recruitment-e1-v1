@@ -1,12 +1,13 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const gate=require('../scripts/study1-gas-backend-allowlist.cjs');
 const dir=path.join(__dirname,'../gas');
-const html=fs.readFileSync(path.join(dir,'Study1Team.html'),'utf8');
-const unified=fs.readFileSync(path.join(dir,'Study1Unified.js'),'utf8');
-const website=fs.readFileSync(path.join(dir,'Website.js'),'utf8');
+const html=fs.readFileSync(legacySourcePath(dir,'Study1Team.html'),'utf8');
+const unified=fs.readFileSync(legacySourcePath(dir,'Study1Unified.js'),'utf8');
+const website=fs.readFileSync(legacySourcePath(dir,'Website.js'),'utf8');
 const visitor=fs.readFileSync(path.join(__dirname,'fixtures/Study1Visitor.demo.html'),'utf8');
-const index=fs.readFileSync(path.join(dir,'Index.html'),'utf8');
+const index=fs.readFileSync(legacySourcePath(dir,'Index.html'),'utf8');
 const sync=fs.readFileSync(path.join(__dirname,'../scripts/study1-gas-auto-index.cjs'),'utf8');
 const flow=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-gas-auto-index.yml'),'utf8');
 // Isolated B01 legacy-KPI tests stub the new independently-tested B07 contract;

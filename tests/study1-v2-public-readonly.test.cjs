@@ -45,8 +45,11 @@ test('old system and private deployment URL are not hard-coded as public links',
 test('Unified/Team/Fixture synthetic sources cannot ship with formal E1 HEAD',()=>{
  for(const id of ['Study1FixtureAdapter','Study1Team','Study1Flow','Study1Unified'])
   assert.equal(files.some(f=>f.name===id),false,id);
- for(const fname of ['Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js'])
-  assert.ok(fs.existsSync(path.join(folder,fname)),'offline test-only source retained: '+fname);
+ for(const fname of ['Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js']){
+  assert.equal(fs.existsSync(path.join(folder,fname)),false,'synthetic runtime removed from gas/: '+fname);
+  assert.ok(fs.existsSync(path.join(__dirname,'fixtures/legacy-gas',fname)),
+   'historical test-only source preserved: '+fname);
+ }
  const html=fs.readFileSync(path.join(folder,'Study1Visitor.html'),'utf8');
  assert.ok(html.includes("document.body.dataset.siteMode!=='FORMAL')return;"));
  assert.doesNotMatch(html,/study1UnifiedPreview|study1Fixture|SIMULATED_SIGN_ONLY/);

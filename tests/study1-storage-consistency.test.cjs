@@ -1,4 +1,5 @@
 'use strict';
+const {legacySourcePath}=require('./helpers/study1-legacy-source.cjs');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const vm=require('node:vm');
@@ -8,7 +9,7 @@ const path=require('node:path');
 const gas=path.join(__dirname,'../gas');
 const code=['OtpCore.js','BookingCore.js','OtpThrottle.js','OtpTransaction.js',
  'BookingHoldTransaction.js','Study1FixtureAdapter.js','AdminSandbox.js','Study1Unified.js']
- .map(n=>fs.readFileSync(path.join(gas,n),'utf8')).join('\n');
+ .map(n=>fs.readFileSync(legacySourcePath(gas,n),'utf8')).join('\n');
 const shaBytes=bytes=>[...crypto.createHash('sha256')
  .update(Buffer.from(bytes.map(x=>x<0?x+256:x))).digest()]
  .map(x=>x>127?x-256:x);
