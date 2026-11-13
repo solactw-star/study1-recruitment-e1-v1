@@ -1020,15 +1020,33 @@ function e1OwnerOperationsSetup_(){
   caption.textContent='正式 E1 同意、原預約及通知出站狀態（僅 OWNER 唯讀）';
   table.appendChild(caption);
   const head=document.createElement('thead'),hr=document.createElement('tr');
-  for(const title of ['同意紀錄 ID','本人同意狀態','原預約核對','通知 outbox']){
+  for(const title of ['同意紀錄 ID','同意索引狀態（非PDF逐檔核驗）','原預約核對','通知 outbox','跨來源處置']){
    const th=document.createElement('th');th.textContent=title;hr.appendChild(th);
   }
   head.appendChild(hr);table.appendChild(head);
   const body=document.createElement('tbody');
+  let reviewCount=0;
   for(const [id,book] of b){
    const noticeRow=n.get(id),tr=document.createElement('tr');
+   let crossStatus;
+   if(book.bookingStatus==='UNKNOWN'||noticeRow.noticeStatus==='SOURCE_MISMATCH')
+    crossStatus='來源衝突／UNKNOWN，需人工唯讀核對';
+   else if(noticeRow.consentState==='WITHDRAWN')
+    crossStatus='已撤回，須人工核對後續處置';
+   else if(noticeRow.consentState!=='CONFIRMED')
+    crossStatus='同意索引未完成，不能推定正式報名成立';
+   else if(book.bookingStatus!=='CONFIRMED')
+    crossStatus='同意索引已確認，但原預約未確認；不得重送';
+   else if(noticeRow.noticeStatus==='NOT_QUEUED')
+    crossStatus='原預約已確認，但未見通知；禁止自動補寄';
+   else if(noticeRow.noticeStatus==='UNKNOWN_REQUIRES_STAFF_REVIEW')
+    crossStatus='原預約已確認，寄送結果 UNKNOWN；禁止重寄';
+   else
+    crossStatus='原預約已確認；寄件服務接受不等於送達';
+   if(crossStatus!=='原預約已確認；寄件服務接受不等於送達')reviewCount++;
    for(const value of [id,noticeRow.consentState,
-     bookingText[book.bookingStatus],noticeText[noticeRow.noticeStatus]]){
+     bookingText[book.bookingStatus],noticeText[noticeRow.noticeStatus],
+     crossStatus]){
     const td=document.createElement('td');td.textContent=value;tr.appendChild(td);
    }
    body.appendChild(tr);
@@ -1036,7 +1054,8 @@ function e1OwnerOperationsSetup_(){
   table.appendChild(body);out.appendChild(table);
   button.disabled=false;
   statusNode.textContent='已依相同同意索引版號 '+booking.consentRevision+
-   ' 核對 '+b.size+' 筆；預約、PDF 和郵件送達仍是獨立證據。';
+   ' 核對 '+b.size+' 筆，需人工查核 '+reviewCount+
+   ' 筆；同意索引不代替完整PDF逐檔SHA，預約與郵件送達仍是獨立證據。';
  }
  button.addEventListener('click',()=>{
   const current=++request;button.disabled=true;clear();

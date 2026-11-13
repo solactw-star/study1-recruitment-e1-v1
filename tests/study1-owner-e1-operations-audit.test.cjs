@@ -97,6 +97,19 @@ test('duplicate, forged, wrong-party and corrupted outbox rows fail closed',()=>
   assert.equal(f.counters().mailCalls,0);
  }
 });
+test('accepted notification timestamp before creation must be inconsistent',()=>{
+ const forged=row();forged[7]='2026-11-13T05:59:59.000Z';
+ const f=harness({rows:[forged]});
+ assert.equal(f.ctx.study1OwnerE1NotificationAudit().records[0].noticeStatus,
+  'SOURCE_MISMATCH');
+ assert.equal(f.counters().mailCalls,0);
+});
+test('duplicate reservation with no outbox has no arbitrary first owner',()=>{
+ const other={...harness({rows:[]}).entry,id:'22222222-3333-4444-5555-666666666666'};
+ const f=harness({rows:[],entries:[harness({rows:[]}).entry,other]});
+ assert.deepEqual(f.ctx.study1OwnerE1NotificationAudit().records.map(x=>x.noticeStatus),
+  ['SOURCE_MISMATCH','SOURCE_MISMATCH']);
+});
 test('public RPC is rejected before OWNER, registry, Sheets or MailApp',()=>{
  const f=harness({publicDenied:true});
  assert.throws(()=>f.ctx.study1OwnerE1NotificationAudit(),/PUBLIC_RPC_DENIED/);
@@ -128,7 +141,7 @@ test('same original reservation cannot be attributed to two consents',()=>{
   state:'CONFIRMED',binding:{applicantId:APP,reservationId:RSV,experiment:'E1'}};
  const f=harness({entries:[harness({rows:[]}).entry,x]});
  const rows=f.ctx.study1OwnerE1NotificationAudit().records;
- assert.equal(rows[0].noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');
+ assert.equal(rows[0].noticeStatus,'SOURCE_MISMATCH');
  assert.equal(rows[1].noticeStatus,'SOURCE_MISMATCH');
 });
 const uiStart=ownerHtml.indexOf('function e1OwnerOperationsSetup_(){');
@@ -172,6 +185,21 @@ test('OWNER UI combines booking and outbox only after same revision and exact ID
  assert.match(view,/郵件服務已接受（非實際送達證明）/);
  assert.match(view,/已由原 Reservations 核實/);
  assert.doesNotMatch(view,/email|example.org|RSV_ORIGINAL/);
+});
+test('OWNER UI flags PDF-index / booking / outbox UNKNOWN without retries',()=>{
+ const held={...booking,records:[{id:RID,bookingStatus:'HELD',bookingConfirmed:false}]};
+ const h=browser(held,notice);h.click();
+ assert.match(JSON.stringify(h.elements.get('e1OpsResults')),/同意索引已確認，但原預約未確認；不得重送/);
+ assert.match(h.elements.get('e1OpsStatus').textContent,/需人工查核 1 筆/);
+ const uncertain=browser(booking,{...notice,records:[{...notice.records[0],
+  noticeStatus:'UNKNOWN_REQUIRES_STAFF_REVIEW'}]});
+ uncertain.click();
+ assert.match(JSON.stringify(uncertain.elements.get('e1OpsResults')),/寄送結果 UNKNOWN；禁止重寄/);
+ const inconsistent=browser(booking,{...notice,records:[{...notice.records[0],
+  noticeStatus:'SOURCE_MISMATCH'}]});
+ inconsistent.click();
+ assert.match(JSON.stringify(inconsistent.elements.get('e1OpsResults')),/來源衝突／UNKNOWN/);
+ assert.deepEqual(h.calls,['booking','notice']);
 });
 test('OWNER UI rejects revision drift, missing row, booking ambiguity and private read error',()=>{
  for(const [bk,nt] of [

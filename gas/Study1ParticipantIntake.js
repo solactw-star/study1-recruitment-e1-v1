@@ -610,7 +610,8 @@ function study1ParticipantBookingNotice_(verifiedApplicantEmail,consentId){
  try{
   if(lock.hasLock()!==true)throw Error('E1_NOTICE_LOCK_LOST');
   study1ParticipantMailGate_();study1FormalConsentGate_();
-  const matches=study1EConsentRegistry_().records.filter(x=>x.id===consentId);
+  const registry=study1EConsentRegistry_();
+  const matches=registry.records.filter(x=>x.id===consentId);
   if(matches.length!==1)throw Error('E1_NOTICE_CONSENT_NOT_UNIQUE');
   const entry=matches[0],binding=entry.binding;
   if(entry.channel!=='FORMAL_E1'||entry.experiment!=='E1'||
@@ -618,6 +619,35 @@ function study1ParticipantBookingNotice_(verifiedApplicantEmail,consentId){
      !entry.signedPdf||!entry.signature||!entry.confirmation||
      !binding||binding.experiment!=='E1')
    throw Error('E1_NOTICE_SIGNED_CONSENT_REQUIRED');
+  // Revalidate the exact signed private PDF and independent events BEFORE
+  // queuing any irreversible notice. Never pick a winner by consent order.
+  if(registry.records.some(x=>x&&x.id!==entry.id&&
+     x.channel==='FORMAL_E1'&&x.experiment==='E1'&&x.binding&&
+     x.binding.reservationId===binding.reservationId))
+   throw Error('E1_NOTICE_RESERVATION_CONSENT_NOT_UNIQUE');
+  if(!entry.participantSignedPdf||!entry.documentSha||
+     !entry.documentVersion||!binding.documentSha||
+     binding.documentSha!==entry.documentSha||
+     binding.documentVersion!==entry.documentVersion||
+     study1BindingDigest_(binding)!==binding.digest||
+     entry.participantSignedPdf.id!==entry.signedPdf.id||
+     entry.participantSignedPdf.sha!==entry.signedPdf.sha)
+   throw Error('E1_NOTICE_SIGNED_PDF_EVIDENCE_CHANGED');
+  const signature=study1EConsentEvent_(entry.signature,entry,'SIGNATURE').data;
+  const confirmed=study1EConsentEvent_(entry.confirmation,entry,'CONFIRMATION').data;
+  if(signature.signedPdfSha256!==entry.signedPdf.sha||
+     confirmed.mode!=='RESEARCHER_PRESIGNED_SOURCE'||
+     confirmed.researcherSignedSourceSha256!==entry.documentSha||
+     confirmed.signatureHash!==entry.signature.sha||
+     confirmed.participantSignedPdfSha256!==entry.signedPdf.sha||
+     confirmed.researcherSignedPdfSha256!==entry.signedPdf.sha)
+   throw Error('E1_NOTICE_SIGNED_PDF_EVIDENCE_CHANGED');
+  const signedAt=new Date(signature.serverSignedAt);
+  if(!Number.isFinite(signedAt.getTime())||
+     signedAt.toISOString()!==signature.serverSignedAt||
+     signature.taipeiDate!==study1PdfTaipeiDate_(signedAt))
+   throw Error('E1_NOTICE_SIGNED_PDF_CHRONOLOGY_INVALID');
+  study1EConsentSignedPdfRead_(entry.signedPdf,entry);
   const id=study1SelfReportedAuthority_({
    applicantId:binding.applicantId,screeningId:binding.screeningId,
    challengeId:binding.challengeId,experiment:'E1'},lock);
@@ -631,6 +661,11 @@ function study1ParticipantBookingNotice_(verifiedApplicantEmail,consentId){
      reservations[0][2]!==binding.slotId||
      reservations[0][3]!=='CONFIRMED'||!reservations[0][7]||reservations[0][8])
    throw Error('E1_NOTICE_ORIGINAL_BOOKING_NOT_CONFIRMED');
+  const bookingAt=new Date(reservations[0][7]);
+  if(!Number.isFinite(bookingAt.getTime())||
+     bookingAt.toISOString()!==reservations[0][7]||
+     bookingAt.getTime()<signedAt.getTime())
+   throw Error('E1_NOTICE_ORIGINAL_BOOKING_CHRONOLOGY_INVALID');
   const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
   const source=study1WizardTable_(book,'Notifications',STUDY1_E1_NOTIFICATION_HEADERS_);
   const noticeType='E1_RESERVATION_CONFIRMED';
@@ -719,7 +754,15 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
    const matches=byReservation.get(row[2])||[];
    matches.push(row);byReservation.set(row[2],matches);
   }
-  const seenIds=new Set(),seenReservationIds=new Set();
+  // Duplicate reservation claims must ALL be marked ambiguous, not only
+  // whichever consent happens to appear later in registry order.
+  const bindingCounts=new Map();
+  for(const entry of entries){
+   const id=entry&&entry.binding&&entry.binding.reservationId;
+   if(typeof id==='string'&&id)
+    bindingCounts.set(id,(bindingCounts.get(id)||0)+1);
+  }
+  const seenIds=new Set();
   const records=entries.map(entry=>{
    if(typeof entry.id!=='string'||!entry.id||
       seenIds.has(entry.id))
@@ -732,9 +775,8 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
    if(!bound||bound.experiment!=='E1'||
       typeof bound.applicantId!=='string'||!bound.applicantId||
       typeof bound.reservationId!=='string'||!bound.reservationId||
-      seenReservationIds.has(bound.reservationId))
+      bindingCounts.get(bound.reservationId)!==1)
     return outcome;
-   seenReservationIds.add(bound.reservationId);
    const rows=byReservation.get(bound.reservationId)||[];
    if(!rows.length){outcome.noticeStatus='NOT_QUEUED';return outcome;}
    if(rows.length!==1)return outcome;
@@ -744,10 +786,13 @@ function study1OwnerE1NotificationAudit(){if(typeof study1V2PublicRpcDeny_==='fu
    if(row[0]!==job||row[1]!==bound.applicantId||
       row[2]!==bound.reservationId||row[5]!==1||
       typeof row[6]!=='string'||!Number.isFinite(Date.parse(row[6]))||
+      new Date(row[6]).toISOString()!==row[6]||
       !['DISPATCHING','UNKNOWN','PROVIDER_ACCEPTED'].includes(row[4]))
     return outcome;
    if(row[4]==='PROVIDER_ACCEPTED'){
     if(typeof row[7]!=='string'||!Number.isFinite(Date.parse(row[7]))||
+       new Date(row[7]).toISOString()!==row[7]||
+       Date.parse(row[7])<Date.parse(row[6])||
        row[8]!=='')return outcome;
     outcome.noticeStatus='PROVIDER_ACCEPTED_NOT_DELIVERED';
    }else{
