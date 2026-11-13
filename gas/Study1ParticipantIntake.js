@@ -163,6 +163,61 @@ function study1ParticipantBegin_(input){
 }
 
 
+/** Ambiguous prospective intake POST: original Applicants+Screenings readback.
+ * Exact caller-held 160-bit requestId and submitted contact fields only.
+ * No Turnstile replay, no applicant append, no email or OTP creation.
+ */
+function study1ParticipantBeginOutcome(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1ParticipantGate_();
+ if(!input||Array.isArray(input)||typeof input!=='object'||
+    Object.keys(input).sort().join(',')!=='email,experiment,name,phone,requestId'||
+    input.experiment!=='E1'||typeof input.requestId!=='string'||
+    !/^[A-Za-z0-9_-]{16,80}$/.test(input.requestId)||
+    typeof input.name!=='string'||input.name.trim().length<2||
+    input.name.length>80||/[<>\r\n\x00-\x1f]/.test(input.name)||
+    typeof input.phone!=='string'||input.phone.length>30||
+    /[<>\r\n\x00-\x1f]/.test(input.phone)||
+    /^[=+\-@]/.test(input.name.trim())||
+    /^[=+\-@]/.test(input.phone.trim()))
+  throw Error('APPLICATION_OUTCOME_REQUEST_INVALID');
+ const email=study1BindingEmail_(input.email);
+ const applicantId='APP_'+study1BindingHmac_([
+  'PUBLIC_PENDING_E1_V1',input.requestId,email]).slice(0,28);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(5000)!==true)
+  throw Error('APPLICATION_OUTCOME_LOCK_BUSY');
+ try{
+  if(lock.hasLock()!==true)throw Error('APPLICATION_OUTCOME_LOCK_LOST');
+  study1ParticipantGate_();
+  const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
+  const screeningId='SCR_'+study1BindingHmac_([
+   'PUBLIC_PENDING_SCREEN_E1_V1',applicantId,policy.documentSha256]).slice(0,28);
+  const book=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
+  const applicants=study1WizardTable_(book,'Applicants',STUDY1_BINDING_SCHEMA_.applicants);
+  const screens=study1WizardTable_(book,'Screenings',STUDY1_BINDING_SCHEMA_.screenings);
+  const ai=study1WizardLookup_(applicants,1,applicantId,true),
+   si=study1WizardLookup_(screens,1,screeningId,true);
+  if(!ai.length&&!si.length)return {found:false,status:'UNKNOWN'};
+  if(ai.length!==1||si.length!==1)
+   return {found:false,status:'PARTIAL_UNKNOWN'};
+  const read=(tab,row,n)=>tab.getRange(row,1,1,n).getValues()[0];
+  const a=read(applicants.tab,ai[0],7),s=read(screens.tab,si[0],6);
+  if(JSON.stringify(a)!==JSON.stringify(read(applicants.tab,ai[0],7))||
+     JSON.stringify(s)!==JSON.stringify(read(screens.tab,si[0],6)))
+   throw Error('APPLICATION_OUTCOME_SOURCE_CHANGED');
+  if(a[0]!==applicantId||a[1]!==input.name.trim()||
+     study1BindingEmail_(a[2])!==email||a[3]!==input.phone.trim()||
+     !['PENDING_EMAIL','EMAIL_VERIFIED','VERIFIED'].includes(a[6])||
+     s[0]!==screeningId||s[1]!==applicantId||
+     s[2]!==policy.screeningVersion||s[3]!=='ELIGIBLE'||
+     s[5]!=='PARTICIPANT_SELF_REPORT')
+   return {found:false,status:'SOURCE_MISMATCH'};
+  if(lock.hasLock()!==true)throw Error('APPLICATION_OUTCOME_LOCK_LOST');
+  return {found:true,status:a[6],applicantId,screeningId};
+ }finally{lock.releaseLock();}
+}
+
+
 /**
  * PRIVATE prospective mailbox OTP. Contact control is NOT a verified student,
  * REC eligibility, participant identity, or authorization to book/sign.

@@ -484,3 +484,42 @@ test('E1 original hold idempotency lookup does not confuse raw requestId with WZ
  assert.equal(outcome.reservationId,first.reservationId);
  assert.equal(h.mutations.length,writes);
 });
+
+test('ambiguous HOLD readback uses the original signed quote even after PDF publication changes',()=>{
+ const h=harness(),p=h.proof(h.person('A')),key='REQ_QUOTE_CAUSAL_1234567890';
+ const issued=h.ctx.study1FormalQuoteHold({emailProof:p,slotId:h.S1,requestId:key});
+ assert.equal(issued.allowed,true);
+ const held=h.ctx.study1FormalHoldSlot({emailProof:p,quote:issued.quote});
+ const mutationCount=h.mutations.length;
+ const historicalQuote=issued.quote;
+ // A publication can change after original HOLD has already committed.
+ h.ctx.study1EConsentReadyDocument_=()=>({experiment:'E1',version:'REC_NEW_V03',sha256:'f'.repeat(64)});
+ const oldLookup=h.ctx.study1FormalHoldOutcome({emailProof:p,slotId:h.S1,requestId:key});
+ assert.equal(oldLookup.resolved,false,'current PDF cannot resolve the old WZ HMAC');
+ const recovered=h.ctx.study1FormalHoldOutcome({emailProof:p,slotId:h.S1,
+  requestId:key,quote:historicalQuote});
+ assert.equal(recovered.resolved,true);
+ assert.equal(recovered.status,'HELD');
+ assert.equal(recovered.reservationId,held.reservationId);
+ assert.equal(h.mutations.length,mutationCount);
+ // The quote expiration is for the original WRITE only; the signed GET
+ // can still identify an already committed and unexpired original hold.
+ h.clock.now+=3*60000;
+ assert.equal(h.ctx.study1FormalHoldOutcome({emailProof:p,slotId:h.S1,
+  requestId:key,quote:historicalQuote}).status,'HELD');
+ assert.equal(h.mutations.length,mutationCount);
+});
+test('signed HOLD readback refuses tampered quote, other requester and false status',()=>{
+ const h=harness(),a=h.proof(h.person('A')),b=h.proof(h.person('B'));
+ const requestId='REQ_SIGNED_READ_ONLY_123456';
+ const signed=h.ctx.study1FormalQuoteHold({emailProof:a,slotId:h.S1,requestId}).quote;
+ const count=h.mutations.length,read=q=>h.ctx.study1FormalHoldOutcome({
+  emailProof:a,slotId:h.S1,requestId,quote:q});
+ assert.equal(read(signed).status,'UNKNOWN');
+ assert.throws(()=>read({...signed,documentSha:'b'.repeat(64)}),/QUOTE_HMAC_INVALID/);
+ assert.throws(()=>read({...signed,slotId:h.S2}),/QUOTE_INVALID/);
+ assert.throws(()=>read({...signed,requestId:'REQ_DIFFERENT_KEY_12345678'}),/QUOTE_INVALID/);
+ assert.throws(()=>h.ctx.study1FormalHoldOutcome({emailProof:b,
+  slotId:h.S1,requestId,quote:signed}),/QUOTE_INVALID/);
+ assert.equal(h.mutations.length,count);
+});

@@ -100,10 +100,65 @@ function study1FormalConsentDocument_(ctx,reservationId){
  * original reservation ID. Everything else is rederived from original rows.
  * This creates a one-use HMAC-bound invitation, not consent or acceptance.
  */
+
+/** Deterministic, server-HMAC-backed bearer for one validated E1 issue nonce.
+ * The bearer is reconstructible from the original proof/HELD/doc plus the
+ * high-entropy client requestId, but never stored in plaintext.
+ */
+function study1FormalConsentIssueToken_(ctx,r,doc,requestId){
+ study1FormalKey_(requestId);
+ const base=['FORMAL_E1_PRESIGNED_ISSUE_V1',ctx.identity.applicantId,
+  ctx.identity.screeningId,ctx.identity.challengeId,r[0],
+  doc.sha256,doc.version,requestId];
+ const a=study1BindingHmac_(base.concat(['A']));
+ const b=study1BindingHmac_(base.concat(['B']));
+ const uuid=x=>x.slice(0,8)+'-'+x.slice(8,12)+'-4'+x.slice(13,16)+
+  '-8'+x.slice(17,20)+'-'+x.slice(20,32);
+ return uuid(a)+'-'+uuid(b);
+}
+/** Only read the same original private consent registry; no new issue or send.
+ * Invalid original proof, HELD or document remain fail-closed.
+ */
+function study1FormalConsentIssueState(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ if(!input||Array.isArray(input)||typeof input!=='object'||
+    Object.keys(input).sort().join(',')!=='emailProof,requestId,reservationId')
+  throw Error('FORMAL_CONSENT_ISSUE_OUTCOME_REQUEST_INVALID');
+ study1FormalKey_(input.requestId);study1BindingId_(input.reservationId);
+ study1FormalConsentGate_();
+ return study1FormalWithLock_(input.emailProof,ctx=>{
+  study1FormalConsentGate_();
+  const {r,document}=study1FormalConsentDocument_(ctx,input.reservationId);
+  const token=study1FormalConsentIssueToken_(ctx,r,document,input.requestId);
+  const matches=study1EConsentRegistry_().records.filter(x=>x.binding&&
+    (x.binding.applicantId===ctx.identity.applicantId||
+     x.binding.reservationId===r[0]));
+  if(!matches.length)return {found:false,status:'UNKNOWN'};
+  if(matches.length!==1)throw Error('FORMAL_CONSENT_ISSUE_OUTCOME_NOT_UNIQUE');
+  const entry=matches[0],b=entry.binding;
+  if(entry.channel!=='FORMAL_E1'||entry.experiment!=='E1'||
+     entry.researcherPresigned!==true||entry.state!=='ISSUED'||
+     entry.expires<=Date.now()||entry.documentSha!==document.sha256||
+     entry.documentVersion!==document.version||
+     b.applicantId!==ctx.identity.applicantId||
+     b.screeningId!==ctx.identity.screeningId||
+     b.challengeId!==ctx.identity.challengeId||
+     b.reservationId!==r[0]||b.slotId!==r[2]||
+     entry.tokenHash!==study1EConsentHash_(token))
+   return {found:false,status:'SOURCE_MISMATCH'};
+  if(ctx.lock.hasLock()!==true)throw Error('FORMAL_CONSENT_ISSUE_OUTCOME_LOCK_LOST');
+  return {found:true,status:'ISSUED',token,experiment:'E1',
+   reservationId:r[0],documentVersion:document.version,
+   documentSha256:document.sha256,researcherPresigned:true,
+   recovery:'ORIGINAL_REGISTRY_READ_ONLY'};
+ });
+}
+
 function study1FormalConsentBegin(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||Array.isArray(input)||typeof input!=='object'||
-    Object.keys(input).sort().join(',')!=='emailProof,reservationId')
+    !['emailProof,reservationId','emailProof,requestId,reservationId'].includes(Object.keys(input).sort().join(',')))
   throw Error('FORMAL_CONSENT_REQUEST_INVALID');
+ if(Object.prototype.hasOwnProperty.call(input,'requestId'))
+  study1FormalKey_(input.requestId);
  study1FormalConsentGate_();
  return study1FormalWithLock_(input.emailProof,ctx=>{
   study1FormalConsentGate_();
@@ -120,15 +175,37 @@ function study1FormalConsentBegin(input){if(typeof study1V2PublicRpcDeny_==='fun
    throw Error('FORMAL_CONSENT_EMAIL_OTP_AUTHORITY_CHANGED');
   binding.digest=study1BindingDigest_({...binding,digest:''});
   const registry=study1EConsentRegistry_();
+  const stable=typeof input.requestId==='string';
+  const token=stable?
+   study1FormalConsentIssueToken_(ctx,r,document,input.requestId):
+   Utilities.getUuid()+'-'+Utilities.getUuid();
+  const prior=registry.records.filter(x=>x.binding&&
+   (x.binding.applicantId===binding.applicantId||
+    x.binding.reservationId===binding.reservationId));
+  if(prior.length){
+   if(stable&&prior.length===1){
+    const old=prior[0],v=old.binding;
+    if(old.channel==='FORMAL_E1'&&old.experiment==='E1'&&
+       old.researcherPresigned===true&&old.state==='ISSUED'&&
+       old.expires>Date.now()&&old.documentSha===document.sha256&&
+       old.documentVersion===document.version&&
+       v.applicantId===binding.applicantId&&
+       v.screeningId===binding.screeningId&&
+       v.challengeId===binding.challengeId&&
+       v.reservationId===r[0]&&v.slotId===r[2]&&
+       old.tokenHash===study1EConsentHash_(token))
+     return {state:'ISSUED',experiment:'E1',reservationId:r[0],
+      documentVersion:document.version,documentSha256:document.sha256,
+      token,expiresAtUtc:new Date(old.expires).toISOString(),
+      researcherPresigned:true,needsResearcherExplanation:false,
+      signatureAccepted:false,readOnlyReplay:true};
+   }
+   throw Error('FORMAL_CONSENT_ALREADY_ISSUED');
+  }
   if(registry.records.length>=STUDY1_ECONSENT_MAX_RECORDS_)
    throw Error('FORMAL_CONSENT_REGISTRY_FULL');
-  if(registry.records.some(x=>x.binding&&
-    (x.binding.applicantId===binding.applicantId||
-     x.binding.reservationId===binding.reservationId)))
-   throw Error('FORMAL_CONSENT_ALREADY_ISSUED');
   const expires=Math.min(Date.now()+86400000,Date.parse(binding.holdUntilUtc));
   if(expires<=Date.now())throw Error('FORMAL_CONSENT_HOLD_EXPIRED');
-  const token=Utilities.getUuid()+'-'+Utilities.getUuid();
   const entry={id:Utilities.getUuid(),tokenHash:study1EConsentHash_(token),
    experiment:'E1',documentSha:document.sha256,
    documentVersion:document.version,expires,state:'ISSUED',

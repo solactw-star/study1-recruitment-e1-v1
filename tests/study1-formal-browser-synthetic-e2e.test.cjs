@@ -32,6 +32,7 @@ function simulate(readiness,options={}){
   study1ParticipantBegin:req=>({
    accepted:true,created:true,applicantId:'APP_CLOSED_TEST_12345678',
    screeningId:'SCR_CLOSED_TEST_12345678',phase:'PENDING_EMAIL'}),
+  study1ParticipantBeginOutcome:()=>({found:false,status:'UNKNOWN'}),
   study1ParticipantSendOtp:req=>({
    sent:true,reason:'ISSUED',challengeId:'CHL_CLOSED_TEST_12345678'}),
   study1ParticipantOtpIssueState:req=>({found:false,status:'NOT_FOUND'}),
@@ -214,7 +215,7 @@ test('non-screening backend rejection does not falsely report ineligible',()=>{
  assert.equal(s.click('screenNext'),true);
  assert.equal(s.node('step-ineligible').hidden,true);
  assert.equal(s.node('step-screen').hidden,false);
- assert.match(s.node('status').textContent,/請勿重複送出/);
+ assert.match(s.node('status').textContent,/不重新送出個資/);
 });
 test('OTP THROTTLED never claims email sent; repeated click cannot issue a second challenge',()=>{
  const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
@@ -301,4 +302,64 @@ test('After OTP succeeds but Applicants state readback fails, no OTP is consumed
  assert.equal(s.calls.filter(x=>x.method==='study1ParticipantVerifyOtp').length,1);
  assert.equal(s.node('step-slots').hidden,true);
  assert.match(s.node('status').textContent,/回讀未知/);
+});
+
+test('lost intake POST after original write is recovered by GET with same requestId, never replays Turnstile',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{
+  study1ParticipantBegin:()=>{throw Error('APPLICATION_COMMIT_BUT_RESPONSE_LOST')},
+  study1ParticipantBeginOutcome:()=>({found:true,status:'PENDING_EMAIL',
+   applicantId:'APP_CLOSED_TEST_12345678',screeningId:'SCR_CLOSED_TEST_12345678'})
+ }});
+ mockEligibleE1(s);
+ const issued=s.calls.filter(x=>x.method==='study1ParticipantBegin'),
+  looked=s.calls.filter(x=>x.method==='study1ParticipantBeginOutcome');
+ assert.equal(issued.length,1);assert.equal(looked.length,1);
+ assert.equal(looked[0].request.requestId,issued[0].request.requestId);
+ assert.equal(looked[0].request.email,issued[0].request.email);
+ assert.equal(Object.hasOwn(looked[0].request,'humanToken'),false);
+ assert.equal(s.node('step-otp').hidden,false);
+ assert.match(s.node('status').textContent,/唯讀找回/);
+ assert.equal(s.calls.filter(x=>x.method==='study1ParticipantBegin').length,1);
+});
+test('lost intake POST with partial or missing original records never causes a second POST',()=>{
+ for(const outcome of [{found:false,status:'UNKNOWN'},{found:false,status:'PARTIAL_UNKNOWN'}]){
+  const s=simulate({ready:true,experiment:'E1',
+   siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+  {serverOverrides:{
+   study1ParticipantBegin:()=>{throw Error('POST_OUTCOME_UNKNOWN')},
+   study1ParticipantBeginOutcome:()=>outcome
+  }});
+  s.click('chooseE1');
+  for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])s.node(key).checked=true;
+  s.node('formalName').value='合成申請者';s.node('formalEmail').value='synthetic.e1@example.org';
+  s.rendered[0].options.callback('SYNTHETIC_FIRST_ONCE_TOKEN');
+  s.click('screenNext');
+  assert.equal(s.node('step-otp').hidden,true);
+  s.rendered[0].options.callback('SYNTHETIC_OTHER_TOKEN'); // cannot replay
+  s.click('screenNext');
+  assert.equal(s.calls.filter(x=>x.method==='study1ParticipantBegin').length,1);
+  assert.match(s.node('status').textContent,/不重新送出個資/);
+ }
+});
+
+test('applicant readback EMAIL_VERIFIED never issues a new OTP or impersonates a consumed email proof',()=>{
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{
+  study1ParticipantBegin:()=>{throw Error('APPLICATION_POST_UNKNOWN')},
+  study1ParticipantBeginOutcome:()=>({found:true,status:'EMAIL_VERIFIED',
+   applicantId:'APP_CLOSED_TEST_12345678',screeningId:'SCR_CLOSED_TEST_12345678'})
+ }});
+ s.click('chooseE1');
+ for(const key of ['adult','cycu','noDx','noTreatment','noPractice'])s.node(key).checked=true;
+ s.node('formalName').value='合成申請者';s.node('formalEmail').value='synthetic.e1@example.org';
+ s.rendered[0].options.callback('SYNTHETIC_TOKEN_ONLY_ONCE');
+ s.click('screenNext');
+ assert.equal(s.node('step-otp').hidden,false);
+ assert.equal(s.node('otpSend').disabled,true);
+ assert.equal(s.node('otpVerify').disabled,true);
+ assert.equal(s.click('otpSend'),false);
+ assert.equal(s.calls.some(x=>x.method==='study1ParticipantSendOtp'),false);
+ assert.equal(s.calls.some(x=>x.method==='study1ParticipantVerifyOtp'),false);
+ assert.match(s.node('status').textContent,/不能|不得|核對/);
 });

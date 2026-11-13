@@ -6,7 +6,7 @@ const start=html.indexOf("(function(){\n'use strict';\n// This controller reuses
 const end=html.indexOf("\n})();\n</script>",start);
 assert.ok(start>0&&end>start,'formal controller must remain inside original IIFE');
 const formal=html.slice(start,end+6);
-function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none'){
+function simulate(available,withConsent=false,researcherPresigned=false,holdMode='none',consentIssueMode='none'){
  const nodes=new Map(),calls=[],errors=[],reservations=[],uuid=()=>crypto.randomBytes(8).toString('hex');
  const now=Date.now(),S1='SLOT_E1_BROWSER_A_12345678',S2='SLOT_E1_BROWSER_B_12345678';
  const base=[{slotId:S1,startAtUtc:new Date(now+86400000).toISOString(),endAtUtc:new Date(now+90000000).toISOString(),capacity:1,remaining:1,waitlistCount:0,bookable:true},
@@ -22,7 +22,7 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
   year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(signedAt));
  const date=Object.fromEntries(taipei.map(p=>[p.type,p.value]));
  const taipeiDate=date.year+'/'+date.month+'/'+date.day;
- let consent='ISSUED',staffExplained=false,staffConfirmed=false,withdrawn=false;
+ let consent='ISSUED',staffExplained=false,staffConfirmed=false,withdrawn=false,originalIssueNonce=null;
 
  function element(kind,id){
   const n={kind,id,hidden:id==='formalHumanCheck',disabled:false,textContent:'',value:'',checked:false,children:[],handlers:new Map(),attributes:{},
@@ -107,10 +107,24 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
  if(withConsent)Object.assign(server,{
   study1FormalConsentBegin:req=>{
    assert.equal(req.emailProof,eProof);
+   assert.match(req.requestId,/^[A-Za-z0-9_-]{16,80}$/);
    const r=reservations.find(x=>x.reservationId===req.reservationId);
    if(!r||r.status!=='HELD')throw Error('NOT_HELD');
+   originalIssueNonce=req.requestId;
+   if(consentIssueMode==='after_commit'||consentIssueMode==='before_commit')
+    throw Error('CONSENT_ISSUE_RESPONSE_UNKNOWN');
    return {state:'ISSUED',experiment:'E1',reservationId:r.reservationId,
     token,documentVersion:'V1',documentSha256:pdfSha,researcherPresigned};
+  },
+  study1FormalConsentIssueState:req=>{
+   assert.equal(req.emailProof,eProof);
+   assert.equal(req.requestId,originalIssueNonce);
+   if(consentIssueMode==='before_commit')
+    return {found:false,status:'UNKNOWN'};
+   return {found:true,status:'ISSUED',experiment:'E1',
+    reservationId:req.reservationId,token,documentVersion:'V1',
+    documentSha256:pdfSha,researcherPresigned,
+    recovery:'ORIGINAL_REGISTRY_READ_ONLY'};
   },
   study1FormalConsentOriginalPdf:sessionToken=>{
    assert.equal(sessionToken,token);
@@ -245,7 +259,7 @@ test('FORMAL rejects non-presigned E1 invitation without reading or signing a pr
  assert.equal(h.calls.some(x=>x.name==='study1FormalConsentOriginalPdf'),false);
  assert.equal(h.calls.some(x=>x.name==='study1EConsentSignPdf'),false);
  assert.equal(h.node('finish').disabled,true);
- assert.match(h.node('status').textContent,/禁止進入PDF簽署|預簽|未核實/);
+ assert.match(h.node('status').textContent,/禁止進入PDF簽署|預簽|未核實|核發因果/);
 });
 
 test('§70-S.23 consent is online-only without a 15-minute countdown or booking shortcut',()=>{
@@ -284,6 +298,11 @@ test('FORMAL lost HOLD response after commit: one original GET, no duplicate hol
  assert.equal(h.reservations.length,1);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldOutcome').length,1);
+ const quote=h.calls.find(x=>x.name==='study1FormalQuoteHold').payload;
+ const recovered=h.calls.find(x=>x.name==='study1FormalHoldOutcome').payload;
+ assert.equal(recovered.requestId,quote.requestId);
+ assert.equal(recovered.slotId,quote.slotId);
+ assert.equal(recovered.quote.signature,'c'.repeat(64));
  assert.equal(h.reservations[0].status,'HELD');
  assert.equal(h.node('step-confirm').hidden,false);
 });
@@ -296,4 +315,33 @@ test('FORMAL unknown missing HOLD: fail-closed and cannot submit another booking
  assert.equal(h.click('hold'),false);
  assert.equal(h.node('step-confirm').hidden,true);
  assert.match(h.node('status').textContent,/UNKNOWN/);
+});
+
+test('FORMAL lost consent ISSUE response uses original read-only registry and keeps one issue',()=>{
+ const h=simulate(undefined,true,true,'none','after_commit');
+ h.enter();h.click('hold');
+ const button=h.findButton('核對本人暫留並進入最後知情同意');
+ assert.ok(button);
+ button.handlers.get('click')();
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentBegin').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentIssueState').length,1);
+ const sent=h.calls.find(x=>x.name==='study1FormalConsentBegin').payload,
+  read=h.calls.find(x=>x.name==='study1FormalConsentIssueState').payload;
+ assert.equal(read.requestId,sent.requestId);
+ assert.equal(read.reservationId,sent.reservationId);
+ assert.equal(h.node('step-consent').hidden,false);
+ button.handlers.get('click')(); // read-only STATUS, never new ISSUE
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentBegin').length,1);
+});
+test('FORMAL missing consent issue cannot be replayed even when user clicks again',()=>{
+ const h=simulate(undefined,true,true,'none','before_commit');
+ h.enter();h.click('hold');
+ const button=h.findButton('核對本人暫留並進入最後知情同意');
+ assert.ok(button);button.handlers.get('click')();
+ assert.equal(h.node('step-consent').hidden,true);
+ assert.match(h.node('status').textContent,/UNKNOWN|核發因果/);
+ button.handlers.get('click')();
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentBegin').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalConsentIssueState').length,2);
+ assert.equal(h.calls.some(x=>x.name==='study1EConsentSignPdf'),false);
 });

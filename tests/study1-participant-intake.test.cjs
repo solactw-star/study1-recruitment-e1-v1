@@ -466,3 +466,43 @@ test('OTP lookup validates binding and fails closed without mail or mutation',()
  assert.throws(()=>closed.scope.study1ParticipantOtpIssueState_(valid),/PARTICIPANT_INTAKE_NOT_READY|PUBLIC_EMAIL_OTP_NOT_READY/);
  assert.equal(closed.open.length,0);assert.equal(closed.mail.length,0);
 });
+
+test('lost intake response is resolved from the exact original application without replaying Turnstile or writes',()=>{
+ const x=env(),created=x.begin(),writes=x.writes.length;
+ const request={email:x.input.email,experiment:'E1',name:x.input.name,
+  phone:x.input.phone,requestId:x.input.requestId};
+ x.scope.study1ParticipantAbuseProtection_=()=>{throw Error('TURNSTILE_REPLAY_FORBIDDEN');};
+ const out=x.scope.study1ParticipantBeginOutcome(request);
+ assert.equal(out.found,true);assert.equal(out.status,'PENDING_EMAIL');
+ assert.equal(out.applicantId,created.applicantId);
+ assert.equal(out.screeningId,created.screeningId);
+ assert.equal(x.writes.length,writes);
+ assert.equal(x.records.Applicants.length,1);
+ assert.equal(x.records.Screenings.length,1);
+});
+test('wrong request key, contact mismatch, partial cross-sheet commit and source drift cannot claim applicant recovery',()=>{
+ const x=env(),created=x.begin(),n=x.writes.length;
+ const req={email:x.input.email,experiment:'E1',name:x.input.name,
+  phone:x.input.phone,requestId:x.input.requestId};
+ assert.equal(x.scope.study1ParticipantBeginOutcome({...req,requestId:'REQ_FAKE_ALT_REQUEST_123456789'}).status,'UNKNOWN');
+ assert.equal(x.scope.study1ParticipantBeginOutcome({...req,name:'另一位申請者'}).status,'SOURCE_MISMATCH');
+ assert.throws(()=>x.scope.study1ParticipantBeginOutcome({...req,experiment:'E2'}),/REQUEST_INVALID/);
+ x.records.Screenings.pop();
+ assert.equal(x.scope.study1ParticipantBeginOutcome(req).status,'PARTIAL_UNKNOWN');
+ x.records.Screenings.push([created.screeningId,created.applicantId,
+  x.source.screeningVersion,'ELIGIBLE',new Date().toISOString(),'PARTICIPANT_SELF_REPORT']);
+ x.records.Applicants[0][3]='NOT_THE_SAME_PHONE';
+ assert.equal(x.scope.study1ParticipantBeginOutcome(req).status,'SOURCE_MISMATCH');
+ assert.equal(x.writes.length,n);
+});
+test('applicant outcome readback fails closed before any original personal Sheet access',()=>{
+ const x=env(),req={email:x.input.email,experiment:'E1',name:x.input.name,
+  phone:x.input.phone,requestId:x.input.requestId};
+ x.scope.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
+ assert.throws(()=>x.scope.study1ParticipantBeginOutcome(req),/PUBLIC_RPC_DENIED/);
+ assert.equal(x.open.length,0);
+ delete x.scope.study1V2PublicRpcDeny_;
+ x.flags.set('OPEN','false');
+ assert.throws(()=>x.scope.study1ParticipantBeginOutcome(req),/PARTICIPANT_INTAKE_NOT_READY/);
+ assert.equal(x.open.length,0);
+});

@@ -274,20 +274,51 @@ function study1FormalStatus(emailProof){if(typeof study1V2PublicRpcDeny_==='func
  * An absent row is UNKNOWN, NEVER a reason to replay the original write.
  */
 function study1FormalHoldOutcome(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- if(!input||typeof input!=='object'||Array.isArray(input)||
-    Object.keys(input).sort().join(',')!=='emailProof,requestId,slotId')
+ if(!input||typeof input!=='object'||Array.isArray(input))
+  throw Error('V05_HOLD_OUTCOME_REQUEST_INVALID');
+ const keys=Object.keys(input).sort().join(',');
+ const signed=keys==='emailProof,quote,requestId,slotId';
+ if(!signed&&keys!=='emailProof,requestId,slotId')
   throw Error('V05_HOLD_OUTCOME_REQUEST_INVALID');
  study1FormalKey_(input.requestId);study1BindingId_(input.slotId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
-  // The original Reservations idempotency_key is a WZ_ HMAC, never the
-  // client requestId. Derive exactly the SAME key as study1WizardHoldBound_.
-  const doc=study1EConsentReadyDocument_('E1');
-  if(!doc||doc.experiment!=='E1'||!/^[a-f0-9]{64}$/.test(doc.sha256||''))
-   throw Error('V05_HOLD_OUTCOME_DOCUMENT_NOT_READY');
+  // Read-only: the original WZ_ key must use the DOCUMENT AT HOLD TIME,
+  // not a newly published version. An expired signed quote remains usable
+  // solely for finding the ORIGINAL request outcome; it cannot issue a hold.
+  let documentSha,documentVersion;
+  if(signed){
+   const q=input.quote;
+   const expectedKeys='applicantId,challengeId,documentSha,documentVersion,experiment,expiresAtUtc,holdUntilUtc,issuedAtUtc,requestId,screeningId,signature,slotId,version';
+   if(!q||typeof q!=='object'||Array.isArray(q)||
+      Object.keys(q).sort().join(',')!==expectedKeys||
+      q.version!==1||q.experiment!=='E1'||q.slotId!==input.slotId||
+      q.requestId!==input.requestId||q.applicantId!==ctx.identity.applicantId||
+      q.challengeId!==ctx.identity.challengeId||
+      q.screeningId!==ctx.identity.screeningId||
+      !/^[a-f0-9]{64}$/.test(q.documentSha||'')||
+      typeof q.documentVersion!=='string'||!q.documentVersion||
+      !/^[a-f0-9]{64}$/.test(q.signature||'')||
+      study1BindingUtc_(q.expiresAtUtc)-study1BindingUtc_(q.issuedAtUtc)!==
+       STUDY1_FORMAL_QUOTE_MS_||
+      study1BindingUtc_(q.holdUntilUtc)<=study1BindingUtc_(q.issuedAtUtc))
+    throw Error('V05_HOLD_OUTCOME_QUOTE_INVALID');
+   const unsigned={...q};delete unsigned.signature;
+   const proof=study1BindingHmac_(['E1_V05_HOLD_QUOTE_V1',
+    ctx.proof.signature,...Object.keys(unsigned).sort().map(k=>unsigned[k])]);
+   if(proof!==q.signature)throw Error('V05_HOLD_OUTCOME_QUOTE_HMAC_INVALID');
+   documentSha=q.documentSha;documentVersion=q.documentVersion;
+  }else{
+   // Legacy read-only callers without the exact signed quote cannot
+   // safely recover a hold across document changes.
+   const doc=study1EConsentReadyDocument_('E1');
+   if(!doc||doc.experiment!=='E1'||!/^[a-f0-9]{64}$/.test(doc.sha256||''))
+    throw Error('V05_HOLD_OUTCOME_DOCUMENT_NOT_READY');
+   documentSha=doc.sha256;documentVersion=doc.version;
+  }
   const issuedKey='WZ_'+study1BindingHmac_([
    'STUDY1_WIZARD_BOOKING_V1',ctx.identity.applicantId,
    ctx.identity.challengeId,ctx.identity.screeningId,'E1',input.slotId,
-   doc.sha256,doc.version,input.requestId
+   documentSha,documentVersion,input.requestId
   ]);
   const rows=ctx.snapshot.reservations.rows.filter(x=>x[5]===issuedKey);
   if(!rows.length)return {resolved:false,status:'UNKNOWN',reason:'NOT_FOUND_IN_SNAPSHOT',

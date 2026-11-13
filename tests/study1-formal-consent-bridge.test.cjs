@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const crypto=require('node:crypto');
 const src=fs.readFileSync(path.join(__dirname,'../gas/Study1FormalConsent.js'),'utf8');
 const id='SLOT_OFFLINE_0001',rid='RSV_OFFLINE_0001',app='APP_OFFLINE_0001';
 const sha='a'.repeat(64),pin='b'.repeat(64);
@@ -201,4 +202,63 @@ test('MVP never offers participant signature from an un-attested researcher-blan
  assert.throws(()=>h.scope.study1FormalConsentBegin({emailProof:'MAIL_PROOF',reservationId:rid}),
   /E1_RESEARCHER_PRESIGNED_PDF_NOT_UPLOADED/);
  assert.equal(h.seen.writes,0);
+});
+
+function recoverableHarness(){
+ const h=harness(),scope=h.scope;
+ scope.study1FormalKey_=key=>{if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,80}$/.test(key))throw Error('BAD_NONCE');return key;};
+ scope.study1BindingHmac_=parts=>crypto.createHmac('sha256','isolated-valid-32-byte-server-secret-only')
+  .update(JSON.stringify(parts)).digest('hex');
+ scope.study1EConsentHash_=v=>crypto.createHash('sha256').update(v).digest('hex');
+ const oldVerify=scope.study1BindingVerify_;
+ scope.study1BindingVerify_=(snapshot,index,document)=>({
+  ...oldVerify(snapshot,index,document),
+  screeningId:index.screeningId,challengeId:index.challengeId,
+  slotId:index.slotId,experiment:index.experiment,
+  documentSha:index.documentSha,documentVersion:index.documentVersion});
+ return h;
+}
+test('lost E1 consent issuance response recovers exact same bearer from original registry without another write',()=>{
+ const h=recoverableHarness(),requestId='REQ_CONSENT_NONCE_1234567890';
+ const input={emailProof:'MAIL_PROOF',reservationId:rid,requestId};
+ const issued=h.scope.study1FormalConsentBegin(input),writes=h.seen.writes;
+ assert.equal(issued.state,'ISSUED');assert.match(issued.token,/^[-a-f0-9]{70,90}$/);
+ const recovered=h.scope.study1FormalConsentIssueState(input);
+ assert.equal(recovered.found,true);assert.equal(recovered.status,'ISSUED');
+ assert.equal(recovered.token,issued.token);
+ assert.equal(recovered.recovery,'ORIGINAL_REGISTRY_READ_ONLY');
+ const replay=h.scope.study1FormalConsentBegin(input);
+ assert.equal(replay.token,issued.token);
+ assert.equal(replay.readOnlyReplay,true);
+ assert.equal(h.registry.records.length,1);
+ assert.equal(h.seen.writes,writes,'no second consent registry write');
+});
+test('a mismatching nonce, unrelated source or already-confirmed state can never mint a different consent bearer',()=>{
+ const h=recoverableHarness(),input={emailProof:'MAIL_PROOF',reservationId:rid,
+  requestId:'REQ_CONSENT_SOURCE_123456789'};
+ const none=h.scope.study1FormalConsentIssueState(input);
+ assert.equal(none.found,false);assert.equal(none.status,'UNKNOWN');
+ const original=h.scope.study1FormalConsentBegin(input);
+ const other={...input,requestId:'REQ_OTHER_CONSENT_NONCE_123456'};
+ assert.equal(h.scope.study1FormalConsentIssueState(other).status,'SOURCE_MISMATCH');
+ assert.throws(()=>h.scope.study1FormalConsentBegin(other),/ALREADY_ISSUED/);
+ assert.throws(()=>h.scope.study1FormalConsentIssueState({...input,emailProof:'FORGED'}),
+  /EMAIL_OTP_PROOF_INVALID/);
+ h.registry.records[0].state='CONFIRMED';
+ assert.equal(h.scope.study1FormalConsentIssueState(input).status,'SOURCE_MISMATCH');
+ assert.equal(h.seen.writes,1);
+ assert.equal(h.registry.records[0].tokenHash,h.scope.study1EConsentHash_(original.token));
+});
+test('expired original HELD and public RPC deny block readback without issuing or leaking token',()=>{
+ const h=recoverableHarness(),input={emailProof:'MAIL_PROOF',reservationId:rid,
+  requestId:'REQ_CONSENT_EXPIRED_123456789'};
+ h.scope.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
+ assert.throws(()=>h.scope.study1FormalConsentIssueState(input),/PUBLIC_RPC_DENIED/);
+ assert.equal(h.seen.writes,0);
+ delete h.scope.study1V2PublicRpcDeny_;
+ h.scope.study1FormalConsentBegin(input);
+ h.rows[0][4]=new Date(Date.now()-1000).toISOString();
+ assert.throws(()=>h.scope.study1FormalConsentIssueState(input),
+  /FORMAL_CONSENT_NO_CURRENT_PERSONAL_HOLD/);
+ assert.equal(h.seen.writes,1);
 });

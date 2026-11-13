@@ -202,7 +202,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null};
+ emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -314,8 +314,30 @@ el('chooseE1').addEventListener('click',()=>{
  show('screen');status('請完成正式資格初篩與最少必要聯絡資料。');
 });
 el('screenBack').addEventListener('click',()=>show('choose'));
+function formalBeginOutcome_(payload){
+ // A one-use Turnstile token must never be replayed to resolve a timeout.
+ rpc('study1ParticipantBeginOutcome',{
+  experiment:'E1',requestId:payload.requestId,email:payload.email,
+  name:payload.name,phone:payload.phone},result=>{
+  if(!result||result.found!==true||
+     !['PENDING_EMAIL','EMAIL_VERIFIED','VERIFIED'].includes(result.status)||
+     typeof result.applicantId!=='string'||!/^APP_[A-Za-z0-9_-]{12,76}$/.test(result.applicantId)||
+     typeof result.screeningId!=='string'||!/^SCR_[A-Za-z0-9_-]{12,76}$/.test(result.screeningId)){
+   status('原申請結果仍未知或只部分寫入；不重新送出個資，請聯絡研究團隊核對。');return;
+  }
+  state.app={applicantId:result.applicantId,screeningId:result.screeningId,
+   experiment:'E1',email:payload.email};
+  state.beginUnknown=false;show('otp');
+  if(result.status==='PENDING_EMAIL')
+   status('已唯讀找回同一原申請；尚未進行信箱驗證，可繼續下一步。');
+  else{
+   state.otpVerifyUnknown=true;el('otpSend').disabled=true;el('otpVerify').disabled=true;
+   status('原申請信箱狀態已變更，但不得由申請回查重新核發已驗證憑證；請研究團隊核對。');
+  }
+ },()=>status('原申請唯讀回查失敗；原因果未知，不得重複提交個資。'));
+}
 el('screenNext').addEventListener('click',()=>{
- if(!state.ready||state.busy)return;
+ if(!state.ready||state.busy||state.beginUnknown)return;
  // Screening is a self-declaration, not an identity check; ineligible answers
  // never cross the RPC boundary or create a pending applicant record.
  if(yes.some(id=>!el(id).checked)){
@@ -337,25 +359,26 @@ el('screenNext').addEventListener('click',()=>{
   noPractice:el('noPractice').checked,name,email,phone,
   requestId:state.requestId||genRequest(),humanToken:state.humanToken};
  state.requestId=payload.requestId;
- state.humanToken='';
+ state.humanToken='';state.beginUnknown=true;
  if(window.turnstile&&state.captchaWidget!==null)
   window.turnstile.reset(state.captchaWidget);
  rpc('study1ParticipantBegin',payload,result=>{
   if(!result||result.accepted!==true){
    if(result&&result.reason==='SCREENING_NOT_ELIGIBLE'){
-    show('ineligible');status('目前自陳條件不符合研究報名資格。');
-   }else status('申請是否成立尚未確認；請勿重複送出，聯絡研究團隊核對。');
+    state.beginUnknown=false;show('ineligible');
+    status('依目前自陳條件無法繼續申請；未建立有效申請。');
+   }else formalBeginOutcome_(payload);
    return;
   }
   if(typeof result.applicantId!=='string'||!/^APP_[A-Za-z0-9_-]{12,76}$/.test(result.applicantId)||
      typeof result.screeningId!=='string'||!/^SCR_[A-Za-z0-9_-]{12,76}$/.test(result.screeningId)){
-   status('申請識別資料未能核實；請勿重複送出，聯絡研究團隊。');
-   return;
+   formalBeginOutcome_(payload);return;
   }
   state.app={applicantId:result.applicantId,screeningId:result.screeningId,
    experiment:'E1',email:payload.email};
+  state.beginUnknown=false;
   show('otp');status('已建立待驗證申請，尚未完成信箱驗證、預約或知情同意。');
- });
+ },()=>formalBeginOutcome_(payload));
 });
 function reconcileOtpIssue_(payload){
  // Never repeat MailApp.sendEmail; this endpoint is original Verification read-only.
@@ -802,27 +825,53 @@ function formalConsentCopy_(){
   }
  });
 }
+function formalConsentAdopt_(reservation,result){
+ if(!result||result.state!=='ISSUED'||result.experiment!=='E1'||
+    result.reservationId!==reservation.reservationId||
+    typeof result.token!=='string'||!/^[a-f0-9-]{70,90}$/i.test(result.token)||
+    !/^[a-f0-9]{64}$/.test(result.documentSha256||'')||
+    typeof result.documentVersion!=='string'||!result.documentVersion||
+    result.researcherPresigned!==true)return false;
+ formalConsentReset_();
+ formalConsent={token:result.token,reservationId:reservation.reservationId,
+  slotId:reservation.slotId,documentSha256:result.documentSha256,
+  documentVersion:result.documentVersion,researcherPresigned:true,
+  originalVerified:false,staffExplained:false,signed:false,confirmed:false};
+ show('consent');formalConsentRender_();formalConsentLoadPdf_();
+ status('已核對同一原預約與研究者預簽 PDF；請閱讀後手寫本人簽名。');
+ return true;
+}
+function formalConsentIssueRead_(reservation){
+ // Same nonce + original registry only; never create a second invitation.
+ if(!state.pendingConsentRequestId||
+    state.pendingConsentReservationId!==reservation.reservationId)return;
+ const input={emailProof:state.emailProof,
+  reservationId:reservation.reservationId,requestId:state.pendingConsentRequestId};
+ rpc('study1FormalConsentIssueState',input,result=>{
+  if(result&&result.found===true&&result.status==='ISSUED'&&
+     result.recovery==='ORIGINAL_REGISTRY_READ_ONLY'&&
+     formalConsentAdopt_(reservation,{...result,state:'ISSUED'}))
+   status('原同意憑證已唯讀找回，未新增邀請或重送任何寫入。');
+  else status('同意憑證核發因果 UNKNOWN；需人工核對，不重複核發。');
+ },()=>status('原同意索引唯讀回查失敗，核發仍 UNKNOWN；勿重送。'));
+}
 function formalConsentStart_(reservation){
  if(!reservation||reservation.status!=='HELD'||!state.emailProof||state.busy)return;
- formalConsentReset_();
+ if(formalConsent&&formalConsent.reservationId===reservation.reservationId){
+  show('consent');formalConsentStatus_();return;
+ }
+ if(state.pendingConsentRequestId){
+  if(state.pendingConsentReservationId===reservation.reservationId)
+   formalConsentIssueRead_(reservation);
+  else status('原同意核發尚未核實，不能另建新同意憑證。');
+  return;
+ }
+ state.pendingConsentRequestId=genRequest();
+ state.pendingConsentReservationId=reservation.reservationId;
  rpc('study1FormalConsentBegin',{emailProof:state.emailProof,
-  reservationId:reservation.reservationId},result=>{
-  if(!result||result.state!=='ISSUED'||result.experiment!=='E1'||
-     result.reservationId!==reservation.reservationId||
-     typeof result.token!=='string'||
-     !/^[a-f0-9-]{70,90}$/i.test(result.token)||
-     typeof result.documentSha256!=='string'||
-     !/^[a-f0-9]{64}$/.test(result.documentSha256)||result.researcherPresigned!==true){
-   status('尚無合法本人預約／正式同意邀請；禁止進入PDF簽署。');return;
-  }
-  formalConsent={token:result.token,reservationId:reservation.reservationId,
-   slotId:reservation.slotId,
-   documentSha256:result.documentSha256,documentVersion:result.documentVersion,
-   researcherPresigned:result.researcherPresigned===true,
-   originalVerified:false,staffExplained:false,signed:false,confirmed:false};
-  show('consent');formalConsentRender_();
-  formalConsentLoadPdf_();status(result.researcherPresigned===true?'已核對本人預約及Email OTP；本份PDF由研究者事先簽署並上傳，請閱讀完整內容並於網站手寫本人簽名，送出後可查詢簽署PDF與預約結果。':'已核對本人預約及Email OTP，請依有效程序閱讀PDF及完成簽署。');
- });
+  reservationId:reservation.reservationId,requestId:state.pendingConsentRequestId},
+  result=>{if(!formalConsentAdopt_(reservation,result))formalConsentIssueRead_(reservation);},
+  ()=>formalConsentIssueRead_(reservation));
 }
 function formalInkInit_(){
  const box=el('visitorSignaturePreviewBox'),canvas=el('visitorSignaturePreview');
@@ -1035,9 +1084,9 @@ function formalV08Read_(){
   }
  });
 }
-function formalHoldUnknown_(slotId,requestId){
+function formalHoldUnknown_(slotId,requestId,quote){
  // The original request may already have committed. One GET, never a second HOLD.
- rpc('study1FormalHoldOutcome',{emailProof:state.emailProof,slotId,requestId},r=>{
+ rpc('study1FormalHoldOutcome',{emailProof:state.emailProof,slotId,requestId,quote},r=>{
   if(!r||r.resolved!==true){
    status('原預約結果仍為UNKNOWN，未見有效原列不代表失敗；請勿重送原操作。');return;
   }
@@ -1082,14 +1131,14 @@ el('hold').addEventListener('click',()=>{
   state.pendingHoldRequestId=requestId;
   rpc('study1FormalHoldSlot',{emailProof:state.emailProof,
    quote:quote.quote},held=>{
-   if(!held||held.held!==true){formalHoldUnknown_(chosen.slotId,requestId);return;}
+   if(!held||held.held!==true){formalHoldUnknown_(chosen.slotId,requestId,quote.quote);return;}
    if(typeof held.reservationId!=='string'||!/^RSV_[A-Za-z0-9_-]{8,76}$/.test(held.reservationId)){
-    formalHoldUnknown_(chosen.slotId,requestId);return;
+    formalHoldUnknown_(chosen.slotId,requestId,quote.quote);return;
    }
    state.pendingHoldReservationId=held.reservationId;
    status('原Reservations已完成暫留與回讀，尚未完成正式知情同意。');
    formalV08Read_();
-  },()=>formalHoldUnknown_(chosen.slotId,requestId));
+  },()=>formalHoldUnknown_(chosen.slotId,requestId,quote.quote));
  });
 });
 
