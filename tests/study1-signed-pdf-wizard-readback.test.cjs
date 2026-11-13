@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const crypto=require('node:crypto');
-const html=fs.readFileSync(path.join(__dirname,'../gas/Study1Visitor.html'),'utf8');
+const html=fs.readFileSync(path.join(__dirname,'fixtures/Study1Visitor.demo.html'),'utf8');
 const begin=html.indexOf('function officialSignedPdfVerify_(');
 const end=html.indexOf('async function officialSignedPdfDisplay_(',begin);
 assert.ok(begin>0&&end>begin,'Last-step signed-PDF verification must exist');

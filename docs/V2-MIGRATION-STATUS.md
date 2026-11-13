@@ -301,3 +301,5 @@
 - TEST_ONLY_ARCHIVE：原完整 Visitor Demo HTML 原樣保存在 `tests/fixtures/Study1Visitor.demo.html`，僅供隔離 VM 回歸參照，不列 GAS 正式來源；Team／Visitor／V06 舊測試改讀此 fixture，不改原正式 GAS 同意／預約／通知核心。
 - TESTS：原 V2 公開安全及 HEAD-only 負測要求正式 HTML 不含 Preview/Fixture 呼叫且只有 FORMAL 門檻；原正式 Browser E2E 調整讀取單一控制器邊界。保留既有 CI，並回讀對應 SHA，失敗不得假通過。
 - LAST_VERIFIED_STEP=`CI_PENDING`；WRITE_OWNER=唯一新 V2 GitHub；NEXT_ACTION=驗證新 main CI 並核對是否仍可實體搬離四個合成 GAS 元件；BLOCKERS=正式 E1 核定資料／OAuth／真正 UI；`OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`。
+
+- CI_REPAIR_2026-11-13：新 Visitor FORMAL-only SHA `b73eb852a520f39a1700c8081cb2298f91ba3f67` 的 Run #43396439242 實際 `217 PASS / 1 FAIL`，因原 `study1-signed-pdf-wizard-readback.test.cjs` 仍用正式 GAS 讀取已退出的舊 DEMO `officialSignedPdfVerify_`，非現行 FORMAL 的 `formalVerifySigned_`。修正原測試僅將其既有虛構 PDF 測試來源改指 `tests/fixtures/Study1Visitor.demo.html`，保留所有測試與負例，不恢復舊 DEMO 正式程式。增列 FORMAL intake 的既有靜態檢查入安全 CI。本段更新後以新 SHA CI 回讀，不得宣稱先前失敗 SHA 通過。
