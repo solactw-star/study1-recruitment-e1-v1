@@ -414,7 +414,14 @@ function joinedHarness(opts={}){
  };
  if(opts.publicDenied)ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_RPC_DENIED');};
  const scope=vm.createContext(ctx);
+ // The standalone GAS booking source defines its real snapshot/validation
+ // functions. Restore the synthetic adapters after loading it so offline
+ // tests never attempt to access Sheets or missing booking kernels.
+ const readOriginalSnapshot=scope.study1FormalSnapshot_;
+ const validateOriginalSnapshot=scope.study1FormalValidateSnapshot_;
  vm.runInContext(bookingBackend,scope);
+ scope.study1FormalSnapshot_=readOriginalSnapshot;
+ scope.study1FormalValidateSnapshot_=validateOriginalSnapshot;
  vm.runInContext(src,scope);
  return {scope,stats:()=>({ownerChecks,consentReads,bookingReads,noticeReads,
   noticeMetadata,locks,unlocks,privateOpens,writes,mailCalls})};
