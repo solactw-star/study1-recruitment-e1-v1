@@ -407,3 +407,14 @@
 
 
 - CI_REPAIR_2026-11-13：main `916e98f8ee00a1720053ef0139139e85392b467f` 的 [Run #43417083105](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43417083105) public-safety Job #131857576179 **274 tests／273 PASS／1 FAIL／0 SKIP**；唯一失敗為新增「錯 slot 來源不得手動收尾」負測僅接受 `DUAL_PDF|HASH_MISMATCH|IDENTITY_SLOT_CHANGED`，實際更早按完整 binding digest 回報 `FORMAL_BOOKING_CONSENT_SOURCE_CHANGED`（已正確在寫入前拒絕）。只將此合法安全錯誤碼加入原測試預期，未改生產程式、未略過負測；下一 main SHA 必須重驗，不以原失敗 SHA 冒充成功。
+
+
+### 2026-11-13｜E1 完整簽署 PDF／原預約 UNKNOWN：本輪程式及負測同 SHA 回讀
+- TASK_DOMAIN=`Study1_V2_E1_SIGNED_PDF_BOOKING_UNKNOWN_RECONCILIATION`；SOURCE_ID/PATH=新唯一 V2 `solactw-star/study1-recruitment-e1-v1`，主規格原 `docs/study1-system-spec.md` §70-S.34–36、進度原 `docs/V2-MIGRATION-STATUS.md`。
+- SOURCE_VERSION/CODE_SHA=`4f0f9f0d9e37d229421721e1a2f2181317682955`；本輪最新完整原程式與測試 CI [Run #43417261068](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43417261068)、Job `public-safety` #131858197714 原始日誌回讀：`274 tests / 274 PASS / 0 FAIL / 0 SKIP`、`completed/success`。本記錄是文件附錄更新，會再產生 docs-only 新 main SHA，必須另以該新 SHA CI 回讀；不冒充 GAS 或真實 UI 驗收。
+- VERIFIED_CODE_BLOBS：`gas/Study1FormalBooking.js=5d5d5d7bc400cec89bca893f8813ff3e4eff0896`、`gas/AdminConsole.html=f15fbb48dc4fdf2b782d3cc85f759d98de39a14f`、`tests/study1-formal-v05-v08-original-booking.test.cjs=07cefae3f1876fe4cadf94a2f19b32a4771e3cb4`、`tests/study1-owner-e1-operations-audit.test.cjs=1814fd055504bd62ecf83c629736abc3a9407e59`。主規格 `docs/study1-system-spec.md` 仍原 blob `b0e10c1ccbdd90a52693edbbe92c73f1408c0157`，未改需求或引入舊程式。
+- LAST_VERIFIED_STEP：由原相同 ScriptLock 和獨立證據核實的 OWNER-only `PREFLIGHT`，返回 `REPAIRABLE_HELD`／`MANUAL_REVIEW_ONLY`／`ALREADY_CONFIRMED`，只在研究者預簽＋本人最終簽署 PDF 原 SHA/ACL/event、OTP、PI 原 Slots、原 Reservations 唯一列均有效時供人工操作。二階段 HMAC receipt 與原 consent revision+Reservations 全列 CAS 防競寫；未經人工操作不寫入；寫後結果 UNKNOWN 使用 OWNER 重新唯讀查原來源，禁止重送。因 §70-S.36 禁用非預簽歷史流程，FORMAL_E1 一律要求 `researcherPresigned=true`，同一 reservation 不得連結兩份正式同意。原 PDF、原研究者簽名／日期與舊系統皆未改動；通知 `NOT_SENT_BY_RECONCILIATION`，不代為寄送。
+- NEGATIVE_TESTS：修正歷史離線 fixture 為唯一預簽完整 PDF＋本人最後一簽，新增簽署原來源、單次人工明確操作、逾時已寫入 CONFIRMED 的唯讀恢復、偽造／過時 HMAC/原列/revision、錯人錯 slot、雙重同意、撤銷/過期 HELD、非 OWNER／公版拒絕、UI 未勾選／變更 ID／UNKNOWN 不再 POST 等；保留全部既有安全負測。首筆 Run #43417083105 有 273 PASS／1 FAIL，純負測錯誤碼預期已修正，沒有改生產邏輯，最新同 SHA 274 全通過。
+- WRITE_OWNER=唯一 V2 GitHub main。BLOCKERS：遠端 V2 GAS HEAD 未做來源同步／版本部署，現有私人 V1 不變；尚未完成真人 OWNER 受控 UI、PI 核定原 E1 Slots／研究者預簽完整 PDF、真 MailApp/Turnstile、PI／研究行政 REC 適用結論及真人營運授權。此修復是 GitHub 程式，不代表實際研究資料已修復或任何真人資料被確認。
+- NEXT_ACTION：維持所有真人收件關閉；之後可在 V2 GitHub 離線測本人端 PDF 副本與 OWNER 綜合審核跨來源時間漂移；若未來單獨授權 GAS 同步/部署，須備份及完整回讀、真角色 UI/安全驗收，不能以此 CI 自行啟用收件。
+- SYNC_STATUS：`MAIN_CODE_CI_VERIFIED=true`（僅 `4f0f9f0d9e37d229421721e1a2f2181317682955`）；`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`OPEN=false`、`CONSENT_READY=false`；`CONTEXT_SYNC_VERIFIED=false`（本輪沒有變更來源角色／研究上下文）。
