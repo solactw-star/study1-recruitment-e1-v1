@@ -345,3 +345,5 @@
 - SYNC_STATUS：`OPEN=false`、`CONSENT_READY=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；不操作舊 Repo/GAS、正式 Sheets、REC 或真人收件。
 
 - CI_REPAIR_2026-11-13：程式 SHA `10be9d0a975773deda5d0bdffed86a181aa38241` 的 Run #43400450407 實際 `243 tests / 234 PASS / 9 FAIL`，源於安全掃描要求所有可被 GAS 直接呼叫的 OWNER RPC 在函式起始立即執行 public deny（原新 RPC 換行未符合 scanner），以及新 Node VM 測試未注入既有 `STUDY1_E1_NOTIFICATION_HEADERS_` 常數；已做最小修正，不放寬 scanner、沒有取消測試或改正式資料，下一新 SHA 必須回讀。
+
+- CI_REPAIR_2026-11-13_2：`44785b986628b5feb2b3013b3667b1556591e9aa` Run #43400658501 實際 `247 tests / 246 PASS / 1 FAIL`，唯一失敗是新 outbox 異常列測試在 assert.throws 前先呼叫會丟錯的函式；已調整測試斷言執行順序，生產程式與嚴格安全檢查維持不變。下一 SHA CI 需重新回讀。

@@ -90,8 +90,9 @@ test('duplicate, forged, wrong-party and corrupted outbox rows fail closed',()=>
   [['FORGED_JOB',...row().slice(1)]],
   [row().slice(0,8)]
  ]){
-  const f=harness({rows}),a=f.ctx.study1OwnerE1NotificationAudit();
-  if(rows[0].length===9)assert.equal(a.records[0].noticeStatus,'SOURCE_MISMATCH');
+  const f=harness({rows});
+  if(rows[0].length===9)
+   assert.equal(f.ctx.study1OwnerE1NotificationAudit().records[0].noticeStatus,'SOURCE_MISMATCH');
   else assert.throws(()=>f.ctx.study1OwnerE1NotificationAudit(),/ROW_INVALID/);
   assert.equal(f.counters().mailCalls,0);
  }
