@@ -106,3 +106,19 @@ test('malformed original reservation rows fail closed without any write',()=>{
  assert.throws(()=>h.scope.study1OwnerE1ConsentBookingAudit(),/OWNER_E1_BOOKING_AUDIT_ROW_INVALID/);
  assert.equal(h.writes(),0);
 });
+
+test('mismatched original slot binding remains UNKNOWN even for CONFIRMED reservation',()=>{
+ const h=setup();
+ h.registry.records[0].binding.slotId='DIFFERENT_SLOT';
+ const result=h.scope.study1OwnerE1ConsentBookingAudit();
+ assert.equal(result.records[0].bookingStatus,'UNKNOWN');
+ assert.equal(result.records[0].bookingConfirmed,false);
+ assert.equal(result.records[6].bookingConfirmed,true);
+ assert.equal(h.reads(),1);assert.equal(h.writes(),0);
+});
+test('missing consent registry revision fails closed without writes',()=>{
+ const h=setup();
+ delete h.registry.revision;
+ assert.throws(()=>h.scope.study1OwnerE1ConsentBookingAudit(),/OWNER_E1_BOOKING_AUDIT_SOURCE_INVALID/);
+ assert.equal(h.writes(),0);
+});
