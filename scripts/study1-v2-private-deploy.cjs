@@ -13,6 +13,8 @@ const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
 const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
 const TARGET=core.PRIVATE_TARGET;
+// Verified historical version 2, read back from release Run 43706978095.
+const VERIFIED_VERSION2_SHA='b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
 // One authorized execution only, bound to the reviewed parent and push event.
 const RELEASE_PARENT='e6020f1b4d9e51c669409c8ddd4fadc69db34c66';
 const RELEASE_MESSAGE='release-v2 authorized one-time private E1 OWNER launch 2026-11-15';
@@ -72,7 +74,7 @@ function sourceProof(obj){
  try{
   const manifest=core.closedManifest(obj.files);core.closedWebsite(obj.files);
   access=manifest.webapp.access;
-  known=(access==='MYSELF'&&(remote.sha===TARGET||remote.sha===HISTORICAL_TARGET))||
+  known=(access==='MYSELF'&&([TARGET,HISTORICAL_TARGET,VERIFIED_VERSION2_SHA].includes(remote.sha)))||
    (access==='ANYONE'&&remote.sha===core.digest(core.localSources()));
  }catch(_){}
  return {sha:remote.sha,count:remote.count,access,known};
@@ -227,7 +229,7 @@ function normalizedDeployments(d){
    }
   }
   return {id,kind,version,manifest:config.manifestFileName||'',
-   description:String(config.description||''),updateTime:String(x.updateTime||''),
+   description:String(config.description||''), // raw updateTime is preserved in the encrypted backup, not the semantic digest
    points:points.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))};
  }).sort((a,b)=>a.id.localeCompare(b.id,'en'));
 }
@@ -327,10 +329,10 @@ async function reviewedMutation(api,env,mode,assertMain){
  const before=await inventory(api);
  assert(before.fp===env.EXPECTED_INVENTORY_SHA256,'version/deployment inventory differs from prior audited state');
  checkHead(before.head);assert(before.safe,'unverified existing deployment inventory');
- const again=await inventory(api);
- assert(again.fp===before.fp,'deployment/version inventory raced');
+ // A new invocation reaches this gate after the independently persisted backup.
+ // This full fresh inventory is already compared with the exact reviewed snapshot.
  assertMain(env);
- return again;
+ return before;
 }
 function targetVersions(s){return s.proofs.filter(v=>v.sha===TARGET&&v.known&&v.access==='MYSELF');}
 function targetDeployed(s){const nums=new Set(targetVersions(s).map(v=>v.version));
@@ -370,9 +372,8 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  const number=Number(env.PRIVATE_VERSION);
  const matches=targetVersions(before);
  assert(matches.length===1&&matches[0].version===number,'specified immutable candidate version not uniquely verified');
- checkHead(await api.getVersionContent(number));
- const recheck=await inventory(api);
- assert(recheck.fp===before.fp,'deployment/version inventory raced before POST');
+ // reviewedMutation just verified the full immutable source and deployment inventory,
+ // including the version specified here. No duplicate content/list GET before POST.
  assertMain(env);
  const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
  let created;

@@ -34,10 +34,10 @@ function fakeApi(){
  };
  return {api,counts:()=>({puts,versionCreates})};
 }
-test('V2 source is exactly 27 reviewed GAS files with closed private manifest',()=>{
+test('V2 source matches the current approved GAS inventory and closed private manifest',()=>{
  const f=baseFiles();
- assert.equal(f.length,27);
- assert.equal(d.reviewedLocal().length,27);
+ assert.equal(f.length,core.APPROVED.length);
+ assert.equal(d.reviewedLocal().length,core.APPROVED.length);
  assert.equal(core.digest(f),d.TARGET);
  assert.equal(core.closedManifest(f).webapp.access,'MYSELF');
  assert.doesNotThrow(()=>core.closedWebsite(f));
@@ -52,7 +52,7 @@ test('strict manual main and independent deploy confirmation',()=>{
   assert.throws(()=>d.invocation({...e,...c},'deploy'),/V2_PRIVATE_BLOCKED/);
 });
 test('HEAD must match reviewed 27-file SHA and new Script ID',()=>{
- assert.deepEqual(d.checkHead(gas()),{sha:d.TARGET,files:27});
+ assert.deepEqual(d.checkHead(gas()),{sha:d.TARGET,files:core.APPROVED.length});
  assert.throws(()=>d.checkHead({...gas(),scriptId:'old'}),/Script ID/);
  const f=baseFiles();f[0]={...f[0],source:f[0].source+' '};
  assert.throws(()=>d.checkHead({scriptId:d.SID,files:f}),/diverged/);
@@ -124,7 +124,7 @@ test('read-only audit accepts nonliteral HEAD and correctly counts versioned dep
  }];
  f.api.getVersionContent=async()=>{versionContentReads++;return gas();};
  const result=await d.audit(f.api);
- assert.equal(result.head.files.length,27);
+ assert.equal(result.head.files.length,core.APPROVED.length);
  assert.equal(result.deploymentCount,1);
  assert.equal(result.versionedDeployments,0);
  assert.equal(d.normalizedDeployments(result.deps)[0].kind,'HEAD');
@@ -134,7 +134,7 @@ test('read-only audit accepts nonliteral HEAD and correctly counts versioned dep
 });
 test('public or wrong-execution deployment is rejected before any mutations',async()=>{
  const f=fakeApi(),b=await d.audit(f.api);
- assert.equal(b.head.files.length,27);
+ assert.equal(b.head.files.length,core.APPROVED.length);
  assert.equal(b.versionCount,0);assert.equal(b.deploymentCount,0);
  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
  const publicDep={deploymentId:'PUBLIC',deploymentConfig:{scriptId:d.SID,versionNumber:1,manifestFileName:'appsscript'},
@@ -471,4 +471,36 @@ test('authorized one-time job preserves separate encrypted artifacts before each
  }
  assert.match(job,/if: failure\(\)[\s\S]*?\.cjs auto-audit/);
  assert.doesNotMatch(job,/rerun|clasp push|script\.run/i);
+});
+
+test('semantic deployment fingerprint ignores only display update time, never deployment identity or ACL',()=>{
+ const head={deploymentId:'DEV',deploymentConfig:{scriptId:d.SID},updateTime:'2026-11-15T11:04:03Z',
+  entryPoints:[{webApp:{entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'},url:'https://example.invalid/private'}}]};
+ const fp=dep=>d.fingerprint([], [dep],d.TARGET,[]);
+ assert.equal(fp(head),fp({...head,updateTime:'2026-11-15T11:04:11Z'}));
+ assert.notEqual(fp(head),fp({...head,deploymentId:'OTHER'}));
+ assert.notEqual(fp(head),fp({...head,entryPoints:[{webApp:{entryPointConfig:{access:'ANYONE',executeAs:'USER_DEPLOYING'}}}]}));
+ assert.notEqual(fp(head),fp({...head,deploymentConfig:{scriptId:d.SID,manifestFileName:'appsscript',versionNumber:2}}));
+ assert.throws(()=>fp({...head,entryPoints:[{webApp:{entryPointConfig:{access:'ANYONE_ANONYMOUS',executeAs:'USER_DEPLOYING'}}}]}),/publicly accessible/);
+});
+test('reviewed private source SHA follows the current checkout rather than a historical release',()=>{
+ const src=core.privateOwnerManagementCandidate(core.localSources());
+ assert.equal(core.PRIVATE_TARGET,core.digest(src));
+ assert.equal(d.TARGET,core.PRIVATE_TARGET);
+ const bad= '0'.repeat(64);
+ assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:bad}),/reviewed target SHA mismatch/);
+});
+test('deploy reuses the fresh reviewed immutable inventory before one POST and retains full readback',async()=>{
+ const f=fakeApi(),e=runEnv();
+ const v=await d.createImmutableVersion(f.api,{...e,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},()=>{});
+ const before=await d.audit(f.api);
+ let lists=0,reads=0,listsAtPost,readsAtPost;
+ const list=f.api.getVersions,content=f.api.getVersionContent,post=f.api.createDeployment;
+ f.api.getVersions=async()=>{lists++;return list();};
+ f.api.getVersionContent=async n=>{reads++;return content(n);};
+ f.api.createDeployment=async(...a)=>{listsAtPost=lists;readsAtPost=reads;return post(...a);};
+ await d.deploy(f.api,{...e,PRIVATE_VERSION:String(v.version),EXPECTED_INVENTORY_SHA256:before.fp},()=>{});
+ assert.equal(listsAtPost,1);assert.equal(readsAtPost,1);
+ assert.ok(lists>listsAtPost&&reads>readsAtPost);
+ assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
 });

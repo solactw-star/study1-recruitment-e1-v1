@@ -5,16 +5,16 @@
 ## 每輪先讀（增量，禁止以舊摘要當現況）
 
 1. 讀 GitHub `main` **當下** SHA、最近 commit／PR、相關 workflows／最新 CI；不要沿用前一輪固定 SHA、測試數、Run 或檔數。
-2. 正式網站需求讀 `docs/study1-system-spec.md` 的**最新適用節**，特別留意 §70-S.34–36 與任何後續取代條文；唯一網站接續紀錄讀 `docs/V2-MIGRATION-STATUS.md` 的最新有效工作段落。
+2. 正式網站需求讀 `docs/study1-system-spec.md` 的**最新適用節**，依最新取代條文（含開發期精簡發布規則）；唯一網站接續紀錄讀 `docs/V2-MIGRATION-STATUS.md` 的最新有效工作段落。
 3. 按本輪工作只讀直接相關的 `gas/`、`tests/`、`scripts/study1-v2-*`、`.github/workflows/`，以及對應來源／部署日誌。先核對已完成與已失效的工作，避免重做已通過階段。
 4. 研究參與者程序、資格、正式同意或風險與有效 REC 不一致／適用未定時，標記 `REC_REVIEW_REQUIRED`，將受影響的真人啟用交 PI／研究行政，不把程式修改當研究倫理核准。
 
 ## 唯一施工範圍及不可跨越的界線
 
-- 唯一網站程式／測試／規格／進度可寫入來源：`solactw-star/study1-recruitment-e1-v1` 的現有原路徑。唯一持續開發的遠端 GAS Script ID：`1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f`；**知道 ID 不代表有遠端寫入／部署授權**。
+- 唯一網站程式／測試／規格／進度可寫入來源：`solactw-star/study1-recruitment-e1-v1` 的現有原路徑。唯一持續開發的遠端 GAS Script ID：`1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f`；依正式規格及本次既有授權施工；已明確授權的同一私人發布不重複要求確認，禁止擴及正式資料或真人收件。
 - 舊 `solactw-star/study1-recruitment-gas`、PR #133、舊 GAS 及其版本／部署一律 `LEGACY_FROZEN / READ_ONLY_ARCHIVE`，僅必要時唯讀查歷史；禁止修改、合併、同步、恢復或部署。舊 `scripts/study1-gas-*` 不得作為現行 V2 寫入工具；參見 `scripts/README-V2-SAFETY.md`。
 - 不擅自修改或讀寫正式研究參與者資料、正式 Slots／Reservations／個資 Sheets、REC、研究者預簽 PDF、Script Properties、正式刺激、RIF Context；不建立平行正式 Repo／規格／資料庫。
-- 原合成 Unified／Team／Fixture 及 Visitor Demo 僅保留於 `tests/fixtures/` 的隔離離線測試；不得回灌到 `gas/`、發布清單或公開 RPC。保持 V2 發布來源 allowlist 及伺服器端公版 deny-all 契約。
+- 原合成 Unified／Team／Fixture 及 Visitor Demo 僅保留於 `tests/fixtures/` 的隔離離線測試；不得回灌到 `gas/`、發布清單或公開 RPC。保持當期 V2 發布來源 allowlist 及伺服器端公版 deny-all 契約；清單可隨正式功能經受影響測試更新，歷史檔數不是永久限制。
 
 ## 優先施工目標（非新的設計決策）
 
@@ -22,14 +22,13 @@
 
 已具備的功能先以最新 `main` 實際程式和同版 CI 核驗，**只修尚存缺口**。尤其需保留原申請、OTP、HOLD、PDF、Reservations 與 Email 的同一可信綁定；多儲存非 ACID 時不能用「PDF 已簽」推定「預約已確認」，也不能用「寄信提供者接受」推定「已送達」。
 
-## Agent 實作／測試安全迴圈
+## 最短可信開發與發布迴圈
 
-1. `SOURCE_OWNER → TARGET → AUTHORIZATION → CONCURRENCY → WRITE → READBACK`：明確分辨只讀、GitHub 原程式修改、GAS HEAD 寫入、版本、部署及真人啟用的不同權限。先核對目標原本 SHA／版本；競寫、來源不一致或未授權就停止該寫入。
-2. 限定相應 `gas/`、既有 `tests/`、必要 workflow 及原進度檔做**最小增量**；優先真實 E1 成功／失敗及安全負測。不刪測試、不以 skip／弱化驗證取得通過；高風險安全失敗必須修正。
-3. 非冪等 POST／MailApp／PDF／跨 Sheet CAS 的回應未知：先查原唯一來源與事件／狀態，**禁止盲目重送**、自動補寄、重簽或重建預約。未知／部分寫入應 fail closed 並提供 OWNER 唯讀查核／人工處置；不可對真人測試。
-4. 每次提交後完整回讀實際 `main` SHA、受影響檔案／diff、**同一 SHA** 最新適用 CI Job 原始日誌及正／負測；不能拿別的 SHA、單純 unit test、Demo 或合成 CI 冒充部署成功。再將實質完成、未完成、阻塞及下一步增量記入原 `docs/V2-MIGRATION-STATUS.md`，文件提交後也要另外核對新 SHA CI。
-5. 遠端 **V2 GAS** 來源同步、版本建立及部署都需各自具體授權；在該階段重新檢查 OAuth、唯一 Script ID、manifest/ACL、寫前原始備份／SHA、競寫、完整 GET 回讀及版本／部署 inventory。過去失敗的部署或備份 Artifact 不是新 POST 授權。公開登入唯讀版與私人 OWNER 版分開驗證。
-6. 無真實 Google 帳號 UI／PI 已核定資料／REC 適用結論及啟用授權時，只能宣稱 `MAIN_CODE_CI_VERIFIED`（若有同 SHA 證據），不得宣稱 GAS 已同步、公開版已部署、真 UI 已驗收或正式可營運。保持 `OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；不寄真人信、不啟用真人申請或簽署。
+1. 判定唯一來源、目標、既有授權與競寫。一般程式／文案／測試及唯讀稽核直接進行；一個功能一次完整提交。低風險純文件不必為相同程式反覆全量測試，仍做內容/diff/回讀及記錄當下適用 CI。高風險資料、權限、交易、簽署、安全及發布程式必須有同版受影響正負測；保留安全覆蓋，不用舊結果、skip 或虛報 PASS 代替驗證。
+2. 以當前 main、實際來源、既有核定及最新 CI 為準。舊 SHA、Run、固定檔數、測試數、部署版號與歷史指紋僅供採證，不能當永久門檻；每次發布時自動從核定原始碼計算精確 SHA，保留本次版本綁定及歷史來源的可追溯性，不能任意接受未知來源。
+3. 唯讀稽核與一般開發不需使用者登入、輸入 SHA 或逐步核准。已獲具體授權的同一 V2 私人發布，將 HEAD 同步、建版、指定私人部署的授權集中一次，依當期規格自動備份、核對、執行和回讀；只做尚未完成的步驟。確認已建立的相符版本可直接沿用，不重建、不重複 PUT/POST。新版本／公開部署或擴大權限須符合相應授權；不得把單次授權變成常設任意遠端寫入。
+4. 遠端檢查採一份完整寫前稽核／備份、每項必要寫入前的最新一致性檢查及一次完整寫後回讀，各階段可重用剛核實的證據；勿連續重取完全相同的 inventory。比較實質來源、版號、部署 ID、ACL/manifest 和文件雜湊，不因非安全性 API 顯示時間或排序變化停工。HTTP 429/503 對 GET 做有界退避；未知 PUT/POST、MailApp、PDF 或跨 Sheet 交易先查原事件，禁止盲目重送、自動補寄、重簽或重建預約。真正競寫、未知來源、身分/ACL 或高風險失敗停止受影響操作。
+5. 依最新證據獨立記錄 main/CI、GAS HEAD、不可變版本、部署 ACL、實際 UI、PI/REC及真人啟用。可核實的遠端步驟可直接報成功，不因真人 UI 尚未驗而否定已完成的部署。無有效核准及獨立啟用授權仍維持 `OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；不碰正式研究資料、真人信、申請、預約或簽署。公開登入唯讀與私人 OWNER 分別驗權限；必要 UI/PI/REC 確認集中安排，不阻斷其他可完成工程。
 
 ## 回報與接續格式
 

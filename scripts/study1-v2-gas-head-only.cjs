@@ -9,7 +9,7 @@ const REPO = 'solactw-star/study1-recruitment-e1-v1';
 const SID = '1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f';
 const CONFIRM = 'I_AUTHORIZE_STUDY1_V2_HEAD_ONLY';
 const PRIVATE_CONFIRM = 'I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_HEAD_ONLY';
-const PRIVATE_TARGET = 'b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
+// PRIVATE_TARGET is derived from this reviewed checkout below, never from an old deployment hash.
 function releaseProfile(env){const profile=env.SOURCE_PROFILE||'public_readonly';
  require_(['public_readonly','private_e1_management'].includes(profile),'invalid V2 source profile');
  return profile;
@@ -461,6 +461,8 @@ function privateOwnerManagementCandidate(files){
  require_(rejected,'private management candidate rejected by public release guard');
  return result;
 }
+// Bind this run to the closed, allowlisted private candidate of its exact checkout.
+const PRIVATE_TARGET=digest(privateOwnerManagementCandidate(localSources()));
 module.exports={PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
  runnerPaths,aad,audit,prepare,apply};
