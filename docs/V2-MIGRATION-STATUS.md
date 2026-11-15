@@ -672,3 +672,5 @@
 ### 2026-11-15｜E1 原案件新工作階段重新驗證（唯讀候選）
 - TASK_DOMAIN=Study1_V2_E1_CASE_REAUTH_READONLY；PRE_MAIN_SHA=`2ca3e1304eb1331d3cf5863de37810134e8637df`。原普通 OTP 核發 supersedes 先前原憑證，與既有 consent binding 相衝；候選採原 Verification C purpose 新 E1_CASE_RECOVERY（A:I 不改），共用原 OTP HMAC/8碼/10分鐘/帳戶節流/ScriptLock/F:G CAS；與一般 EMAIL_VERIFICATION 明確隔離，不產生普通 emailProof/consent bearer，不使原一般 OTP 被 recovery purpose supersede。需要獨立 PI/REC 適用及資料使用核准與新旗標 STUDY1_E1_CASE_RECOVERY_APPROVED（未設定）；原 public deny、mail/intake gates 保留。APP+原信箱+一次 Turnstile 僅請求驗證；結果不揭示是否存在，寄送 UNKNOWN 不重送。正確新碼消耗一次後同鎖核對原 Applicants/Screenings/Verification 及原 Reservations/consent observation，僅回本人原案狀態、不自動遷移/重簽/重建預約；原 UI opt-in candidate，無瀏覽器持久儲存。無正式資料/遠端/真人信。
 - LAST_VERIFIED_STEP=PATCH_PREPARED；SYNC_STATUS=CI_PENDING；NEXT_ACTION=同 SHA CI 與原進度回讀；BLOCKERS=REC_REVIEW_REQUIRED（新 verification purpose/重新接續程序需核准）、自助異動/失去簽署 token 的重新授權未實作、無持久 V08 因果、公開 UI/inventory/真人 UAT；WRITE_OWNER=唯一 V2 repo。
+
+- 初輪 code SHA `9cbcc9c` 的核心 CI Run #43725442612 原始 log：331/332 PASS、1 FAIL（新增 test 呼叫不存在 RPC 名稱）；修正測試使用現有原 RPC，另加 recovery purpose 不取代原 OTP HMAC authority 驗收及查核失敗不揭示個案存在邊界；不得以初輪結果宣稱完成。

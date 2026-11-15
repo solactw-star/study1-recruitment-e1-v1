@@ -111,3 +111,14 @@ test('Newer issue invalidates the consumed challenge; original evidence SHA chan
  assert.notEqual(x.bind().eligibilityEvidenceSha256,previous.eligibilityEvidenceSha256);
  assert.notEqual(x.bind().evidenceSha256,previous.evidenceSha256);
 });
+
+test('new case recovery OTP does not supersede or replace original enrollment authority',()=>{
+ const x=env();x.lock.held=true;
+ const old=x.bind();
+ const recovery=['CHL_RECOVERY_12345678',x.req.applicantId,'E1_CASE_RECOVERY','c'.repeat(64),
+  iso(x.now,500000),1,iso(x.now,-30000),x.email,iso(x.now,-100000)];
+ x.history.push(recovery);
+ assert.equal(x.bind().evidenceSha256,old.evidenceSha256);
+ x.req.challengeId=recovery[0];x.rows.Verification=recovery;
+ assert.throws(()=>x.bind(),/SELF_REPORT_EMAIL_OTP_EVIDENCE_INVALID/);
+});

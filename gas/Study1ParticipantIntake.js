@@ -911,7 +911,7 @@ function study1ParticipantRecoverySend(input){if(typeof study1V2PublicRpcDeny_==
     body:'您的原案件查核驗證碼：'+code+'\n10分鐘內有效。僅供本次原案件唯讀查核，不授權預約、簽署或下載PDF。'});}
   catch(_){/* provider outcome unknown: never resend or reveal existence */}
   return ack;
- }finally{lock.releaseLock();}
+ }catch(_){return ack;}finally{lock.releaseLock();}
 }
 function study1ParticipantRecoveryVerify(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1ParticipantRecoveryGate_();
@@ -919,7 +919,8 @@ function study1ParticipantRecoveryVerify(input){if(typeof study1V2PublicRpcDeny_
  const lock=LockService.getScriptLock();
  if(!lock||lock.tryLock(5000)!==true)throw Error('E1_CASE_RECOVERY_LOCK_BUSY');
  try{
-  const data=study1ParticipantRecoverySource_(r,lock);
+  let data;
+  try{data=study1ParticipantRecoverySource_(r,lock);}catch(_){return reject;}
   if(!data)return reject;
   const id=study1ParticipantRecoveryChallenge_(r),state=data.state,now=new Date().toISOString();
   const found=otpFindUniqueChallenge_(state.snapshot,id);

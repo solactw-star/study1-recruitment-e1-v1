@@ -548,10 +548,10 @@ test('candidate recovery gate closes before accessing any original source',()=>{
 });
 test('existing verified applicant recovers original status with new scoped OTP, no ordinary capability or new intake',()=>{
  const x=env(),a=x.begin(),p={applicantId:a.applicantId,screeningId:a.screeningId,email:x.input.email,experiment:'E1',requestId:'REQ_FIRST_MAIL_12345678'};
- const sent=x.scope.study1ParticipantOtpSend(p);
+ const sent=x.scope.study1ParticipantSendOtp(p);
  const code=x.mail[0].body.match(/\d{8}/)[0];
  const {requestId,...otp}=p;
- const verified=x.scope.study1ParticipantOtpVerify({...otp,challengeId:sent.challengeId,code});
+ const verified=x.scope.study1ParticipantVerifyOtp({...otp,challengeId:sent.challengeId,code});
  x.scope.study1ParticipantEmailStatus(verified.emailProof);
  const original=x.records.Verification[0].slice();
  x.flags.set('STUDY1_E1_CASE_RECOVERY_APPROVED','true');x.time.now+=61000;
@@ -564,7 +564,7 @@ test('existing verified applicant recovers original status with new scoped OTP, 
  const recovery=x.records.Verification[1];
  assert.equal(recovery[2],'E1_CASE_RECOVERY');
  const newCode=x.mail[1].body.match(/\d{8}/)[0];
- assert.throws(()=>x.scope.study1ParticipantOtpVerify({...otp,challengeId:recovery[0],code:newCode}),/MISMATCH|不一致/);
+ assert.throws(()=>x.scope.study1ParticipantVerifyOtp({...otp,challengeId:recovery[0],code:newCode}),/MISMATCH|不一致/);
  x.scope.study1FormalRecoveryObservationLocked_=(id,lock)=>{
   assert.equal(id,a.applicantId);assert.equal(lock.hasLock(),true);
   return {reservations:[{reservationId:'RSV_ORIGINAL_12345678',slotId:'SLOT_ORIGINAL_12345678',status:'HELD'}],consents:[{reservationId:'RSV_ORIGINAL_12345678',state:'CONFIRMED'}]};
