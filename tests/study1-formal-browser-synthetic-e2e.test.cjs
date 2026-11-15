@@ -363,3 +363,55 @@ test('applicant readback EMAIL_VERIFIED never issues a new OTP or impersonates a
  assert.equal(s.calls.some(x=>x.method==='study1ParticipantVerifyOtp'),false);
  assert.match(s.node('status').textContent,/不能|不得|核對/);
 });
+
+test('a consumed OTP with a retained proof can converge on original Applicants after uncertain status without resending',()=>{
+ let attempt=0;
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1ParticipantEmailStatus:()=>{
+  if(++attempt===1)throw Error('APPLICANT_STATUS_WRITE_OR_READ_UNKNOWN');
+  return {emailVerified:true,eligibilitySource:'PARTICIPANT_SELF_REPORT',
+   applicationState:'SELF_REPORTED_ELIGIBLE_EMAIL_VERIFIED'};
+ }}});
+ assert.equal(s.node('formalEmailContinue').hidden,true);
+ mockEligibleE1(s);s.click('otpSend');s.node('otpInput').value='24681357';s.click('otpVerify');
+ assert.equal(s.node('step-slots').hidden,true);
+ assert.equal(s.node('formalEmailContinue').hidden,false);
+ assert.equal(s.node('otpInput').value,'');
+ assert.equal(s.node('otpInput').disabled,true);
+ assert.equal(s.click('formalEmailContinue'),true);
+ assert.equal(s.node('step-slots').hidden,false);
+ assert.equal(s.click('formalEmailContinue'),false);
+ assert.equal(s.click('otpVerify'),false);assert.equal(s.click('otpSend'),false);
+ const reads=s.calls.filter(x=>x.method==='study1ParticipantEmailStatus');
+ assert.equal(reads.length,2);assert.deepEqual(reads[0].request,reads[1].request);
+ for(const method of ['study1ParticipantBegin','study1ParticipantSendOtp','study1ParticipantVerifyOtp','study1FormalV05Slots'])
+  assert.equal(s.calls.filter(x=>x.method===method).length,1,method);
+});
+test('no proof or unconfirmed original status never opens slots or creates new OTP',()=>{
+ for(const missing of [true,false]){
+  const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+   {serverOverrides:missing?{study1ParticipantVerifyOtp:()=>{throw Error('OTP_UNKNOWN')}}:
+    {study1ParticipantEmailStatus:()=>({emailVerified:false})}});
+  mockEligibleE1(s);s.click('otpSend');s.node('otpInput').value='24681357';s.click('otpVerify');
+  assert.equal(s.click('formalEmailContinue'),!missing);
+  assert.equal(s.node('step-slots').hidden,true);
+  assert.equal(s.calls.filter(x=>x.method==='study1FormalV05Slots').length,0);
+  assert.equal(s.calls.filter(x=>x.method==='study1ParticipantVerifyOtp').length,1);
+  assert.equal(s.calls.filter(x=>x.method==='study1ParticipantSendOtp').length,1);
+ }
+});
+test('temporary E1 slot inventory failure can reload original inventory without repeating applicant or OTP writes',()=>{
+ let n=0;
+ const s=simulate({ready:true,experiment:'E1',siteKey:'OFFLINE_REVIEWED_SITEKEY_ABCDEFGHIJK'},
+ {serverOverrides:{study1FormalV05Slots:()=>{if(++n===1)throw Error('SLOT_READ_UNAVAILABLE');return {experiment:'E1',slots:[]};}}});
+ mockEligibleE1(s);s.click('otpSend');s.node('otpInput').value='24681357';s.click('otpVerify');
+ assert.equal(s.node('step-slots').hidden,false);
+ assert.equal(s.node('hold').disabled,true);
+ assert.equal(s.node('formalSlotsRetry').hidden,false);
+ assert.equal(s.click('formalSlotsRetry'),true);
+ assert.equal(s.node('formalSlotsRetry').hidden,true);
+ assert.equal(s.node('hold').disabled,true);
+ assert.equal(s.calls.filter(x=>x.method==='study1FormalV05Slots').length,2);
+ for(const method of ['study1ParticipantBegin','study1ParticipantSendOtp','study1ParticipantVerifyOtp','study1ParticipantEmailStatus'])
+  assert.equal(s.calls.filter(x=>x.method===method).length,1,method);
+});

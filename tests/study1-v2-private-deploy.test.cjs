@@ -452,13 +452,14 @@ test('one-time release authorization binds actual parent, exact commit message, 
   GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',V2_ONCE_RELEASE:'1'};
  const e={before:d.RELEASE_PARENT,after:env.GITHUB_SHA,ref:'refs/heads/main',forced:false,deleted:false,created:false,
   repository:{full_name:d.REPO},head_commit:{id:env.GITHUB_SHA,message:d.RELEASE_MESSAGE},commits:[{id:env.GITHUB_SHA}]};
- assert.doesNotThrow(()=>d.oneShotInvocation(env,e));
+ if(d.TARGET===d.RELEASE_TARGET)assert.doesNotThrow(()=>d.oneShotInvocation(env,e));
+ else assert.throws(()=>d.oneShotInvocation(env,e),/reviewed source identity mismatch/);
  for(const c of [{before:'f'.repeat(40)},{after:'e'.repeat(40)},{forced:true},{deleted:true},{created:true},
   {head_commit:{...e.head_commit,message:'later routine change'}},{commits:[{},{}]},{repository:{full_name:'other/repo'}}])
   assert.throws(()=>d.oneShotInvocation(env,{...e,...c}),/authorization event mismatch/);
  for(const c of [{GITHUB_RUN_ATTEMPT:'2'},{GITHUB_REF:'refs/heads/other'},{GITHUB_EVENT_NAME:'workflow_dispatch'},{V2_ONCE_RELEASE:''}])
   assert.throws(()=>d.oneShotInvocation({...env,...c},e),/first attempt/);
- assert.equal(d.RELEASE_TARGET,d.TARGET);
+ assert.match(d.RELEASE_TARGET,/^[a-f0-9]{64}$/);
 });
 test('authorized one-time job preserves separate encrypted artifacts before each mutation and only GETs on failure',()=>{
  const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
@@ -513,6 +514,11 @@ test('version 2 continuation only accepts its exact new event; original stages c
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'v2-resume-'));e.GITHUB_EVENT_PATH=path.join(dir,'event.json');
  fs.writeFileSync(e.GITHUB_EVENT_PATH,JSON.stringify(event));
  try{
+  if(d.TARGET!==d.RELEASE_TARGET){
+   assert.throws(()=>d.resumeEnv(e),/reviewed source identity mismatch/);
+   assert.throws(()=>d.resumeEnv({...e,GITHUB_RUN_ATTEMPT:'2'}),/first attempt/);
+   assert.throws(()=>d.oneShotInvocation(e,{...event,before:d.RELEASE_PARENT}),/authorization event mismatch/);
+  }else{
   const next=d.resumeEnv(e);
   assert.equal(next.PRIVATE_VERSION,'2');assert.equal(next.EXPECTED_INVENTORY_SHA256,d.RESUME_FP);
   assert.doesNotThrow(()=>d.invocation(next,'deploy'));
@@ -521,6 +527,7 @@ test('version 2 continuation only accepts its exact new event; original stages c
   await assert.rejects(d.oneShotPhase('head-prepare',next,{},fakeApi().api,null,()=>{}),/cannot invoke original multi-stage/);
   assert.throws(()=>d.resumeEnv({...e,GITHUB_RUN_ATTEMPT:'2'}),/first attempt/);
   assert.throws(()=>d.oneShotInvocation(e,{...event,before:d.RELEASE_PARENT}),/authorization event mismatch/);
+  }
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
  const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
  const job=wf.slice(wf.indexOf('  private-version2-resume:'),wf.indexOf('  private-approved-once:'));

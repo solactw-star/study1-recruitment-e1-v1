@@ -104,7 +104,8 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
 <div class="actionrow"><button type="button" id="otpSend">寄送電子郵件驗證碼</button></div>
 <div id="otpInputWrap" hidden>
 <label for="otpInput" class="field">請輸入八位驗證碼</label><input id="otpInput" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="請輸入 8 位數字">
-<div class="actionrow"><button id="otpVerify" type="button">驗證並選擇時段</button><button id="otpPaste" type="button" class="ghost" hidden disabled>未開放自動輸入</button></div></div></section>
+<div class="actionrow"><button id="otpVerify" type="button">驗證並選擇時段</button><button id="otpPaste" type="button" class="ghost" hidden disabled>未開放自動輸入</button></div></div>
+<button id="formalEmailContinue" type="button" class="ghost" hidden disabled>重新核對已驗證信箱並繼續（不重寄、不重驗驗證碼）</button></section>
 <section class="step" id="step-slots" hidden><span class="tag">STEP 04 · 預約時間</span><h2>選擇方便參與的時段</h2><p class="lead">正式 E1 時段須由伺服器核定；未開放時不提供預約。先選擇臺灣日期，再選擇當日場次；提交時原GAS仍會重新檢查容量及研究安全限制。</p>
 <div class="v05Calendar" aria-label="核定場次月份與日期">
  <div class="v05MonthBar"><button type="button" class="ghost" id="v05Prev" disabled>上一個有時段的月份</button><strong id="v05Month" aria-live="polite">日期尚未核實</strong><button type="button" class="ghost" id="v05Next" disabled>下一個有時段的月份</button></div>
@@ -113,7 +114,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
 <p id="v05Status" class="help" role="status" aria-live="polite">請先核對日期來源。</p>
 <div id="v05Choices" class="v05SlotCards" role="group" aria-label="當日可預約的時段"></div>
 <label class="field" for="slot">當日核定場次（可使用鍵盤與選單操作）</label><select id="slot"></select>
-<div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button></div>
+<div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost" hidden disabled>重新載入正式場次</button></div>
 <div id="v08WaitBox" class="box" aria-label="純TEST候補順位與有效期限">
  <strong>E1 額滿候補與遞補回覆</strong>
  <p class="help">只可在原GAS額滿的未來時段排候補；順位依入列順序，需OWNER人工處理。十分鐘邀請不寄信、不自動成立預約；逾期不得接受。</p>
@@ -203,7 +204,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
+ emailProof:null,emailStatusConfirmed:false,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -298,6 +299,7 @@ const sampleCode=document.querySelector('#otpInputWrap > .box');
 if(sampleCode)sampleCode.hidden=true;
 if(el('otpPaste'))el('otpPaste').hidden=true;
 if(el('otpInputWrap'))el('otpInputWrap').hidden=true;
+for(const id of ['formalEmailContinue','formalSlotsRetry']){el(id).hidden=true;el(id).disabled=true;}
 const otpLead=document.querySelector('#step-otp .lead');
 if(otpLead)otpLead.textContent='系統將寄送八位數電子郵件驗證碼至您剛提供的電子郵件地址，10分鐘內有效。';
 const slotLead=document.querySelector('#step-slots .lead');
@@ -447,24 +449,47 @@ el('otpVerify').addEventListener('click',()=>{
    status('OTP 已核實但信箱憑證不完整；可能已一次性使用，請勿重複驗證。');
    return;
   }
-  // OTP F:G has been consumed. Even if the next Applicants readback fails,
-  // do not replay the one-time OTP; retain proof in memory for staff review.
+  // Keep the actual server-issued proof only in this page's memory.
+  // Reconciliation below revalidates original Applicants and Verification
+  // under ScriptLock; it never calls OTP verification or sends another mail.
   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
+  el('otpInput').value='';el('otpInput').disabled=true;
   state.emailProof=result.emailProof;
-  rpc('study1ParticipantEmailStatus',result.emailProof,statusResult=>{
-   if(!statusResult||statusResult.emailVerified!==true||
-      statusResult.applicationState!=='SELF_REPORTED_ELIGIBLE_EMAIL_VERIFIED'||
-      statusResult.eligibilitySource!=='PARTICIPANT_SELF_REPORT'){
-    status('OTP 已一次性使用，但原申請狀態尚未核實；請勿重複驗證，聯絡研究團隊。');return;
-   }
-   show('slots');
-   status('資格依本人勾選自陳，Email OTP已核對；以下場次由正式E1來源提供，暫留不等於完成研究同意。');
-   formalV05Read_();
-  },()=>status('OTP 已一次性使用；原申請狀態回讀未知，請勿重複驗證碼或寄送。'));
+  formalEmailContinue_(result);
  },()=>{
   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;
   status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');
  });
+});
+function formalEmailContinue_(result){
+ // This is a guarded, convergent operation, NOT a repeat of one-use OTP.
+ // The existing server validates HMAC/expiry, original rows and lock, and
+ // writes Applicants only if PENDING_EMAIL; EMAIL_VERIFIED is a no-op.
+ if(!state.ready||state.busy||state.emailStatusConfirmed||!state.otpVerifyUnknown||
+    !state.emailProof||!result||result.emailProof!==state.emailProof)return;
+ const button=el('formalEmailContinue');button.disabled=true;button.hidden=true;
+ const failed=message=>{
+  button.hidden=false;button.disabled=false;
+  status(message+' 可使用本頁重新核對原申請；不重新寄送或驗證 OTP。');
+ };
+ rpc('study1ParticipantEmailStatus',result.emailProof,statusResult=>{
+   if(!statusResult||statusResult.emailVerified!==true||
+      statusResult.applicationState!=='SELF_REPORTED_ELIGIBLE_EMAIL_VERIFIED'||
+      statusResult.eligibilitySource!=='PARTICIPANT_SELF_REPORT'){
+    failed('OTP 已一次性使用，但原申請狀態尚未核實。');return;
+   }
+   state.emailStatusConfirmed=true;
+   show('slots');
+   status('資格依本人勾選自陳，Email OTP已核對；以下場次由正式E1來源提供，暫留不等於完成研究同意。');
+   formalV05Read_();
+ },()=>failed('OTP 已一次性使用；原申請狀態回讀未知。'));
+}
+el('formalEmailContinue').addEventListener('click',()=>{
+ if(!el('formalEmailContinue').hidden)formalEmailContinue_({emailProof:state.emailProof});
+});
+el('formalSlotsRetry').addEventListener('click',()=>{
+ if(!el('formalSlotsRetry').hidden&&state.emailStatusConfirmed&&!state.busy&&
+    !state.pendingHoldRequestId&&!state.activeBooking)formalV05Read_();
 });
 if(typeof google!=='undefined'&&google.script&&google.script.run){
  google.script.run.withFailureHandler(()=>{
@@ -584,16 +609,26 @@ function formalV05Choice_(){
    '請先選擇日期與場次。';}
 }
 function formalV05Read_(){
- if(!state.emailProof)return;
+ if(!state.emailProof||!state.emailStatusConfirmed||state.busy)return;
+ const retry=el('formalSlotsRetry');retry.hidden=true;retry.disabled=true;
+ el('hold').disabled=true;
+ const failed=()=>{
+  // Do not allow selection from a previous successful inventory.
+  state.slots=[];state.chosenDay=null;formalV05Draw_();
+  if(!state.pendingHoldRequestId&&!state.activeBooking){
+   retry.hidden=false;retry.disabled=false;
+  }
+  status('正式E1時段來源尚未通過核對，暫不提供預約。可重新載入場次，毋須重新申請或驗證信箱。');
+ };
  rpc('study1FormalV05Slots',state.emailProof,result=>{
   if(!result||result.experiment!=='E1'||!Array.isArray(result.slots)){
-   status('正式E1時段來源尚未通過核對，暫不提供預約。');return;
+   failed();return;
   }
   state.slots=result.slots;formalV05Draw_();
   status(result.slots.length?
    '請選擇經核對的E1日期及場次；名額以送出時伺服器重新核實為準。':
    '目前沒有已核實可選的E1場次。');
- });
+ },failed);
 }
 
 /* §70-S.21: original FORMAL Step 05/06 consent LAST; never use Demo signature.
