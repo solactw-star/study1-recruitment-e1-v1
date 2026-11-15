@@ -333,7 +333,7 @@ test('POST versions/deployments never retry even when server says 503 or 429',as
   assert.deepEqual(waits,[]);
  }
 });
-test('only automatic inventory can run on main push; mutation job stays manual and cannot upload code',()=>{
+test('ordinary main pushes audit only; manual and one-time bound release jobs remain isolated',()=>{
  const script=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-private-deploy.cjs'),'utf8');
  const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
  assert.match(wf,/workflow_dispatch:/);
@@ -445,4 +445,30 @@ test('read-only API rejects project POST before network; OAuth token exchange is
  await assert.rejects(api.createDeployment(1,'test'),/read-only inventory cannot mutate GAS/);
  assert.equal(calls.length,2);
  assert.equal(calls[1][1],'GET');
+});
+
+test('one-time release authorization binds actual parent, exact commit message, candidate, repository and first attempt',()=>{
+ const env={GITHUB_SHA:'d'.repeat(40),GITHUB_RUN_ID:'987',GITHUB_RUN_ATTEMPT:'1',
+  GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',V2_ONCE_RELEASE:'1'};
+ const e={before:d.RELEASE_PARENT,after:env.GITHUB_SHA,ref:'refs/heads/main',forced:false,deleted:false,created:false,
+  repository:{full_name:d.REPO},head_commit:{id:env.GITHUB_SHA,message:d.RELEASE_MESSAGE},commits:[{id:env.GITHUB_SHA}]};
+ assert.doesNotThrow(()=>d.oneShotInvocation(env,e));
+ for(const c of [{before:'f'.repeat(40)},{after:'e'.repeat(40)},{forced:true},{deleted:true},{created:true},
+  {head_commit:{...e.head_commit,message:'later routine change'}},{commits:[{},{}]},{repository:{full_name:'other/repo'}}])
+  assert.throws(()=>d.oneShotInvocation(env,{...e,...c}),/authorization event mismatch/);
+ for(const c of [{GITHUB_RUN_ATTEMPT:'2'},{GITHUB_REF:'refs/heads/other'},{GITHUB_EVENT_NAME:'workflow_dispatch'},{V2_ONCE_RELEASE:''}])
+  assert.throws(()=>d.oneShotInvocation({...env,...c},e),/first attempt/);
+ assert.equal(d.RELEASE_TARGET,d.TARGET);
+});
+test('authorized one-time job preserves separate encrypted artifacts before each mutation and only GETs on failure',()=>{
+ const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
+ const job=wf.slice(wf.indexOf('  private-approved-once:'));
+ assert.ok(job.includes(d.RELEASE_PARENT)&&job.includes(d.RELEASE_MESSAGE)&&job.includes('github.run_attempt == 1'));
+ assert.ok(job.includes('needs: automatic-inventory'));
+ for(const p of ['head','version','deploy']){
+  const pre=job.indexOf('once-'+p+'-prepare'),artifact=job.indexOf('name: study1-v2-once-'+p+'-'),apply=job.indexOf('once-'+p+'-apply');
+  assert.ok(pre>0&&artifact>pre&&apply>artifact,p);
+ }
+ assert.match(job,/if: failure\(\)[\s\S]*?\.cjs auto-audit/);
+ assert.doesNotMatch(job,/rerun|clasp push|script\.run/i);
 });

@@ -13,6 +13,11 @@ const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
 const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
 const TARGET=core.PRIVATE_TARGET;
+// One authorized execution only, bound to the reviewed parent and push event.
+const RELEASE_PARENT='50d3d832fe73d83b58b71c4195e6540c9cf5ee45';
+const RELEASE_MESSAGE='release(v2): authorized one-time private E1 OWNER launch 2026-11-15';
+const RELEASE_TARGET='b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
+const RELEASE_BASE_FP='4d85ca4609ccab451221012b454957d80d605603602cb283addff8d0e6846d2e';
 const VERSION_CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_VERSION';
 const CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY';
 const assert=(ok,message)=>{if(!ok)throw Error('V2_PRIVATE_BLOCKED: '+message)};
@@ -21,7 +26,10 @@ const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
 function invocation(env,mode){
  assert(['audit','version','deploy'].includes(mode),'unknown mode');
- assert(env.GITHUB_REPOSITORY===REPO && env.GITHUB_REF==='refs/heads/main' &&
+ if(env.V2_ONCE_RELEASE==='1'){
+  oneShotInvocation(env);
+  assert(mode==='version'||mode==='deploy','one-time authorization only for these mutation stages');
+ }else assert(env.GITHUB_REPOSITORY===REPO && env.GITHUB_REF==='refs/heads/main' &&
   env.GITHUB_EVENT_NAME==='workflow_dispatch','V2 manual main workflow only');
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
   env.REVIEWED_SHA===env.GITHUB_SHA,'exact reviewed GitHub HEAD required');
@@ -397,7 +405,7 @@ async function deploy(api,env,assertMain=latestMain,sleep){
 // Store only authenticated ciphertext off-runner; bind it to exact operation.
 function releaseBackupPath(env){
  assert(env.RUNNER_TEMP&&/^[0-9]+$/.test(env.GITHUB_RUN_ID||''),'release backup run identity missing');
- return path.join(env.RUNNER_TEMP,'study1-v2-private-prewrite-'+env.GITHUB_RUN_ID+'.json.enc');
+ return path.join(env.RUNNER_TEMP,'study1-v2-private-prewrite-'+env.GITHUB_RUN_ID+(env.V2_ONCE_RELEASE==='1'?'-'+env.PRIVATE_MODE:'')+'.json.enc');
 }
 function releaseBackupAad(env){
  return [REPO,SID,env.GITHUB_SHA,env.GITHUB_RUN_ID,env.PRIVATE_MODE,
@@ -442,8 +450,127 @@ async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
  const api=await apiFactory(c,undefined,undefined,undefined,true);
  return audit(api);
 }
+function oneShotInvocation(env,event){
+ assert(env.V2_ONCE_RELEASE==='1'&&env.GITHUB_REPOSITORY===REPO&&env.GITHUB_REF==='refs/heads/main'&&
+  env.GITHUB_EVENT_NAME==='push'&&env.GITHUB_RUN_ATTEMPT==='1','one-time release requires trusted main push and first attempt');
+ const e=event||JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));
+ assert(e.before===RELEASE_PARENT&&e.after===env.GITHUB_SHA&&e.ref==='refs/heads/main'&&
+  e.head_commit?.id===env.GITHUB_SHA&&e.head_commit?.message===RELEASE_MESSAGE&&
+  e.forced===false&&e.deleted===false&&e.created===false&&e.commits?.length===1&&
+  e.repository?.full_name===REPO,'one-time release authorization event mismatch');
+ assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')&&/^[0-9]+$/.test(env.GITHUB_RUN_ID||'')&&
+  TARGET===RELEASE_TARGET,'one-time reviewed source identity mismatch');
+}
+const ONCE_PHASES=['head-prepare','head-apply','version-prepare','version-apply','deploy-prepare','deploy-apply'];
+function oncePath(env,phase){
+ assert(env.RUNNER_TEMP&&ONCE_PHASES.includes(phase),'invalid release phase path');
+ return path.join(env.RUNNER_TEMP,'study1-v2-once-'+env.GITHUB_RUN_ID+'-'+phase+'.json');
+}
+function writeOnceStage(env,phase,data){
+ fs.writeFileSync(oncePath(env,phase),JSON.stringify({sha:env.GITHUB_SHA,run:env.GITHUB_RUN_ID,phase,...data}),{flag:'wx',mode:0o600});
+}
+function readOnceStage(env,phase){
+ const data=JSON.parse(fs.readFileSync(oncePath(env,phase),'utf8'));
+ assert(data.sha===env.GITHUB_SHA&&data.run===env.GITHUB_RUN_ID&&data.phase===phase,'one-time release stage identity mismatch');
+ return data;
+}
+function onceEnv(env,mode,s,version){
+ return {...env,REVIEWED_SHA:env.GITHUB_SHA,REVIEWED_TARGET_SHA256:TARGET,PRIVATE_MODE:mode,
+  PRIVATE_VERSION:version?String(version):'',EXPECTED_INVENTORY_SHA256:s.fp,
+  SOURCE_PROFILE:'private_e1_management',EXPECTED_REMOTE_SHA256:s.headSha,
+  CONFIRMATION:mode==='version'?VERSION_CONFIRM:mode==='deploy'?CONFIRM:core.PRIVATE_CONFIRM,SYNC_MODE:'apply'};
+}
+async function oneShotPhase(phase,env,c,api,headApi,assertMain=latestMain){
+ oneShotInvocation(env);assertMain(env);
+ assert(ONCE_PHASES.includes(phase),'unknown one-time phase');
+ assert(!fs.existsSync(oncePath(env,phase)),'one-time phase already recorded; no rerun');
+ const files=reviewedLocal();
+ const now=await inventory(api);
+ requirePrivateHeadBaseline(now);
+ if(phase==='head-prepare'){
+  assert(now.fp===RELEASE_BASE_FP&&now.headSha===HISTORICAL_TARGET,'remote baseline differs from specifically reviewed audit');
+  assert(!targetVersions(now).length,'candidate already has a version; stop for reconciliation');
+  const e=onceEnv(env,'head',now);
+  await core.prepare(headApi,files,c,e);
+  writeOnceStage(env,phase,{fp:now.fp,headSha:now.headSha,stable:now.stable});
+  report('V2_ONCE_HEAD_PREPARED=true');return;
+ }
+ if(phase==='head-apply'){
+  const prev=readOnceStage(env,'head-prepare');
+  assert(now.fp===prev.fp&&now.headSha===HISTORICAL_TARGET&&now.fp===RELEASE_BASE_FP,'remote changed after initial backup');
+  const e=onceEnv(env,'head',now);
+  await core.apply(headApi,files,c,e,async()=>{
+   const pre=await inventory(api);requirePrivateHeadBaseline(pre);
+   assert(pre.fp===prev.fp,'HEAD prewrite inventory raced');
+   assertMain(env);
+  },async()=>{
+   const after=await inventory(api);requirePrivateHeadBaseline(after);checkHead(after.head);
+   assert(after.stable===prev.stable,'immutable inventory changed during HEAD sync');
+  });
+  const after=await inventory(api);requirePrivateHeadBaseline(after);checkHead(after.head);
+  assert(after.stable===prev.stable,'immutable inventory changed after HEAD sync');
+  writeOnceStage(env,phase,{fp:after.fp,headSha:after.headSha,stable:after.stable});
+  report('V2_ONCE_HEAD_VERIFIED=true');return;
+ }
+ checkHead(now.head);
+ if(phase==='version-prepare'){
+  const prev=readOnceStage(env,'head-apply');
+  assert(now.fp===prev.fp&&now.stable===prev.stable,'remote changed after HEAD verification');
+  assert(!targetVersions(now).length,'unexpected candidate version exists; no new mutation');
+  const e=onceEnv(env,'version',now);
+  await prepareReleaseBackup(api,c,e,assertMain);
+  writeOnceStage(env,phase,{fp:now.fp,headSha:now.headSha,stable:now.stable});
+  return;
+ }
+ if(phase==='version-apply'){
+  const prev=readOnceStage(env,'version-prepare');
+  assert(now.fp===prev.fp&&now.stable===prev.stable,'remote changed after version backup');
+  const e=onceEnv(env,'version',now);
+  verifyReleaseBackup(c,e);
+  const v=await createImmutableVersion(api,e,assertMain);
+  assert(v.createdNew,'unexpected orphan reuse in initial one-time release');
+  const after=await settleVersionInventory(api,now,v.version,true);
+  requirePrivateHeadBaseline(after);
+  writeOnceStage(env,phase,{fp:after.fp,headSha:after.headSha,stable:after.stable,version:v.version});
+  report('V2_ONCE_VERSION_VERIFIED='+v.version);return;
+ }
+ if(phase==='deploy-prepare'){
+  const prev=readOnceStage(env,'version-apply');
+  assert(now.fp===prev.fp&&now.stable===prev.stable,'remote changed after version verification');
+  const e=onceEnv(env,'deploy',now,prev.version);
+  await prepareReleaseBackup(api,c,e,assertMain);
+  writeOnceStage(env,phase,{fp:now.fp,headSha:now.headSha,stable:now.stable,version:prev.version});
+  return;
+ }
+ const prev=readOnceStage(env,'deploy-prepare');
+ assert(now.fp===prev.fp&&now.stable===prev.stable,'remote changed after deployment backup');
+ const e=onceEnv(env,'deploy',now,prev.version);
+ verifyReleaseBackup(c,e);
+ const v=await deploy(api,e,assertMain);
+ const after=await settleDeploymentInventory(api,now,v.id);
+ requirePrivateHeadBaseline(after);
+ const newDep=normalizedDeployments(after.deps).find(d=>d.id===v.id);
+ assert(newDep&&newDep.version===prev.version&&newDep.points.some(p=>p.web?.access==='MYSELF'&&p.web.executeAs==='USER_DEPLOYING'),'final private deployment proof missing');
+ assert(JSON.stringify(normalizedDeployments(after.deps).filter(d=>d.id!==v.id))===JSON.stringify(normalizedDeployments(now.deps)),'existing deployments changed after release');
+ assert(after.proofs.some(x=>x.version===prev.version&&x.sha===TARGET&&x.access==='MYSELF'),'final immutable source proof missing');
+ writeOnceStage(env,phase,{fp:after.fp,headSha:after.headSha,stable:after.stable,version:v.version});
+ summarize(after);
+ report('V2_ONCE_RELEASE_VERIFIED=true');report('V2_ONCE_RELEASE_VERSION='+v.version);
+ report('V2_ONCE_RELEASE_GAS_TARGET_SHA256='+TARGET);
+ report('V2_ONCE_RELEASE_NO_FORMAL_DATA_OR_INTAKE=true');
+}
+async function oneShotMain(phase,env){
+ oneShotInvocation(env);latestMain(env);
+ assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
+ const c=core.credentials(env.V2_GAS_CLASPRC_JSON);
+ const api=await makeApi(c,undefined,undefined,undefined,!['version-apply','deploy-apply'].includes(phase));
+ const headApi=['head-prepare','head-apply'].includes(phase)?await core.apiFromCredentials(c):null;
+ await oneShotPhase(phase,env,c,api,headApi);
+}
+
 async function main(){
  const phase=process.argv[2];
+ if(phase?.startsWith('once-')){await oneShotMain(phase.slice(5),process.env);return;}
  if(phase==='auto-audit'){await automaticAudit(process.env);return;}
  const mode=phase==='prepare'?process.env.PRIVATE_MODE:phase;
  invocation(process.env,mode);
@@ -464,7 +591,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,
