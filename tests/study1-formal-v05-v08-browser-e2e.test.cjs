@@ -88,27 +88,41 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
    if(rows.length!==1)return {resolved:false,status:'UNKNOWN'};
    return {resolved:true,status:rows[0].status,reservationId:rows[0].reservationId,slotId:rows[0].slotId};
   },
+  study1FormalV08Outcome:q=>{
+   const old=reservations.find(x=>x.reservationId===q.reservationId);
+   const r=['JOIN','MOVE'].includes(q.action)?reservations.find(x=>x.requestId===q.requestId):old;
+   const expected=q.action==='JOIN'?'WAITLISTED':q.action==='CANCEL'?'CANCELLED':'HELD';
+   const base={readOnly:true,experiment:'E1',action:q.action,requestId:q.requestId,
+    originalReservationId:q.reservationId,slotId:q.slotId,newSlotId:q.newSlotId};
+   if(!r||r.status!==expected||(q.action==='MOVE'&&old.status!=='CANCELLED'))
+    return {...base,resolved:false,status:'UNKNOWN'};
+   return {...base,resolved:true,status:expected,reservation:{...r},evidence:
+    ['JOIN','MOVE'].includes(q.action)?'ORIGINAL_REQUEST_KEY':'ORIGINAL_ROW_STATE_ONLY'};
+  },
   study1FormalWaitlistJoin:input=>{
-   const r={reservationId:'RSV_SYNTH_'+uuid(),slotId:input.slotId,status:'WAITLISTED',holdUntilUtc:''};
-   reservations.push(r);return {joined:true,reservationId:r.reservationId};
+   const r={reservationId:'RSV_SYNTH_'+uuid(),slotId:input.slotId,status:'WAITLISTED',holdUntilUtc:'',requestId:input.requestId};
+   reservations.push(r);if(options.joinLost)throw Error('JOIN_RESPONSE_LOST');return {joined:true,reservationId:r.reservationId};
   },
   study1FormalWaitlistClaim:input=>{
    const r=reservations.find(x=>x.reservationId===input.reservationId);
    if(!r||r.status!=='WAITLISTED')return {held:false};
    r.status='HELD';r.holdUntilUtc=new Date(now+600000).toISOString();
+   if(options.claimLost)throw Error('CLAIM_RESPONSE_LOST');
    return {held:true,reservationId:r.reservationId};
   },
   study1FormalCancel:input=>{
    const r=reservations.find(x=>x.reservationId===input.reservationId);
    if(!r)return {cancelled:false};
-   r.status='CANCELLED';return {cancelled:true};
+   r.status='CANCELLED';if(options.cancelLost)throw Error('CANCEL_RESPONSE_LOST');return {cancelled:true};
   },
   study1FormalMove:input=>{
    const r=reservations.find(x=>x.reservationId===input.reservationId);
    if(!r||r.status!=='HELD')return {moved:false};
    r.status='CANCELLED';
+   if(options.movePartial)throw Error('MOVE_PARTIAL');
    reservations.push({reservationId:'RSV_SYNTH_'+uuid(),slotId:input.newSlotId,
-    status:'HELD',holdUntilUtc:r.holdUntilUtc});
+    status:'HELD',holdUntilUtc:r.holdUntilUtc,requestId:input.requestId});
+   if(options.moveLost)throw Error('MOVE_RESPONSE_LOST');
    return {moved:true};
   }
  };
@@ -503,4 +517,33 @@ test('E1 malformed first Reservations read remains UNKNOWN and can recover throu
  assert.equal(h.click('formalHoldRetry'),true);
  assert.equal(h.node('step-confirm').hidden,false);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+});
+
+test('V08 browser lost MOVE reply resolves exact pair, partial MOVE leaves only read-only retry',()=>{
+ for(const partial of [false,true]){
+  const h=simulate(undefined,false,false,'none','none',partial?{movePartial:true}:{moveLost:true});
+  h.enter();h.click('hold');
+  const old=h.findButton('改至選定E1場次');assert.ok(old);old.handlers.get('click')();
+  assert.equal(h.calls.filter(x=>x.name==='study1FormalMove').length,1);
+  old.handlers.get('click')();assert.equal(h.calls.filter(x=>x.name==='study1FormalMove').length,1);
+  if(partial){
+   assert.match(h.node('status').textContent,/UNKNOWN/);
+   const retry=h.findButton('唯讀重新核對原異動');assert.ok(retry);retry.handlers.get('click')();
+   const reads=h.calls.filter(x=>x.name==='study1FormalV08Outcome');
+   assert.equal(reads.length,2);assert.deepEqual(reads[0].payload,reads[1].payload);
+   assert.equal(h.findButton('核對本人暫留並進入最後知情同意'),null);
+   assert.equal(h.click('hold'),false);
+  }else assert.equal(h.findButton('核對本人暫留並進入最後知情同意')!==null,true);
+ }
+});
+test('V08 browser lost JOIN, CLAIM, CANCEL replies observe original records without replay',()=>{
+ const h=simulate('full',false,false,'none','none',{joinLost:true,claimLost:true,cancelLost:true});h.enter();h.click('hold');
+ const claim=h.findButton('按候補順位檢查可否領取名額');assert.ok(claim);claim.handlers.get('click')();
+ claim.handlers.get('click')();
+ assert.equal(h.reservations[0].status,'HELD');
+ const cancel=h.findButton('取消此暫留／候補');assert.ok(cancel);cancel.handlers.get('click')();cancel.handlers.get('click')();
+ for(const name of ['study1FormalWaitlistJoin','study1FormalWaitlistClaim','study1FormalCancel'])
+  assert.equal(h.calls.filter(x=>x.name===name).length,1);
+ assert.equal(h.reservations.length,1);assert.equal(h.reservations[0].status,'CANCELLED');
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalV08Outcome').length,3);
 });

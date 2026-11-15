@@ -675,3 +675,37 @@ test('lost CAS response after original Reservations CONFIRMED is resolved by rea
  assert.equal(h.mutations.filter(x=>x.name==='Reservations'&&x.method==='set').length,
   writesBefore+1);
 });
+
+test('V08 read-only exact MOVE outcome resolves committed pair; partial cancellation never resolves or writes',()=>{
+ for(const partial of [false,true]){
+  const h=harness(),a=h.proof(h.person('A')),held=h.holdSlot(a,h.S1);
+  const p={emailProof:a,reservationId:held.reservationId,newSlotId:h.S2,requestId:'REQ_MOVE_OUTCOME_12345678'};
+  if(partial){h.failAppend=true;assert.throws(()=>h.ctx.study1FormalMove(p),/PARTIAL/);}
+  else assert.equal(h.ctx.study1FormalMove(p).moved,true);
+  const n=h.mutations.length, q={...p,action:'MOVE',slotId:h.S1};
+  const r=h.ctx.study1FormalV08Outcome(q);
+  assert.equal(r.resolved,!partial);
+  if(partial)assert.equal(r.reason,'PARTIAL_OR_UNKNOWN');
+  else assert.equal(r.evidence,'ORIGINAL_REQUEST_KEY');
+  assert.equal(h.ctx.study1FormalV08Outcome({...q,requestId:'REQ_OTHER_MOVE_12345678'}).resolved,false);
+  assert.equal(h.mutations.length,n);
+ }
+});
+test('V08 JOIN exact key, CLAIM/CANCEL original row state only, and cross-applicant denial',()=>{
+ const h=harness(),a=h.proof(h.person('A')),b=h.proof(h.person('B'));
+ const held=h.holdSlot(a,h.S1),p={emailProof:b,slotId:h.S1,requestId:'REQ_JOIN_OUTCOME_12345678'};
+ const joined=h.ctx.study1FormalWaitlistJoin(p);
+ const q={...p,action:'JOIN',reservationId:'',newSlotId:''};
+ assert.equal(h.ctx.study1FormalV08Outcome(q).evidence,'ORIGINAL_REQUEST_KEY');
+ assert.equal(h.ctx.study1FormalV08Outcome({...q,emailProof:a}).resolved,false);
+ h.ctx.study1FormalCancel({emailProof:a,reservationId:held.reservationId,requestId:'REQ_CANCEL_OUTCOME_12345678'});
+ const claim={emailProof:b,reservationId:joined.reservationId,requestId:'REQ_CLAIM_OUTCOME_12345678'};
+ h.ctx.study1FormalWaitlistClaim(claim);
+ const n=h.mutations.length;
+ const result=h.ctx.study1FormalV08Outcome({...claim,action:'CLAIM',slotId:h.S1,newSlotId:''});
+ assert.equal(result.evidence,'ORIGINAL_ROW_STATE_ONLY');assert.equal(result.status,'HELD');
+ const cancel={emailProof:a,reservationId:held.reservationId,requestId:'REQ_CANCEL_OUTCOME_12345678',action:'CANCEL',slotId:h.S1,newSlotId:''};
+ assert.equal(h.ctx.study1FormalV08Outcome(cancel).status,'CANCELLED');
+ assert.throws(()=>h.ctx.study1FormalV08Outcome({...cancel,emailProof:b}),/NOT_OWNED/);
+ assert.equal(h.mutations.length,n);
+});

@@ -334,6 +334,70 @@ function study1FormalHoldOutcome(input){if(typeof study1V2PublicRpcDeny_==='func
    holdUntilUtc:r[4],asOfUtc:ctx.nowUtc};
  });
 }
+
+/** V08 reconciliation is strictly read-only. MOVE/JOIN carry a persisted HMAC
+ * key; CANCEL/CLAIM retain the original row key, so only current state can
+ * be observed, not causality of the particular request. */
+function study1FormalV08Outcome(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ if(!input||typeof input!=='object'||Array.isArray(input)||
+    Object.keys(input).sort().join(',')!=='action,emailProof,newSlotId,requestId,reservationId,slotId'||
+    !['JOIN','CLAIM','CANCEL','MOVE'].includes(input.action))
+  throw Error('V08_OUTCOME_REQUEST_INVALID');
+ study1FormalKey_(input.requestId);study1BindingId_(input.slotId);
+ if(input.action==='JOIN'){
+  if(input.reservationId!==''||input.newSlotId!=='')throw Error('V08_OUTCOME_REQUEST_INVALID');
+ }else{
+  study1BindingId_(input.reservationId);
+  if(input.action==='MOVE'){
+   study1BindingId_(input.newSlotId);
+   if(input.newSlotId===input.slotId)throw Error('V08_OUTCOME_REQUEST_INVALID');
+  }else if(input.newSlotId!=='')throw Error('V08_OUTCOME_REQUEST_INVALID');
+ }
+ return study1FormalWithLock_(input.emailProof,ctx=>{
+  const rows=ctx.snapshot.reservations.rows,app=ctx.identity.applicantId;
+  const base={readOnly:true,experiment:'E1',action:input.action,requestId:input.requestId,
+   originalReservationId:input.reservationId,slotId:input.slotId,newSlotId:input.newSlotId};
+  const unknown=reason=>({...base,resolved:false,status:'UNKNOWN',reason});
+  const active=rows.filter(r=>r[1]===app&&
+   ['WAITLISTED','HELD','CONFIRMED'].includes(study1FormalEffectiveStatus_(r,ctx.nowUtc)));
+  const result=(r,status,evidence)=>({...base,resolved:true,status,evidence,
+   reservation:r?{reservationId:r[0],slotId:r[2],status,holdUntilUtc:r[4]}:null});
+  study1FormalSlot_(ctx,input.slotId);
+  if(input.action==='JOIN'){
+   const key='WQ_'+study1BindingHmac_(['E1_V08_WAITLIST_V1',app,input.slotId,input.requestId]).slice(0,42);
+   const id='RSV_'+study1BindingHmac_(['E1_V08_WAITLIST_ROW_V1',app,input.slotId,key]).slice(0,28);
+   const found=rows.filter(r=>r[5]===key||r[0]===id);
+   if(found.length!==1)return unknown('EXACT_JOIN_NOT_UNIQUE');
+   const r=found[0];
+   if(r[0]!==id||r[5]!==key||r[1]!==app||r[2]!==input.slotId||r[3]!=='WAITLISTED'||
+      active.length!==1||active[0]!==r)return unknown('JOIN_STATE_MISMATCH');
+   return result(r,'WAITLISTED','ORIGINAL_REQUEST_KEY');
+  }
+  const original=study1FormalManageSource_(ctx,input.reservationId);
+  if(original[2]!==input.slotId)return unknown('ORIGINAL_SLOT_MISMATCH');
+  if(input.action==='MOVE'){
+   study1FormalSlot_(ctx,input.newSlotId);
+   const key='MV_'+study1BindingHmac_(['E1_V08_MOVE_V1',app,original[0],input.newSlotId,input.requestId]).slice(0,42);
+   const id='RSV_'+study1BindingHmac_(['E1_V08_MOVE_ROW_V1',app,original[0],key]).slice(0,28);
+   const found=rows.filter(r=>r[5]===key||r[0]===id);
+   if(found.length!==1)return unknown(original[3]==='CANCELLED'?'PARTIAL_OR_UNKNOWN':'EXACT_MOVE_NOT_UNIQUE');
+   const r=found[0];
+   if(original[3]!=='CANCELLED'||r[0]!==id||r[5]!==key||r[1]!==app||r[2]!==input.newSlotId||
+      r[4]!==original[4]||r[6]!==original[8]||
+      study1FormalEffectiveStatus_(r,ctx.nowUtc)!=='HELD'||active.length!==1||active[0]!==r)
+    return unknown('MOVE_PAIR_MISMATCH');
+   return result(r,'HELD','ORIGINAL_REQUEST_KEY');
+  }
+  const status=study1FormalEffectiveStatus_(original,ctx.nowUtc);
+  if(input.action==='CANCEL'&&status==='CANCELLED'&&active.length===0)
+   return result(original,'CANCELLED','ORIGINAL_ROW_STATE_ONLY');
+  if(input.action==='CLAIM'&&status==='HELD'&&original[5].startsWith('WQ_')&&
+     active.length===1&&active[0]===original)
+   return result(original,'HELD','ORIGINAL_ROW_STATE_ONLY');
+  return unknown('ORIGINAL_ROW_STATE_NOT_RESOLVED');
+ });
+}
+
 function study1FormalWaitlistGate_(){
  study1FormalGate_();
  if(PropertiesService.getScriptProperties()
