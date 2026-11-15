@@ -689,3 +689,5 @@
 - TESTS=原合成 server/Drive adapter 增 HOLD/MOVE/CANCEL、WAITLIST JOIN/CLAIM、部分 MOVE 跨 session 新 HOLD 拒絕、原 consent issue/sign 摘要及 tamper。LAST_VERIFIED_STEP=PATCH_PREPARED；SYNC_STATUS=CI_PENDING；NEXT_ACTION=同 SHA CI；BLOCKERS=DATA_AUTHORIZATION_REQUIRED、REC_REVIEW_REQUIRED、未核准 evidence gate、OWNER 未完成事件人工核結、公開 UI/inventory/實際 UAT；WRITE_OWNER=唯一 V2 repo；無遠端 GAS/正式資料/資料夾/設定/信件/部署寫入。
 
 - 初輪 `1f1200b` E1 CI #43727464247 362/366 PASS、4 FAIL；新事件欄位字典排序 `prefix`／`prepareMac` 反序使寫前 fail closed，修正並加 canonical 原始 JSON 比對。另補原 OWNER 畫面證據時間與狀態、競寫與 completion file 未持久化正負測。待最終同 SHA 驗收。
+
+- 第二輪 `cc2c4d7` E1 CI #43727557784：365/368 PASS、3 FAIL；實際新增競寫、完成回執遺失與同意索引三案例通過；V08 全快照誤用單列比較函數使正常交易被拒。修正逐表 headers/rows 比較，補 unrelated slot 競寫在取消前阻斷的負測；不減弱原 CAS。Drive 搜尋的完整性/可見性與刪除/回滾、保留期限須在正式啟用前獨立驗證；候選不得冒稱 WORM 或絕對持久鎖。

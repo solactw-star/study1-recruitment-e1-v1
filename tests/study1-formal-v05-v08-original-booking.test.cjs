@@ -858,3 +858,11 @@ test('missing COMMITTED evidence remains UNKNOWN even when original HOLD was per
  assert.throws(()=>h.ctx.study1FormalCancel({emailProof:h.proof(a),reservationId:h.tables.Reservations.rows[0][0],requestId:'REQ_FRESH_CANCEL_12345678'}),/E1_TXN_UNRESOLVED/);
  assert.equal(h.mutations.length,n);
 });
+
+test('V08 evidence prepare detects changed unrelated original rows before any cancellation',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a),held=h.holdSlot(p,h.S1);
+ h.evidenceCreateHook=f=>{if(f.raw.includes('"action":"CANCEL"')&&f.raw.includes('"stage":"PREPARED"'))h.tables.Slots.rows[1][3]=2;};
+ assert.throws(()=>h.ctx.study1FormalCancel({emailProof:p,reservationId:held.reservationId,requestId:'REQ_CANCEL_COMPETE_12345678'}),/PREPARED_SOURCE_CHANGED/);
+ assert.equal(h.tables.Reservations.rows[0][3],'HELD');assert.equal(h.evidenceFiles.length,3);
+});

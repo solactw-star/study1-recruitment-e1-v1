@@ -239,8 +239,15 @@ function study1FormalSame_(a,b){
  });
 }
 function study1FormalWriteExisting_(ctx,before,after){
- if(study1FormalTxnEnabled_()&&!study1FormalSame_(study1FormalSnapshot_(),ctx.snapshot))
-  throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
+ if(study1FormalTxnEnabled_()){
+  const fresh=study1FormalSnapshot_();
+  for(const name of ['slots','reservations']){
+   const original=ctx.snapshot[name],current=fresh[name];
+   if(!study1FormalSame_(current.headers,original.headers)||current.rows.length!==original.rows.length||
+      current.rows.some((r,i)=>!study1FormalSame_(r,original.rows[i])))
+    throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
+  }
+ }
  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
  const tab=book.getSheetByName('Reservations');
  const ix=ctx.snapshot.reservations.rows.findIndex(r=>r[0]===before[0]);
