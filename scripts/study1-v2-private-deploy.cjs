@@ -7,6 +7,7 @@
  */
 const core=require('./study1-v2-gas-head-only.cjs');
 const fs=require('node:fs');
+const path=require('node:path');
 const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
@@ -286,6 +287,7 @@ async function settleVersionInventory(api,before,number,createdNew,
    'deployment inventory changed during version readback');
   if(versions.length===count&&versions.some(v=>v.version===number)){
    assert(JSON.stringify(versions.filter(v=>!createdNew||v.version!==number))===JSON.stringify(oldVersions),'previous immutable version inventory changed');
+   assert(JSON.stringify(state.proofs.filter(v=>!createdNew||v.version!==number))===JSON.stringify(before.proofs),'previous immutable version content changed');
    return state;
   }
   assert(createdNew&&JSON.stringify(versions)===JSON.stringify(oldVersions),
@@ -388,21 +390,63 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  report('V2_PRIVATE_LIVE_INTAKE_ENABLED=false');
  return {id:created.deploymentId,version:number};
 }
+// Save all current HEAD bytes plus version/deployment metadata and full
+// immutable source proofs. The existing immutable versions are not modified.
+// Store only authenticated ciphertext off-runner; bind it to exact operation.
+function releaseBackupPath(env){
+ assert(env.RUNNER_TEMP&&/^[0-9]+$/.test(env.GITHUB_RUN_ID||''),'release backup run identity missing');
+ return path.join(env.RUNNER_TEMP,'study1-v2-private-prewrite-'+env.GITHUB_RUN_ID+'.json.enc');
+}
+function releaseBackupAad(env){
+ return [REPO,SID,env.GITHUB_SHA,env.GITHUB_RUN_ID,env.PRIVATE_MODE,
+  env.PRIVATE_VERSION||'',env.REVIEWED_TARGET_SHA256,env.EXPECTED_INVENTORY_SHA256].join('\n');
+}
+async function prepareReleaseBackup(api,c,env,assertMain=latestMain){
+ const mode=env.PRIVATE_MODE;assert(['version','deploy'].includes(mode),'backup must precede a specific mutation phase');
+ const s=await reviewedMutation(api,env,mode,assertMain);
+ const plain=JSON.stringify({scriptId:SID,githubSha:env.GITHUB_SHA,mode,
+  head:{scriptId:SID,files:s.head.files.map(({name,type,source})=>({name,type,source}))},
+  versions:s.versions,deps:s.deps,proofs:s.proofs,fp:s.fp});
+ const aad=releaseBackupAad(env),enc=JSON.stringify(core.seal(plain,c.refresh_token,aad));
+ assert(core.unseal(JSON.parse(enc),c.refresh_token,aad)===plain,'release backup encryption self-check failed');
+ const p=releaseBackupPath(env);fs.writeFileSync(p,enc,{flag:'wx',mode:0o600});
+ assert(fs.readFileSync(p,'utf8')===enc,'release backup local readback failed');
+ report('V2_PRIVATE_PREWRITE_BACKUP_SHA256='+sha(enc));
+ report('V2_PRIVATE_PREWRITE_BACKUP_ENCRYPTED=true');
+ return {fp:s.fp,sha:sha(enc)};
+}
+function verifyReleaseBackup(c,env){
+ const enc=fs.readFileSync(releaseBackupPath(env),'utf8');
+ const copy=JSON.parse(core.unseal(JSON.parse(enc),c.refresh_token,releaseBackupAad(env)));
+ assert(copy.scriptId===SID&&copy.githubSha===env.GITHUB_SHA&&copy.mode===env.PRIVATE_MODE,
+  'release backup does not match reviewed operation');
+ checkHead(copy.head);
+ assert(copy.fp===env.EXPECTED_INVENTORY_SHA256&&fingerprint(copy.versions,copy.deps,core.digest(copy.head.files),copy.proofs)===copy.fp,
+  'release backup inventory fingerprint mismatch');
+ return copy.fp;
+}
+
 async function main(){
- const mode=process.argv[2];invocation(process.env,mode);
+ const phase=process.argv[2],mode=phase==='prepare'?process.env.PRIVATE_MODE:phase;
+ invocation(process.env,mode);
+ if(phase==='prepare')assert(mode!=='audit','audit has no write-preparation step');
  latestMain(process.env);reviewedLocal();
  assert(process.env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
  const c=core.credentials(process.env.V2_GAS_CLASPRC_JSON);
  const api=await makeApi(c);
  if(mode==='audit')await audit(api);
- else if(mode==='version')await createImmutableVersion(api,process.env);
- else await deploy(api,process.env);
+ else if(phase==='prepare')await prepareReleaseBackup(api,c,process.env);
+ else{
+  verifyReleaseBackup(c,process.env);
+  if(mode==='version')await createImmutableVersion(api,process.env);
+  else await deploy(api,process.env);
+ }
 }
 if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,

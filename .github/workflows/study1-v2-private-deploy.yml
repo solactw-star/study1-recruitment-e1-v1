@@ -78,7 +78,8 @@ jobs:
           else
             test "$PRIVATE_MODE" = audit
           fi
-      - name: V2-only audit or independently confirmed MYSELF private deployment
+      - name: V2-only read-only inventory audit
+        if: ${{ inputs.mode == 'audit' }}
         env:
           PRIVATE_MODE: ${{ inputs.mode }}
           REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
@@ -87,5 +88,37 @@ jobs:
           EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
           CONFIRMATION: ${{ inputs.confirmation }}
           V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
-        run: |
-          node scripts/study1-v2-private-deploy.cjs "$PRIVATE_MODE"
+        run: node scripts/study1-v2-private-deploy.cjs audit
+      - name: Prepare authenticated private release inventory backup (GET only)
+        if: ${{ inputs.mode != 'audit' }}
+        env:
+          PRIVATE_MODE: ${{ inputs.mode }}
+          REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
+          PRIVATE_VERSION: ${{ inputs.private_version }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs prepare
+      - name: Preserve encrypted private release backup (ciphertext ONLY)
+        if: ${{ inputs.mode != 'audit' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: study1-v2-private-prewrite-${{ github.run_id }}
+          path: ${{ runner.temp }}/study1-v2-private-prewrite-${{ github.run_id }}.json.enc
+          if-no-files-found: error
+          retention-days: 7
+      - name: Independently confirmed version OR deployment; validate backup and read back
+        if: ${{ inputs.mode != 'audit' }}
+        env:
+          PRIVATE_MODE: ${{ inputs.mode }}
+          REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
+          PRIVATE_VERSION: ${{ inputs.private_version }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs "$PRIVATE_MODE"
+      - name: Purge ephemeral encrypted release backup
+        if: always()
+        run: rm -f "$RUNNER_TEMP/study1-v2-private-prewrite-$GITHUB_RUN_ID.json.enc"

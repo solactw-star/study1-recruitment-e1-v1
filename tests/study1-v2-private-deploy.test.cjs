@@ -383,3 +383,33 @@ test('private HEAD synchronization refuses unproven or public development ACL',a
  assert.equal(mixed.safe,false);
  assert.throws(()=>d.requirePrivateHeadBaseline(mixed),/unverified/);
 });
+
+test('immutable version/deploy prewrite snapshots are encrypted, distinct and bound to the exact audited phase',async()=>{
+ const os=require('node:os'),f=fakeApi(),c={refresh_token:'mock-private-backup-refresh-token'};
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'v2-private-backup-'));
+ const e={...runEnv(),RUNNER_TEMP:dir,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM};
+ try{
+  assert.throws(()=>d.verifyReleaseBackup(c,e),/ENOENT/);
+  const b=await d.prepareReleaseBackup(f.api,c,e,()=>{});
+  assert.equal(b.fp,e.EXPECTED_INVENTORY_SHA256);
+  assert.equal(d.verifyReleaseBackup(c,e),b.fp);
+  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+  const p=d.releaseBackupPath(e),enc=fs.readFileSync(p,'utf8');
+  assert.doesNotMatch(enc,/%PDF-|Study1Visitor|mock-private-backup-refresh-token/);
+  for(const change of [{PRIVATE_MODE:'deploy'},{GITHUB_SHA:'b'.repeat(40)},{PRIVATE_VERSION:'2'},{EXPECTED_INVENTORY_SHA256:'b'.repeat(64)}])
+   assert.throws(()=>d.verifyReleaseBackup(c,{...e,...change}));
+  const altered=JSON.parse(enc);altered.tag=Buffer.alloc(16).toString('base64');
+  fs.writeFileSync(p,JSON.stringify(altered));assert.throws(()=>d.verifyReleaseBackup(c,e));
+  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('deployment workflow saves authenticated ciphertext before mutation, and audit never runs write stages',()=>{
+ const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
+ const pre=wf.indexOf('node scripts/study1-v2-private-deploy.cjs prepare'),
+  upload=wf.indexOf('uses: actions/upload-artifact@v4'),
+  post=wf.lastIndexOf('node scripts/study1-v2-private-deploy.cjs "$PRIVATE_MODE"');
+ assert.ok(pre>0&&upload>pre&&post>upload);
+ assert.match(wf,/if-no-files-found: error/);
+ assert.match(wf,/study1-v2-private-prewrite-\$\{\{ github.run_id \}\}\.json\.enc/);
+ assert.ok((wf.match(/inputs\.mode != 'audit'/g)||[]).length>=3);
+});
