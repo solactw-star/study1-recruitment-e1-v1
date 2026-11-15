@@ -82,7 +82,7 @@ function fixture(opts={}){
   Blob:globalThis.Blob,Uint8Array,Array,Object,String,Number,Date,Error,Promise,
   btoa:s=>Buffer.from(s,'binary').toString('base64'),
   atob:s=>Buffer.from(s,'base64').toString('binary')};
- vm.runInNewContext('const $=id=>document.getElementById(id);\n'+script,runtime,{timeout:2000});
+ vm.runInNewContext('const $=id=>document.getElementById(id);\n'+(opts.scriptOverride||script),runtime,{timeout:2000});
  const fire=(id,event='click')=>{
   const n=el(id);assert.notEqual(n.disabled,true,'disabled '+id);
   assert.equal(typeof n.handlers[event],'function','missing '+id+'/'+event);
@@ -162,4 +162,21 @@ test('OWNER private completed PDF link appears only after SHA and byte readback,
  await new Promise(r=>setImmediate(r));
  assert.equal(bad.el('e1PdfSignedLink').hidden,true);
  assert.match(bad.el('e1PdfSignedStatus').textContent,/禁止下載/);
+});
+
+
+test('private management generated UI locks all PDF writes after UNKNOWN even after a successful fresh directory GET',async()=>{
+ const core=require('../scripts/study1-v2-gas-head-only.cjs');
+ const candidate=core.privateOwnerManagementCandidate(core.localSources()).find(x=>x.name==='AdminConsole').source;
+ const i=candidate.indexOf('function e1OwnerPresignSetup_(){'),j=candidate.indexOf('\ne1OwnerPresignSetup_();',i);
+ assert.ok(i>=0&&j>i);
+ const h=fixture({scriptOverride:candidate.slice(i,j+'\ne1OwnerPresignSetup_();'.length),study1ConsentVersionUpload:()=>{throw Error('UNKNOWN')}});
+ h.fire('e1PdfRead');h.el('e1PdfFile').files=[h.file];h.el('e1PdfTitle').value='Presigned E1';
+ h.el('e1PdfVersion').value='V2';h.el('e1PdfUploadAttest').checked=true;h.fire('e1PdfUploadAttest','input');
+ await h.fire('e1PdfUpload');h.fire('e1PdfRead');
+ assert.equal(h.el('e1PdfUpload').disabled,true);
+ assert.equal(h.el('e1PdfSelect').disabled,true);
+ assert.equal(h.el('e1PdfSource').disabled,true);
+ assert.match(h.el('e1PdfStatus').textContent,/本頁仍鎖定寫入/);
+ assert.equal(h.calls.filter(x=>x.method==='study1ConsentVersionUpload').length,1);
 });

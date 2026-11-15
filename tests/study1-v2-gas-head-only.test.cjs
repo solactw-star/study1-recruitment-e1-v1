@@ -187,3 +187,66 @@ test('private candidate OWNER route and six existing read RPCs refuse non-owner 
  assert.throws(()=>c.doGet({parameter:{view:'demo'}}),/STUDY1_V2_PUBLIC_READ_ONLY/);
  assert.equal(readAttempts,1);
 });
+
+test('private E1 management derives from read-only candidate, keeps public and non-E1 writes blocked',()=>{
+ const vm=require('node:vm'),pub=m.localSources(),before=m.digest(pub);
+ const candidate=m.privateOwnerManagementCandidate(pub),read=m.privateOwnerReadOnlyCandidate(pub);
+ assert.equal(m.digest(pub),before);
+ assert.equal(m.closedManifest(candidate).webapp.access,'MYSELF');
+ assert.throws(()=>m.publicRpcSurface(candidate),/unguarded public RPC/);
+ const accidental=candidate.map(f=>f.name==='appsscript'?{...f,source:f.source.replace('"MYSELF"','"ANYONE"')}:f);
+ assert.throws(()=>m.closedManifest(accidental),/unguarded public RPC/);
+ assert.deepEqual(candidate.filter(f=>f.source!==read.find(p=>p.name===f.name).source).map(f=>f.name).sort(),['AdminConsole','AdminSandbox','Website']);
+ const html=candidate.find(f=>f.name==='AdminConsole').source;
+ assert.match(html,/私人 E1 文件管理候選｜非正式營運/);
+ assert.doesNotMatch(html,/<div hidden><label for="e1PdfFile">/);
+ assert.match(html,/<section hidden><h2>測試研究內容/);
+ assert.match(html,/<div hidden><h3>OWNER 手動核對/);
+ let active='',effective='solac.tw@gmail.com',reads=0;
+ const c=vm.createContext({Session:{getActiveUser:()=>({getEmail:()=>active}),getEffectiveUser:()=>({getEmail:()=>effective})},
+  PropertiesService:{getScriptProperties(){reads++;throw Error('OWNER_REACHED_CLOSED_FLAGS');}}});
+ for(const name of ['Website','AdminSandbox','Study1FormalBooking','Study1WizardP0Bridge','Study1ParticipantIntake','Study1FormalConsent'])
+  vm.runInContext(candidate.find(f=>f.name===name).source,c);
+ const names=['study1ConsentVersionUpload','study1ConsentVersionSelect','study1ConsentVersionPublication'];
+ for(const a of ['', 'other@example.invalid']){
+  active=a;
+  for(const n of names)assert.throws(()=>c[n]({experiment:'E1',researcherPresigned:true}),/管理身分無法驗證/);
+ }
+ assert.equal(reads,0);
+ active=effective;
+ assert.throws(()=>c.study1ConsentVersionUpload({experiment:'E2',researcherPresigned:true}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ assert.throws(()=>c.study1ConsentVersionUpload({experiment:'E1',researcherPresigned:false}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ assert.throws(()=>c.study1ConsentVersionPublication({experiment:'E2',id:'x'}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ assert.throws(()=>c.study1ConsentVersionPublication({experiment:'E1',id:null}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ assert.equal(reads,0);
+ for(const [n,arg] of [[names[0],{experiment:'E1',researcherPresigned:true}],[names[1],{}],[names[2],{experiment:'E1',id:'x'}]])
+  assert.throws(()=>c[n](arg),/OWNER_REACHED_CLOSED_FLAGS/);
+ assert.equal(reads,3);
+ for(const n of ['study1OwnerE1SignedBookingRepair','study1EConsentOwnerWithdraw','study1FormalHoldSlot','study1ParticipantBegin','study1ParticipantSendOtp','getPublicConsentDocument','adminSaveSandboxConfig'])
+  assert.throws(()=>c[n](),/STUDY1_V2_PUBLIC_READ_ONLY/,n);
+ assert.equal(c.getPublicConfig().open,false);
+ assert.equal(c.getPublicConfig().consentReady,false);
+ console.log('V2_PRIVATE_E1_MANAGEMENT_CANDIDATE_SHA256='+m.digest(candidate));
+});
+test('private candidate select and source pointer reject E2, non-presigned and stale source under original lock',()=>{
+ const vm=require('node:vm'),files=m.privateOwnerManagementCandidate(m.localSources());
+ let entry={id:'E1_FILE',experiment:'E2',researcherPresigned:true,sha256:'a'.repeat(64)},writes=0,locks=0,checks=0;
+ const prop={getProperty:()=> 'false',setProperty:()=>{writes++}};
+ const owner='solac.tw@gmail.com',c=vm.createContext({
+  Session:{getActiveUser:()=>({getEmail:()=>owner}),getEffectiveUser:()=>({getEmail:()=>owner})},
+  PropertiesService:{getScriptProperties:()=>prop},LockService:{getScriptLock:()=>({tryLock:()=>{locks++;return true},releaseLock(){}})}
+ });
+ vm.runInContext(files.find(f=>f.name==='Website').source,c);
+ vm.runInContext(files.find(f=>f.name==='AdminSandbox').source,c);
+ c.study1ConsentVersionRead_=()=>({revision:2,documents:[entry],current:{E1:entry.id},published:{E1:entry.id}});
+ c.study1ConsentDocumentBytes_=()=>{checks++;throw Error('ACTUAL_ORIGINAL_SHA_DRIFT')};
+ assert.throws(()=>c.study1ConsentVersionSelect({id:entry.id,expectedRevision:2}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ entry={...entry,experiment:'E1',researcherPresigned:false};
+ assert.throws(()=>c.study1ConsentVersionSelect({id:entry.id,expectedRevision:2}),/E1_PRESIGNED_MANAGEMENT_ONLY/);
+ const p={experiment:'E1',id:entry.id,expectedRevision:2,confirmSha256:entry.sha256};
+ assert.throws(()=>c.study1ConsentVersionPublication(p),/只能公開已選用/);
+ entry={...entry,researcherPresigned:true};
+ assert.throws(()=>c.study1ConsentVersionPublication(p),/ACTUAL_ORIGINAL_SHA_DRIFT/);
+ assert.throws(()=>c.study1ConsentVersionSelect({id:entry.id,expectedRevision:1}),/版本選用衝突/);
+ assert.equal(writes,0);assert.equal(checks,1);assert.equal(locks,5);
+});

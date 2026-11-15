@@ -369,6 +369,57 @@ function privateOwnerReadOnlyCandidate(files){
  require_(publicRejected,'private candidate must not pass public release guard');
  return result;
 }
-module.exports={privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
+function privateOwnerManagementCandidate(files){
+ // Offline only; no automatic HEAD sync, version creation, or deployment.
+ // Extend, rather than replace, the already reviewed read-only candidate.
+ const base=privateOwnerReadOnlyCandidate(files);
+ const patch=(s,a,b)=>{
+  require_(s.split(a).length===2,'private management source anchor drift');
+  return s.replace(a,()=>b);
+ };
+ const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
+ const original=files.find(f=>f.name==='AdminConsole').source;
+ const boundary='<h3>已完成簽署的完整 PDF｜OWNER 私人副本</h3>';
+ const start='<label for="e1PdfFile">';
+ const first=original.indexOf(start),last=original.indexOf(boundary);
+ require_(first>=0&&last>first,'private management PDF UI anchor drift');
+ const result=base.map(f=>{
+  let s=f.source;
+  if(f.name==='AdminSandbox'){
+   // Scope all three existing RPCs to E1; preserve the original OWNER,
+   // closed flags, lock/revision, ACL, original SHA and readback checks.
+   const upload='function study1ConsentVersionUpload(input){'+gate;
+   const select='function study1ConsentVersionSelect(input){'+gate;
+   const pub='function study1ConsentVersionPublication(input){'+gate;
+   s=patch(s,upload,'function study1ConsentVersionUpload(input){\n study1AdminOwnerRequired_();\n if(!input||input.experiment!==\'E1\'||input.researcherPresigned!==true)throw Error(\'E1_PRESIGNED_MANAGEMENT_ONLY\');');
+   s=patch(s,select,'function study1ConsentVersionSelect(input){');
+   s=patch(s,"if(!entry)throw Error('只能選擇原私人資料夾中的已存版本');","if(!entry)throw Error('只能選擇原私人資料夾中的已存版本');\n  if(entry.experiment!=='E1'||entry.researcherPresigned!==true)throw Error('E1_PRESIGNED_MANAGEMENT_ONLY');");
+   s=patch(s,pub,"function study1ConsentVersionPublication(input){\n study1AdminOwnerRequired_();\n if(!input||input.experiment!=='E1'||typeof input.id!=='string'||!input.id)throw Error('E1_PRESIGNED_MANAGEMENT_ONLY');");
+   // Verify the selected private source even when the pointer already matches.
+   s=patch(s,"  if(before.published[input.experiment]===input.id)return before;\n","");
+   s=patch(s,"   if(!entry||before.current[input.experiment]!==input.id||","   if(!entry||entry.researcherPresigned!==true||before.current[input.experiment]!==input.id||");
+   s=patch(s,"  const after={...before,revision:before.revision+1,\n   published:","  if(before.published[input.experiment]===input.id)return before;\n  const after={...before,revision:before.revision+1,\n   published:");
+  }else if(f.name==='AdminConsole'){
+   const a=s.indexOf('<div hidden>'+start),b=s.indexOf(boundary);
+   require_(a>=0&&b>a,'private read-only PDF UI anchor drift');
+   s=patch(s,s.slice(a,b),original.slice(first,last));
+   s=patch(s,'<title>Study 1｜OWNER 私人唯讀管理</title>','<title>Study 1｜OWNER 私人 E1 管理</title>');
+   s=patch(s,'<h1>Study 1｜研究室 OWNER 私人唯讀管理</h1>','<h1>Study 1｜研究室 OWNER 私人 E1 管理</h1>');
+   s=patch(s,'<strong>私人唯讀驗收候選｜非正式營運</strong><p>僅已驗證研究室 OWNER 可核對既有來源；所有寫入、寄信、場次調整、簽署與真人收件 RPC 仍被拒絕。資料是否齊備及正式啟用須另行核對及授權。</p>','<strong>私人 E1 文件管理候選｜非正式營運</strong><p>僅研究室 OWNER 可在獨立授權後管理 E1 研究者預簽 PDF；不開放報名、預約異動、寄信、參與者簽署或其他寫入。正式資料操作仍需個別授權。</p>');
+   // Unknown write result never re-enables writes merely because a GET succeeds.
+   s=patch(s,'try{unknown=false;render(x);}',"try{render(x);if(unknown)msg.textContent+=' 先前寫入結果未知；本頁仍鎖定寫入，須由 OWNER 獨立核對原紀錄後另行處置，不得重送。';}");
+  }else if(f.name==='Website'){
+   s=patch(s,".setTitle('Study 1｜OWNER 私人唯讀管理')",".setTitle('Study 1｜OWNER 私人 E1 管理')");
+  }
+  return {...f,source:s};
+ });
+ require_(closedManifest(result).webapp.access==='MYSELF','private management requires MYSELF');
+ closedWebsite(result);
+ let rejected=false;
+ try{publicRpcSurface(result);}catch(e){rejected=String(e.message).includes('unguarded public RPC');}
+ require_(rejected,'private management candidate rejected by public release guard');
+ return result;
+}
+module.exports={privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
  runnerPaths,aad,audit,prepare,apply};
