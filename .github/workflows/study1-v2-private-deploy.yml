@@ -332,3 +332,64 @@ jobs:
       - name: Remove local encrypted backup
         if: always()
         run: rm -f "$RUNNER_TEMP/study1-v2-public-prewrite-$GITHUB_RUN_ID.json.enc"
+  public-version3-resume:
+    if: >-
+      ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1'
+      && github.ref == 'refs/heads/main' && github.event.before == 'b2e63c0109cb90c21bb0df04c76dcb78f09ae2ad'
+      && github.event.head_commit.message == 'release-v2 authorized public version 3 deployment resume 2026-11-15' && github.run_attempt == 1 }}
+    needs: automatic-inventory
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Review current public source and continuation tests
+        env:
+          V2_PRIVATE_TEST_MODE: 'true'
+        run: node --test tests/study1-v2-public-readonly.test.cjs tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
+      - name: Download existing encrypted original release backup
+        uses: actions/download-artifact@v4
+        with:
+          name: study1-v2-public-prewrite-43711280217
+          run-id: 43711280217
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}
+      - name: Verify original private inventory and existing public version 3 (GET only)
+        env:
+          V2_PUBLIC_RELEASE: '1'
+          V2_PUBLIC_RESUME: '1'
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-public-release.cjs resume-prepare
+      - name: Preserve encrypted current deployment baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: study1-v2-public-resume-prewrite-${{ github.run_id }}
+          path: ${{ runner.temp }}/study1-v2-public-prewrite-${{ github.run_id }}.json.enc
+          if-no-files-found: error
+          retention-days: 7
+      - name: Deploy only existing public version 3 once and verify
+        env:
+          V2_PUBLIC_RELEASE: '1'
+          V2_PUBLIC_RESUME: '1'
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-public-release.cjs resume-apply
+      - name: GET-only reconciliation if necessary
+        if: failure()
+        env:
+          V2_PUBLIC_RELEASE: '1'
+          V2_PUBLIC_RESUME: '1'
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-public-release.cjs audit
+      - name: Remove local encrypted backups
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/study1-v2-public-prewrite-43711280217.json.enc"
+          rm -f "$RUNNER_TEMP/study1-v2-public-prewrite-$GITHUB_RUN_ID.json.enc"

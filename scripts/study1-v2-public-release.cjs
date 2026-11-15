@@ -5,6 +5,8 @@ const fs=require('node:fs'),path=require('node:path'),{execFileSync}=require('no
 const core=require('./study1-v2-gas-head-only.cjs'),d=require('./study1-v2-private-deploy.cjs');
 const {SID,REPO}=core;
 const PARENT='e1b75093d98a56c00f4c941da234703179736a5f',MESSAGE='release-v2 authorized public login-only browse correction 2026-11-15';
+const RESUME_PARENT='b2e63c0109cb90c21bb0df04c76dcb78f09ae2ad',RESUME_MESSAGE='release-v2 authorized public version 3 deployment resume 2026-11-15';
+const RESUME_TARGET='3449d43bee67d450a1934cd24870b581c487bd84f854511a467e270bccf62158',RESUME_VERSION=3,ORIGINAL_RUN='43711280217';
 const BASE_FP='f36f8a5ce9d1658fc7d7cb5370438253d773e3f1d91c344de01ecdded2aed658';
 const assert=(v,m)=>{if(!v)throw Error('V2_PUBLIC_RELEASE_BLOCKED: '+m)};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -13,12 +15,13 @@ function authorize(e,event){
  assert(e.V2_PUBLIC_RELEASE==='1'&&e.GITHUB_REPOSITORY===REPO&&e.GITHUB_REF==='refs/heads/main'&&e.GITHUB_EVENT_NAME==='push'&&e.GITHUB_RUN_ATTEMPT==='1','authorized first main event only');
  assert(/^[a-f0-9]{40}$/.test(e.GITHUB_SHA||'')&&/^\d+$/.test(e.GITHUB_RUN_ID||''),'exact run identity required');
  const x=event||JSON.parse(fs.readFileSync(e.GITHUB_EVENT_PATH,'utf8'));
- assert(x.before===PARENT&&x.after===e.GITHUB_SHA&&x.ref===e.GITHUB_REF&&x.head_commit?.id===e.GITHUB_SHA&&x.head_commit?.message===MESSAGE&&x.commits?.length===1&&x.repository?.full_name===REPO&&x.forced===false&&x.created===false&&x.deleted===false,'authorization event mismatch');
+ const resume=e.V2_PUBLIC_RESUME==='1';
+ assert(x.before===(resume?RESUME_PARENT:PARENT)&&x.after===e.GITHUB_SHA&&x.ref===e.GITHUB_REF&&x.head_commit?.id===e.GITHUB_SHA&&x.head_commit?.message===(resume?RESUME_MESSAGE:MESSAGE)&&x.commits?.length===1&&x.repository?.full_name===REPO&&x.forced===false&&x.created===false&&x.deleted===false,'authorization event mismatch');
 }
-function verifyCheckout(e){
+function verifyCheckout(e,parent=PARENT){
  core.latestMain(e);
  const git=args=>execFileSync('git',args,{encoding:'utf8'}).trim();
- assert(git(['rev-parse','HEAD^'])===PARENT&&git(['rev-parse','HEAD^:gas'])===git(['rev-parse','HEAD:gas']),'public source differs from reviewed parent');
+ assert(git(['rev-parse','HEAD^'])===parent&&git(['rev-parse','HEAD^:gas'])===git(['rev-parse','HEAD:gas']),'public source differs from reviewed parent');
  const files=core.localSources();
  assert(core.closedManifest(files).webapp.access==='ANYONE','login-only public manifest required');
  core.closedWebsite(files);core.publicRpcSurface(files);
@@ -138,14 +141,72 @@ async function release(api,headApi,c,e,files,check=()=>core.latestMain(e),pause=
  report('V2_PUBLIC_ACCESS=ANYONE');report('V2_PUBLIC_EXECUTE_AS=USER_DEPLOYING');report('V2_PUBLIC_PRIVATE_DEPLOYMENTS_UNCHANGED=true');report('V2_PUBLIC_LIVE_INTAKE_ENABLED=false');
  return result;
 }
+// Original run proved HEAD and version 3; deployment POST was not reached.
+// Preserve that run's exact encrypted inventory, and never repeat HEAD/version.
+function originalBaseline(c,e){
+ return restoreBackup(c,{...e,GITHUB_SHA:RESUME_PARENT,GITHUB_RUN_ID:ORIGINAL_RUN},RESUME_TARGET);
+}
+function resumeStateValid(original,s,target){
+ verifiedPublic(s,target);keepOld(original,s);
+ same(versioned(s),versioned(original),'unexpected existing deployment before resume');
+ if(s.versionCount===original.proofs.length)return false;
+ assert(s.versionCount===original.proofs.length+1&&s.proofs.some(p=>p.version===RESUME_VERSION&&p.sha===target&&p.known&&p.access==='ANYONE'),'existing public version 3 not uniquely verified');
+ return true;
+}
+async function resumePrepare(api,c,e,files){
+ const target=core.digest(files);assert(target===RESUME_TARGET,'resume source differs from authorized public version');
+ const original=originalBaseline(c,e);
+ const s=await waitFor(api,state=>resumeStateValid(original,state,target));
+ const plain=JSON.stringify({head:s.head,versions:s.versions,deps:s.deps,proofs:s.proofs,fp:s.fp,git:e.GITHUB_SHA,target});
+ const enc=JSON.stringify(core.seal(plain,c.refresh_token,aad(e,target)));
+ assert(core.unseal(JSON.parse(enc),c.refresh_token,aad(e,target))===plain,'resume backup self-check failed');
+ fs.writeFileSync(backupPath(e),enc,{flag:'wx',mode:0o600});
+ assert(fs.readFileSync(backupPath(e),'utf8')===enc,'resume backup readback failed');
+ report('V2_PUBLIC_RESUME_BACKUP_ENCRYPTED=true');
+ report('V2_PUBLIC_RESUME_EXISTING_VERSION='+RESUME_VERSION);
+}
+async function resumeDeploy(api,c,e,files,pause=sleep){
+ const target=core.digest(files);assert(target===RESUME_TARGET,'resume source differs from authorized public version');
+ const original=originalBaseline(c,e);
+ const saved=JSON.parse(core.unseal(JSON.parse(fs.readFileSync(backupPath(e),'utf8')),c.refresh_token,aad(e,target)));
+ assert(saved.git===e.GITHUB_SHA&&saved.target===target&&saved.head.scriptId===SID&&d.fingerprint(saved.versions,saved.deps,core.digest(saved.head.files),saved.proofs)===saved.fp,'resume backup inventory mismatch');
+ const before=await waitFor(api,s=>{
+  if(!resumeStateValid(original,s,target))return false;
+  keepOld(saved,s);
+  same(s.proofs,saved.proofs,'immutable version source changed after backup');
+  same(d.normalizedVersions(s.versions),d.normalizedVersions(saved.versions),'version inventory changed after backup');
+  same(versioned(s),versioned(saved),'deployment inventory changed after backup');return true;
+ },pause);
+ core.latestMain(e);
+ const made=await api.createDeployment(RESUME_VERSION,'Study1 V2 PUBLIC ANYONE READONLY '+target+' GitHub '+e.GITHUB_SHA+' Run '+e.GITHUB_RUN_ID);
+ assert(made?.deploymentId&&made.deploymentConfig?.scriptId===SID&&made.deploymentConfig.versionNumber===RESUME_VERSION,'deployment response ambiguous');
+ report('V2_PUBLIC_DEPLOY_POST_ACCEPTED=true');
+ const final=await waitFor(api,s=>{
+  verifiedPublic(s,target);keepOld(original,s);keepOld(before,s);
+  same(s.proofs,before.proofs,'immutable version source changed during resume');
+  same(d.normalizedVersions(s.versions),d.normalizedVersions(before.versions),'version inventory changed during resume');
+  if(s.deploymentCount===before.deploymentCount)return false;
+  assert(s.deploymentCount===before.deploymentCount+1&&versioned(s).some(x=>x.id===made.deploymentId&&x.version===RESUME_VERSION),'new public deployment identity mismatch');return true;
+ },pause);
+ const result=await readPublic(api,final,target,pause);
+ assert(result&&result.version===RESUME_VERSION,'public readback missing');
+ report('V2_PUBLIC_DEPLOY_VERIFIED=true');report('V2_PUBLIC_VERSION='+result.version);report('V2_PUBLIC_URL='+result.url);
+ report('V2_PUBLIC_ACCESS=ANYONE');report('V2_PUBLIC_EXECUTE_AS=USER_DEPLOYING');
+ report('V2_PUBLIC_PRIVATE_DEPLOYMENTS_UNCHANGED=true');report('V2_PUBLIC_NO_HEAD_OR_VERSION_MUTATIONS=true');report('V2_PUBLIC_LIVE_INTAKE_ENABLED=false');
+ return result;
+}
+
 async function main(){
  const phase=process.argv[2],e=process.env;
- assert(['prepare','apply','audit'].includes(phase),'unknown phase');
+ const resume=e.V2_PUBLIC_RESUME==='1';
+ assert((resume?['resume-prepare','resume-apply','audit']:['prepare','apply','audit']).includes(phase),'unknown or unauthorized phase');
  if(phase!=='audit')authorize(e);
  else d.autoAuditInvocation(e);
- const files=verifyCheckout(e),target=core.digest(files);
+ const files=verifyCheckout(e,resume?RESUME_PARENT:PARENT),target=core.digest(files);
  const c=core.credentials(e.V2_GAS_CLASPRC_JSON);
- const api=await d.makeApi(c,undefined,undefined,undefined,phase!=='apply');
+ const api=await d.makeApi(c,undefined,undefined,undefined,!['apply','resume-apply'].includes(phase));
+ if(phase==='resume-prepare')return resumePrepare(api,c,e,files);
+ if(phase==='resume-apply')return resumeDeploy(api,c,e,files);
  if(phase==='prepare')return prepare(api,c,e,files);
  if(phase==='apply')return release(api,await core.apiFromCredentials(c),c,e,files);
  const s=await d.audit(api);
@@ -156,4 +217,4 @@ async function main(){
  }
 }
 if(require.main===module)main().catch(e=>{console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));process.exitCode=1;});
-module.exports={PARENT,MESSAGE,BASE_FP,authorize,publicLink,keepOld,readPublic};
+module.exports={PARENT,MESSAGE,BASE_FP,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_TARGET,authorize,publicLink,keepOld,readPublic,resumeStateValid};

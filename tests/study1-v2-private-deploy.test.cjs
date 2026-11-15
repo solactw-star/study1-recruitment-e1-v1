@@ -571,3 +571,23 @@ test('public HEAD permits more restrictive development access but not mismatched
  f.api.getDeployments=async()=>[{...dep,deploymentConfig:{scriptId:d.SID,versionNumber:1,manifestFileName:'appsscript'}}];
  assert.equal((await d.inventory(f.api)).safe,false);
 });
+
+test('public version 3 resume has independently bound event and no HEAD or version create call',()=>{
+ const p=require('../scripts/study1-v2-public-release.cjs');
+ const e={V2_PUBLIC_RELEASE:'1',V2_PUBLIC_RESUME:'1',GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',
+  GITHUB_EVENT_NAME:'push',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'d'.repeat(40),GITHUB_RUN_ID:'88'};
+ const ev={before:p.RESUME_PARENT,after:e.GITHUB_SHA,ref:e.GITHUB_REF,
+  head_commit:{id:e.GITHUB_SHA,message:p.RESUME_MESSAGE},commits:[{}],repository:{full_name:d.REPO},forced:false,created:false,deleted:false};
+ assert.doesNotThrow(()=>p.authorize(e,ev));
+ assert.throws(()=>p.authorize({...e,V2_PUBLIC_RESUME:''},ev),/authorization event mismatch/);
+ assert.throws(()=>p.authorize({...e,GITHUB_RUN_ATTEMPT:'2'},ev),/first main event/);
+ const code=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-public-release.cjs'),'utf8');
+ const body=code.slice(code.indexOf('async function resumeDeploy'),code.indexOf('async function main'));
+ assert.doesNotMatch(body,/putContent|createVersion/);
+ assert.equal((body.match(/api\.createDeployment\(/g)||[]).length,1);
+ const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
+ const job=wf.slice(wf.indexOf('  public-version3-resume:'));
+ assert.ok(job.includes(p.RESUME_PARENT)&&job.includes(p.RESUME_MESSAGE));
+ assert.match(job,/actions\/download-artifact@v4/);
+ assert.ok(job.indexOf('resume-prepare')<job.indexOf('actions/upload-artifact@v4')&&job.indexOf('actions/upload-artifact@v4')<job.indexOf('resume-apply'));
+});
