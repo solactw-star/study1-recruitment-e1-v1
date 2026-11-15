@@ -541,3 +541,53 @@ test('EMAIL_VERIFIED and an unconsumed OTP cannot be returned as pending',()=>{
  assert.throws(()=>x.scope.study1ParticipantOtpSend_(request),
   /OTP_PENDING_APPLICATION_MISMATCH/);
 });
+
+test('candidate recovery gate closes before accessing any original source',()=>{
+ const x=env();assert.throws(()=>x.scope.study1ParticipantRecoverySend({}),/RECOVERY_NOT_APPROVED/);
+ assert.equal(x.open.length,0);assert.equal(x.mail.length,0);
+});
+test('existing verified applicant recovers original status with new scoped OTP, no ordinary capability or new intake',()=>{
+ const x=env(),a=x.begin(),p={applicantId:a.applicantId,screeningId:a.screeningId,email:x.input.email,experiment:'E1',requestId:'REQ_FIRST_MAIL_12345678'};
+ const sent=x.scope.study1ParticipantOtpSend(p);
+ const code=x.mail[0].body.match(/\d{8}/)[0];
+ const {requestId,...otp}=p;
+ const verified=x.scope.study1ParticipantOtpVerify({...otp,challengeId:sent.challengeId,code});
+ x.scope.study1ParticipantEmailStatus(verified.emailProof);
+ const original=x.records.Verification[0].slice();
+ x.flags.set('STUDY1_E1_CASE_RECOVERY_APPROVED','true');x.time.now+=61000;
+ const r={applicantId:a.applicantId,email:x.input.email,requestId:'REQ_'+'a'.repeat(40)};
+ const before=x.writes.length;
+ const ack=x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken});
+ assert.equal(ack.delivery,'UNVERIFIED');assert.equal(x.mail.length,2);
+ const again=x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken});
+ assert.equal(JSON.stringify(ack),JSON.stringify(again));assert.equal(x.mail.length,2);
+ const recovery=x.records.Verification[1];
+ assert.equal(recovery[2],'E1_CASE_RECOVERY');
+ const newCode=x.mail[1].body.match(/\d{8}/)[0];
+ assert.throws(()=>x.scope.study1ParticipantOtpVerify({...otp,challengeId:recovery[0],code:newCode}),/MISMATCH|不一致/);
+ x.scope.study1FormalRecoveryObservationLocked_=(id,lock)=>{
+  assert.equal(id,a.applicantId);assert.equal(lock.hasLock(),true);
+  return {reservations:[{reservationId:'RSV_ORIGINAL_12345678',slotId:'SLOT_ORIGINAL_12345678',status:'HELD'}],consents:[{reservationId:'RSV_ORIGINAL_12345678',state:'CONFIRMED'}]};
+ };
+ assert.equal(x.scope.study1ParticipantRecoveryVerify({...r,code:'00000000'}).verified,false);
+ const result=x.scope.study1ParticipantRecoveryVerify({...r,code:newCode});
+ assert.equal(result.verified,true);assert.equal(result.actionAuthority,'NONE');
+ assert.equal(result.scope,'ORIGINAL_CASE_READ_ONLY');assert.equal(result.consents[0].state,'CONFIRMED');
+ assert.doesNotMatch(JSON.stringify(result),/emailProof|token|signature|hmac|synthetic.person@example/);
+ assert.equal(x.scope.study1ParticipantRecoveryVerify({...r,code:newCode}).verified,false);
+ assert.equal(x.records.Applicants.length,1);assert.equal(x.records.Screenings.length,1);
+ assert.deepEqual(x.records.Verification[0],original);
+ assert.equal(x.scope.study1ParticipantEmailStatus(verified.emailProof).emailVerified,true);
+ assert.ok(x.writes.slice(before).every(n=>['append Verification','flush','F:G'].includes(n)));
+});
+test('recovery wrong reference/mail, stale consent authority, and disabled public gate disclose no case',()=>{
+ const x=env(),a=x.begin();x.flags.set('STUDY1_E1_CASE_RECOVERY_APPROVED','true');
+ const r={applicantId:a.applicantId,email:'wrong@example.org',requestId:'REQ_'+'b'.repeat(40)};
+ const n=x.writes.length;
+ assert.equal(x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken}).delivery,'UNVERIFIED');
+ assert.equal(x.scope.study1ParticipantRecoveryVerify({...r,code:'12345678'}).verified,false);
+ assert.equal(x.mail.length,0);assert.equal(x.writes.length,n);
+ x.scope.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ assert.throws(()=>x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken}),/PUBLIC_READ_ONLY/);
+ assert.throws(()=>x.scope.study1ParticipantRecoveryVerify({...r,code:'12345678'}),/PUBLIC_READ_ONLY/);
+});

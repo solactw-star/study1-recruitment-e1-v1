@@ -135,7 +135,7 @@ function study1EConsentVerifyContactOtp_(request){
    const matching=snap.rows.filter(row=>row[0]===request.challengeId);
    if(matching.length!==1)throw Error('OTP挑戰識別碼非唯一');
    const issued=study1BindingUtc_(matching[0][8]);
-   if(snap.rows.some(row=>row[0]!==''&&
+   if(snap.rows.some(row=>row[0]!==''&&row[2]!==OTP_RULES_.recoveryPurpose&&
       (row[1]===request.applicantId||
        study1BindingEmail_(row[7])===sourceEmail)&&
       study1BindingUtc_(row[8])>issued))

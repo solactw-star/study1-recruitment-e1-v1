@@ -899,6 +899,13 @@ function study1OwnerE1RecoveryAudit(applicantId){if(typeof study1V2PublicRpcDeny
  try{
   if(lock.hasLock()!==true)throw Error('E1_RECOVERY_LOCK_LOST');
   study1AdminOwnerRequired_();
+  return study1FormalRecoveryObservationLocked_(applicantId,lock);
+ }finally{lock.releaseLock();}
+}
+
+/** Internal observation only, called under the verified OWNER or recovery OTP lock. */
+function study1FormalRecoveryObservationLocked_(applicantId,lock){
+ if(!lock||lock.hasLock()!==true)throw Error('E1_RECOVERY_LOCK_REQUIRED');
   const read=()=>{
    const s=study1FormalSnapshot_(),c=study1EConsentRegistry_();
    if(!c||!Number.isSafeInteger(c.revision)||!Array.isArray(c.records))
@@ -929,5 +936,4 @@ function study1OwnerE1RecoveryAudit(applicantId){if(typeof study1V2PublicRpcDeny
     createdAtUtc:r[6],cancelledAtUtc:r[8],updatedAtUtc:r[9]})),
    consents:consent.map(x=>({consentId:x.id,reservationId:x.binding.reservationId,state:x.state})),
    disposition:'OWNER_REVIEW_REQUIRED'};
- }finally{lock.releaseLock();}
 }

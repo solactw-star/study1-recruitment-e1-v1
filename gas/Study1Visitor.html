@@ -88,6 +88,14 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
  <label for="formalPhone" class="field">電話（非必填）</label><input id="formalPhone" type="tel" autocomplete="tel" maxlength="30" disabled>
  <div id="formalHumanCheck" hidden aria-label="真人報名的人機安全驗證"><p class="help">請完成必要的人機驗證；該程序不會把醫療初篩答案提供給驗證服務。</p><div id="formalTurnstile"></div></div>
 </div>
+<div id="formalExistingCase" class="box" hidden>
+ <strong>曾經報名？重新驗證原案件（唯讀）</strong>
+ <p class="help">只輸入原 APP 核對編號及上方原信箱，完成人機驗證。此驗證不會建立新申請、預約、重發同意或下載權限。</p>
+ <label for="formalRecoveryApplicant" class="field">原 APP 案件編號</label><input id="formalRecoveryApplicant" autocomplete="off" maxlength="64">
+ <button id="formalRecoverySend" type="button" disabled>請求原案件查核驗證碼（一次）</button>
+ <div id="formalRecoveryCodeWrap" hidden><label for="formalRecoveryCode" class="field">八位查核驗證碼</label><input id="formalRecoveryCode" autocomplete="one-time-code" inputmode="numeric" maxlength="8"><button id="formalRecoveryVerify" type="button" disabled>驗證並唯讀核對原案件</button></div>
+ <p id="formalRecoveryResult" role="status" aria-live="polite"></p>
+ </div>
 <div id="screenQuestions">
 <label class="check"><input id="adult" type="checkbox" checked><span id="qAdult">已滿十八歲</span></label>
 <label class="check"><input id="cycu" type="checkbox" checked><span id="qCycu">具有中原大學學生身分</span></label>
@@ -204,7 +212,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
 if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
-const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
+const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,recoveryReady:false,recoveryCase:null,
  emailProof:null,emailStatusConfirmed:false,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,pendingHoldQuote:null,pendingHoldSlotId:null,pendingV08:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
@@ -348,8 +356,48 @@ function formalBeginOutcome_(payload){
   }
  },()=>status('原申請唯讀回查失敗；原因果未知，不得重複提交個資。'));
 }
+
+el('formalRecoverySend').addEventListener('click',()=>{
+ if(!state.recoveryReady||state.busy||state.recoveryCase||state.app||state.beginUnknown||!state.humanToken)return;
+ const applicantId=el('formalRecoveryApplicant').value.trim(),email=el('formalEmail').value.trim();
+ if(!/^APP_[A-Za-z0-9_-]{12,60}$/.test(applicantId)||!/^\S+@\S+\.\S+$/.test(email)){
+  status('請核對原案件編號及原信箱格式。');return;
+ }
+ const q={applicantId,email,requestId:genRequest()},humanToken=state.humanToken;
+ state.recoveryCase=q;state.humanToken='';
+ if(window.turnstile&&state.captchaWidget!==null)window.turnstile.reset(state.captchaWidget);
+ el('formalRecoverySend').disabled=true;el('screenNext').disabled=true;
+ el('formalRecoveryApplicant').disabled=true;el('formalEmail').disabled=true;
+ const next=()=>{
+  el('formalRecoveryCodeWrap').hidden=false;el('formalRecoveryVerify').disabled=false;
+  el('formalRecoveryResult').textContent='如原信箱收到查核驗證碼，請輸入。寄送結果未核實，勿重送；未收到請聯絡研究團隊。';
+ };
+ rpc('study1ParticipantRecoverySend',{...q,humanToken},next,next);
+});
+el('formalRecoveryVerify').addEventListener('click',()=>{
+ const q=state.recoveryCase,button=el('formalRecoveryVerify');
+ if(!q||state.busy||button.disabled||!state.recoveryReady)return;
+ const code=el('formalRecoveryCode').value.trim();
+ if(!/^\d{8}$/.test(code)){status('請輸入八位驗證碼。');return;}
+ button.disabled=true;el('formalRecoveryCode').value='';
+ const failed=()=>{el('formalRecoveryResult').textContent='原案件查核結果不明，勿重送；請聯絡研究團隊。';};
+ rpc('study1ParticipantRecoveryVerify',{...q,code},r=>{
+  if(r&&r.verified===false&&r.reason==='REJECTED'){
+   el('formalRecoveryResult').textContent='查核未通過；可核對收到的驗證碼，請勿重新寄送。';button.disabled=false;return;
+  }
+  if(!r||r.verified!==true||r.scope!=='ORIGINAL_CASE_READ_ONLY'||r.experiment!=='E1'||
+     r.applicantId!==q.applicantId||r.actionAuthority!=='NONE'||r.disposition!=='OWNER_REVIEW_REQUIRED'||
+     !Array.isArray(r.reservations)||!Array.isArray(r.consents)){failed();return;}
+  const lines=['已重新驗證原信箱控制權；僅核對原案件，不授權新預約或簽署。'];
+  for(const x of r.reservations)lines.push('原預約 '+x.reservationId+'｜'+x.slotId+'｜'+x.status);
+  for(const x of r.consents)lines.push('同意狀態 '+x.reservationId+'｜'+x.state);
+  lines.push('若原資料缺列或未完成，仍須研究團隊人工查核；不得重複申請。');
+  el('formalRecoveryResult').textContent=lines.join('\n');
+ },failed);
+});
+
 el('screenNext').addEventListener('click',()=>{
- if(!state.ready||state.busy||state.beginUnknown)return;
+ if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase)return;
  // Screening is a self-declaration, not an identity check; ineligible answers
  // never cross the RPC boundary or create a pending applicant record.
  if(yes.some(id=>!el(id).checked)){
@@ -510,6 +558,9 @@ if(typeof google!=='undefined'&&google.script&&google.script.run){
   }).withSuccessHandler(result=>{
    state.ready=!!(result&&result.ready===true&&result.experiment==='E1'&&
     typeof result.siteKey==='string');
+   state.recoveryReady=state.ready&&result.recoveryReady===true;
+   el('formalExistingCase').hidden=!state.recoveryReady;
+   el('formalRecoverySend').disabled=!state.recoveryReady;
    if(state.ready)mountHumanCheck_(result.siteKey);
    if(note)note.textContent=state.ready?
     'Study1 研究報名｜實驗一報名服務目前顯示可受理，請先確認參與條件。':

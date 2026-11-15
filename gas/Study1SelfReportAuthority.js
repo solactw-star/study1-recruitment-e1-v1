@@ -55,7 +55,7 @@ function study1SelfReportedAuthority_(request,heldLock){
  // A re-sent challenge invalidates the earlier consumed OTP, as in the
  // original live mailbox adapter. Never silently fall back to a stale OTP.
  const history=study1WizardIssueRows_(book,request.applicantId,email).snapshot.rows;
- if(history.some(row=>row[0]!==''&&row[0]!==request.challengeId&&
+ if(history.some(row=>row[0]!==''&&row[2]!=='E1_CASE_RECOVERY'&&row[0]!==request.challengeId&&
     (row[1]===request.applicantId||
      study1BindingEmail_(row[7])===email)&&
     study1BindingUtc_(row[8])>=createdAt))

@@ -46,7 +46,7 @@ function otpThrottleSummary_(snapshot, identity, nowUtc) {
     var rowApplicant=otpId_(row[1]);
     var rowEmail=otpBindingEmail_(row[7]);
     if (rowApplicant!==applicantId && rowEmail!==email) return;
-    if (row[2]!==OTP_RULES_.emailPurpose) {
+    if (![OTP_RULES_.emailPurpose,OTP_RULES_.recoveryPurpose].includes(row[2])) {
       throw new Error('OTP 節流用途不合法。');
     }
     var created=otpUtc_(row[8]),expires=otpUtc_(row[4]);

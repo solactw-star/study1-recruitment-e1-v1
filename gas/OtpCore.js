@@ -17,7 +17,8 @@ var OTP_RULES_ = Object.freeze({
   digits:8,
   ttlMinutes:10,
   maxAttempts:5,
-  emailPurpose:'EMAIL_VERIFICATION'
+  emailPurpose:'EMAIL_VERIFICATION',
+  recoveryPurpose:'E1_CASE_RECOVERY'
 });
 
 function otpVerifyHeaders_(headers) {
@@ -64,7 +65,7 @@ function otpSecret_(secret) {
 function otpPayload_(challengeId, applicantId, purpose, code) {
   otpId_(challengeId);
   otpId_(applicantId);
-  if (purpose!==OTP_RULES_.emailPurpose) throw new Error('未知驗證用途。');
+  if (![OTP_RULES_.emailPurpose,OTP_RULES_.recoveryPurpose].includes(purpose)) throw new Error('未知驗證用途。');
   if (typeof code!=='string' || !/^\d{8}$/.test(code)) {
     throw new Error('驗證碼必須是八位數字字串。');
   }
@@ -98,12 +99,13 @@ function otpConstantTimeHexEquals_(left, right) {
  * attemptsAfter / usedAtUtc are candidate updates ONLY; a caller must
  * re-read and update one matching challenge atomically under LockService.
  */
-function otpEvaluateVerification_(row, submittedCode, nowUtc, secret) {
+function otpEvaluateVerification_(row, submittedCode, nowUtc, secret, expectedPurpose) {
   if (!Array.isArray(row) || row.length<OTP_VERIFICATION_HEADERS_.length) {
     throw new Error('驗證資料欄位不足。');
   }
   var challengeId=otpId_(row[0]), applicantId=otpId_(row[1]),purpose=row[2];
-  if (purpose!==OTP_RULES_.emailPurpose) throw new Error('未知驗證用途。');
+  var expected=expectedPurpose||OTP_RULES_.emailPurpose;
+  if (![OTP_RULES_.emailPurpose,OTP_RULES_.recoveryPurpose].includes(expected)||purpose!==expected) throw new Error('未知驗證用途。');
   var stored=row[3];
   if (typeof stored!=='string' || !/^[0-9a-f]{64}$/.test(stored)){
     throw new Error('OTP 簽章資料不合法。');

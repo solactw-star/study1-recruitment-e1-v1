@@ -342,7 +342,7 @@ function study1ParticipantOtpIssueState_(request){
   if(created>now+60000||expires<=created||
      expires-created>OTP_RULES_.ttlMinutes*60000)
    throw Error('OTP_ISSUE_LOOKUP_TIME_INVALID');
-  if(state.snapshot.rows.some(v=>v[0]!==''&&v[0]!==challengeId&&
+  if(state.snapshot.rows.some(v=>v[0]!==''&&v[2]!==OTP_RULES_.recoveryPurpose&&v[0]!==challengeId&&
       (v[1]===r.applicantId||study1BindingEmail_(v[7])===r.email)&&
       study1BindingUtc_(v[8])>created))
    return {found:true,status:'SUPERSEDED'};
@@ -396,7 +396,7 @@ function study1ParticipantOtpVerify_(input){
    const matching=snapshot.rows.filter(v=>v[0]===input.challengeId);
    if(matching.length!==1)throw Error('OTP挑戰來源不唯一');
    const issued=study1BindingUtc_(matching[0][8]);
-   if(snapshot.rows.some(v=>v[0]!==''&&
+   if(snapshot.rows.some(v=>v[0]!==''&&v[2]!==OTP_RULES_.recoveryPurpose&&
      (v[1]===r.applicantId||study1BindingEmail_(v[7])===r.email)&&
      study1BindingUtc_(v[8])>issued))
     throw Error('OTP_SUPERSEDED');
@@ -521,7 +521,7 @@ function study1ParticipantEmailStatus_(untrusted){
      v[2]!=='EMAIL_VERIFICATION'||study1BindingEmail_(v[7])!==email||
      v[6]!==p.usedAtUtc||used<created||used>=expiry||
      expiry-created>600000||Number(v[5])<1||Number(v[5])>5||
-     all.some(row=>row[0]!==''&&row[0]!==p.challengeId&&
+     all.some(row=>row[0]!==''&&row[2]!==OTP_RULES_.recoveryPurpose&&row[0]!==p.challengeId&&
        (row[1]===p.applicantId||
         study1BindingEmail_(row[7])===email)&&
        study1BindingUtc_(row[8])>=created))
@@ -564,7 +564,8 @@ function study1ParticipantReadiness(){
   // No real future PI-reviewed E1 slot means no pre-booking PII intake.
   if(!study1FormalPublicSlotReady_())
    throw Error('E1_OFFICIAL_SLOTS_NOT_AVAILABLE');
-  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey};
+  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey,
+   recoveryReady:PropertiesService.getScriptProperties().getProperty('STUDY1_E1_CASE_RECOVERY_APPROVED')==='true'};
  }catch(_){
   // Do not expose the presence or kind of private record / missing permission.
   return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};
@@ -822,4 +823,137 @@ function study1OwnerE1NoticeProject_(registry,first,lock){
   if(lock.hasLock()!==true)throw Error('OWNER_E1_NOTICE_AUDIT_LOCK_LOST');
   return {readOnly:true,source:'ORIGINAL_NOTIFICATIONS',
    consentRevision:registry.revision,records};
+}
+
+/** Candidate recovery purpose: independent PI/REC and data-use approval.
+ * A fresh recovery OTP proves control of the original mailbox ONLY.
+ * It must never supersede ordinary enrollment evidence or mint emailProof,
+ * original consent token, signed PDF capability or a write authorization. */
+function study1ParticipantRecoveryGate_(){
+ study1ParticipantMailGate_();
+ if(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_CASE_RECOVERY_APPROVED')!=='true')
+  throw Error('E1_CASE_RECOVERY_NOT_APPROVED');
+}
+function study1ParticipantRecoveryInput_(input,verify){
+ const keys=verify?'applicantId,code,email,requestId':'applicantId,email,humanToken,requestId';
+ if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!==keys||
+    !/^APP_[A-Za-z0-9_-]{12,60}$/.test(input.applicantId||'')||
+    !/^REQ_[a-f0-9]{40}$/.test(input.requestId||'')||
+    (verify&&(typeof input.code!=='string'||!/^\d{8}$/.test(input.code))))
+  throw Error('E1_CASE_RECOVERY_INPUT_INVALID');
+ return {...input,email:study1BindingEmail_(input.email)};
+}
+function study1ParticipantRecoverySource_(r,lock){
+ if(!lock||lock.hasLock()!==true)throw Error('E1_CASE_RECOVERY_LOCK_REQUIRED');
+ study1ParticipantRecoveryGate_();
+ const book=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
+ const apps=study1WizardTable_(book,'Applicants',STUDY1_BINDING_SCHEMA_.applicants);
+ const screens=study1WizardTable_(book,'Screenings',STUDY1_BINDING_SCHEMA_.screenings);
+ const ai=study1WizardLookup_(apps,1,r.applicantId,true);
+ const mi=study1WizardLookup_(apps,3,r.email,false);
+ const si=study1WizardLookup_(screens,2,r.applicantId,true);
+ if(ai.length!==1||mi.length!==1||ai[0]!==mi[0]||si.length!==1)return null;
+ const a=study1BindingOtpRow_(apps.tab,ai[0],7),s=study1BindingOtpRow_(screens.tab,si[0],6);
+ const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
+ if(a[0]!==r.applicantId||study1BindingEmail_(a[2])!==r.email||
+    !['PENDING_EMAIL','EMAIL_VERIFIED'].includes(a[6])||
+    s[1]!==a[0]||s[2]!==policy.screeningVersion||s[3]!=='ELIGIBLE'||
+    s[5]!=='PARTICIPANT_SELF_REPORT'||
+    study1BindingUtc_(s[4])<study1BindingUtc_(a[4]))return null;
+ study1BindingId_(s[0]);
+ const state=study1WizardIssueRows_(book,r.applicantId,r.email);
+ // EMAIL_VERIFIED must have original ordinary OTP consumption evidence;
+ // its age need not still authorize booking, and recovery cannot renew it.
+ if(a[6]==='EMAIL_VERIFIED'){
+  const original=state.snapshot.rows.filter(v=>v[0]!==''&&v[1]===a[0]&&
+   v[2]===OTP_RULES_.emailPurpose&&study1BindingEmail_(v[7])===r.email&&v[6]!=='');
+  if(!original.length||original.some(v=>{
+   const issued=study1BindingUtc_(v[8]),used=study1BindingUtc_(v[6]),expiry=study1BindingUtc_(v[4]);
+   return issued<study1BindingUtc_(s[4])||issued>used||used>=expiry||
+    expiry-issued>OTP_RULES_.ttlMinutes*60000||used>Date.now()||
+    !/^[a-f0-9]{64}$/.test(v[3]||'')||!Number.isSafeInteger(Number(v[5]))||Number(v[5])<1||Number(v[5])>5;
+  }))return null;
+ }
+ return {a,s,state};
+}
+function study1ParticipantRecoveryChallenge_(r){
+ return 'CHL_'+study1BindingHmac_(['E1_CASE_RECOVERY_V1',r.applicantId,r.email,r.requestId]).slice(0,28);
+}
+function study1ParticipantRecoverySecret_(){
+ const secret=otpSecret_(PropertiesService.getScriptProperties().getProperty('STUDY1_OTP_HMAC_SECRET'));
+ if(/SIMULATED|TEST_ONLY|EXAMPLE|DEFAULT/i.test(secret))throw Error('E1_CASE_RECOVERY_SECRET_INVALID');
+ return secret;
+}
+function study1ParticipantRecoverySend(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1ParticipantRecoveryGate_();
+ const r=study1ParticipantRecoveryInput_(input,false);
+ const ack={accepted:true,delivery:'UNVERIFIED'};
+ const grant=study1ParticipantAbuseProtection_(r);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(5000)!==true)throw Error('E1_CASE_RECOVERY_LOCK_BUSY');
+ try{
+  study1ParticipantAbuseRecheck_(grant,r);
+  const data=study1ParticipantRecoverySource_(r,lock);
+  if(!data)return ack;
+  const id=study1ParticipantRecoveryChallenge_(r),secret=study1ParticipantRecoverySecret_();
+  const old=study1WizardLookup_(data.state.ref,1,id,true);
+  if(old.length)return ack; // never resend a possibly delivered recovery message
+  const now=new Date().toISOString();
+  if(!otpThrottleIssuePreflight_(data.state.snapshot,{applicantId:r.applicantId,email:r.email},now).allowed)return ack;
+  const code=study1WizardCode_(),expiry=new Date(Date.parse(now)+OTP_RULES_.ttlMinutes*60000).toISOString();
+  const mac=otpHmacHex_(id,r.applicantId,OTP_RULES_.recoveryPurpose,code,secret);
+  study1ParticipantRecoveryGate_();
+  if(lock.hasLock()!==true)throw Error('E1_CASE_RECOVERY_LOCK_LOST');
+  study1WizardAppend_(data.state.ref,[id,r.applicantId,OTP_RULES_.recoveryPurpose,mac,expiry,0,'',r.email,now]);
+  study1ParticipantRecoveryGate_();
+  if(lock.hasLock()!==true)throw Error('E1_CASE_RECOVERY_LOCK_LOST');
+  try{MailApp.sendEmail({to:r.email,subject:'Study1｜原案件唯讀查核驗證碼',
+    body:'您的原案件查核驗證碼：'+code+'\n10分鐘內有效。僅供本次原案件唯讀查核，不授權預約、簽署或下載PDF。'});}
+  catch(_){/* provider outcome unknown: never resend or reveal existence */}
+  return ack;
+ }finally{lock.releaseLock();}
+}
+function study1ParticipantRecoveryVerify(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1ParticipantRecoveryGate_();
+ const r=study1ParticipantRecoveryInput_(input,true),reject={verified:false,reason:'REJECTED'};
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(5000)!==true)throw Error('E1_CASE_RECOVERY_LOCK_BUSY');
+ try{
+  const data=study1ParticipantRecoverySource_(r,lock);
+  if(!data)return reject;
+  const id=study1ParticipantRecoveryChallenge_(r),state=data.state,now=new Date().toISOString();
+  const found=otpFindUniqueChallenge_(state.snapshot,id);
+  if(!found||found.row[1]!==r.applicantId||found.row[2]!==OTP_RULES_.recoveryPurpose||
+     study1BindingEmail_(found.row[7])!==r.email)return reject;
+  const created=study1BindingUtc_(found.row[8]);
+  if(state.snapshot.rows.some(v=>v[0]!==''&&v[0]!==id&&v[2]===OTP_RULES_.recoveryPurpose&&
+      study1BindingUtc_(v[8])>=created))return reject;
+  if(!otpThrottleVerifyGate_(state.snapshot,r,now).allowed)return reject;
+  const result=otpEvaluateVerification_(found.row,r.code,now,study1ParticipantRecoverySecret_(),OTP_RULES_.recoveryPurpose);
+  if(!['MATCH','INVALID'].includes(result.reason))return reject;
+  const used=result.verified?result.usedAtUtc:found.row[6];
+  const fresh=study1BindingOtpRow_(state.ref.tab,found.rowNumber,9);
+  if(JSON.stringify(fresh)!==JSON.stringify(found.row)||lock.hasLock()!==true)
+   throw Error('E1_CASE_RECOVERY_CONCURRENT_CHANGE');
+  study1ParticipantRecoveryGate_();
+  state.ref.tab.getRange(found.rowNumber,6,1,2).setValues([[result.attemptsAfter,used]]);
+  SpreadsheetApp.flush();
+  const after=study1BindingOtpRow_(state.ref.tab,found.rowNumber,9),expected=found.row.slice();
+  expected[5]=result.attemptsAfter;expected[6]=used;
+  if(lock.hasLock()!==true||JSON.stringify(after)!==JSON.stringify(expected))
+   throw Error('E1_CASE_RECOVERY_OUTCOME_UNKNOWN');
+  if(!result.verified)return reject;
+  // Recheck the original applicant, screening and Verification under the
+  // same lock after F:G. A lost response NEVER authorizes replay of OTP.
+  const latest=study1ParticipantRecoverySource_(r,lock);
+  if(!latest||JSON.stringify(latest.a)!==JSON.stringify(data.a)||JSON.stringify(latest.s)!==JSON.stringify(data.s)||
+     JSON.stringify(latest.state.snapshot.rows[found.rowNumber-2])!==JSON.stringify(expected))
+   throw Error('E1_CASE_RECOVERY_SOURCE_CHANGED');
+  const observed=study1FormalRecoveryObservationLocked_(r.applicantId,lock);
+  if(lock.hasLock()!==true)throw Error('E1_CASE_RECOVERY_LOCK_LOST');
+  return {verified:true,scope:'ORIGINAL_CASE_READ_ONLY',experiment:'E1',applicantId:r.applicantId,
+   applicationState:latest.a[6],reservations:observed.reservations.map(x=>({reservationId:x.reservationId,slotId:x.slotId,status:x.status})),
+   consents:observed.consents.map(x=>({reservationId:x.reservationId,state:x.state})),
+   actionAuthority:'NONE',disposition:'OWNER_REVIEW_REQUIRED'};
+ }finally{lock.releaseLock();}
 }
