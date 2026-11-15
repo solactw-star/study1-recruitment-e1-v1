@@ -920,3 +920,64 @@ test('P0-B owner data gate, public denial and duplicate applicant fail closed',(
  assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/PUBLIC_READ_ONLY/);
  assert.equal(h.mutations.length,n);
 });
+
+test('P0-B recruitment source is the original Index; no write or public read of owner RPC',()=>{
+ const h=wsHarness(),n=h.mutations.length;
+ h.ctx.HtmlService={createHtmlOutputFromFile:name=>{
+  assert.equal(name,'Index');return {getContent:()=>fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')};
+ }};
+ const r=h.ctx.study1OwnerE1RecruitmentDraft();
+ assert.match(r.title,/記憶與身體感覺/);assert.match(r.intro,/身體訊號覺察/);assert.equal(r.actionAuthority,'DRAFT_ONLY');assert.equal(r.open,false);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ assert.throws(()=>h.ctx.study1OwnerE1RecruitmentDraft(),/PUBLIC_READ_ONLY/);
+ assert.equal(h.mutations.length,n);
+});
+function workspaceBrowser(server){
+ const src=fs.readFileSync(path.join(__dirname,'../gas/AdminConsole.html'),'utf8');
+ const begin=src.indexOf('/* P0-B recruitment copy:'),end=src.indexOf('function e1RecoverySetup_(){',begin);
+ assert.ok(begin>=0&&end>begin);
+ const nodes=new Map();
+ function node(tag='div'){
+  return {tag,children:[],value:'',textContent:'',disabled:false,handlers:{},
+   appendChild(c){this.children.push(c);return c;},removeChild(c){this.children.splice(this.children.indexOf(c),1);},
+   get firstChild(){return this.children[0]||null;},
+   addEventListener(e,f){this.handlers[e]=f;},
+   click(){if(!this.disabled&&this.handlers.click)this.handlers.click();}
+  };
+ }
+ const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
+ get('e1WsStatus').value='ALL';get('e1WsEligibility').value='ALL';
+ let success,failure;const calls=[];
+ const proxy=new Proxy({}, {get(_t,p){
+  if(p==='withSuccessHandler')return f=>{success=f;return proxy;};
+  if(p==='withFailureHandler')return f=>{failure=f;return proxy;};
+  return (...args)=>{calls.push({method:p,args});const s=success,f=failure;try{s(server[p](...args));}catch(err){f(err);}};
+ }});
+ vm.runInNewContext(src.slice(begin,end),{document:{getElementById:get,createElement:node},google:{script:{run:proxy}},Date,Number,JSON,Error});
+ return {get,calls};
+}
+test('P0-B browser workspace renders real joined roster, filters, selects slot and previews without a mutation',()=>{
+ const h=wsHarness(),a=h.person('A');h.holdSlot(h.proof(a),h.S1);
+ const b=workspaceBrowser(h.ctx),g=b.get,n=h.mutations.length;
+ g('e1WsLoad').click();assert.equal(g('e1WsRows').children.length,1);assert.equal(g('e1WsSlots').children.length,2);
+ assert.match(g('e1WsRows').children[0].children[5].textContent,/HELD/);
+ const selected=g('e1WsSlots').children[0].children[8].children[0];selected.click();g('e1WsDraftCap').value='2';g('e1WsPreview').click();
+ assert.match(g('e1WsDraftResult').textContent,/預檢通過（未儲存）/);
+ assert.equal(b.calls.at(-1).method,'study1OwnerE1SlotChangePreview');
+ g('e1WsQuery').value='NOT_PRESENT';g('e1WsLoad').click();assert.equal(g('e1WsRows').children.length,0);
+ assert.equal(h.mutations.length,n);
+ h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');g('e1WsLoad').click();
+ assert.equal(g('e1WsRows').children.length,0);assert.equal(g('e1WsNew').disabled,true);
+});
+test('P0-B browser recruitment editing preview and review export never publish and reject HTML',()=>{
+ const h=wsHarness();h.ctx.HtmlService={createHtmlOutputFromFile:()=>({getContent:()=>fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')})};
+ const b=workspaceBrowser(h.ctx),g=b.get;
+ g('e1CopyLoad').click();assert.match(g('e1CopyTitle').value,/記憶與身體感覺/);
+ g('e1CopyTitle').value='審核中的招募標題';g('e1CopyPreview').click();
+ assert.equal(g('e1CopyTitlePreview').textContent,'審核中的招募標題');
+ g('e1CopyExport').click();
+ const draft=JSON.parse(g('e1CopyDraft').value);assert.equal(draft.published,false);assert.equal(draft.open,false);assert.equal(draft.approved,false);
+ g('e1CopyTitle').value='<script>';g('e1CopyTitle').handlers.input();g('e1CopyExport').click();
+ assert.equal(g('e1CopyDraft').value,'');assert.match(g('e1CopyStatus').textContent,/不接受 HTML/);
+ assert.deepEqual(b.calls.map(x=>x.method),['study1OwnerE1RecruitmentDraft']);
+});

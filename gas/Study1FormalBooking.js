@@ -1143,7 +1143,8 @@ function study1OwnerE1WorkspaceRead_(lock){
  const p=PropertiesService.getScriptProperties();
  const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
  const read=()=>{
-  const personal=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
+  const personalId=study1BindingSheetId_('applicants'),personal=SpreadsheetApp.openById(personalId);
+  if(!personal||personal.getId()!==personalId)throw Error('E1_WORKSPACE_PERSONAL_SOURCE_MISMATCH');
   return {apps:bookingReadOnlyTab_(personal,'Applicants',STUDY1_BINDING_SCHEMA_.applicants),
    screenings:bookingReadOnlyTab_(personal,'Screenings',STUDY1_BINDING_SCHEMA_.screenings),
    booking:study1FormalSnapshot_(),consent:study1EConsentRegistry_(),
@@ -1190,6 +1191,7 @@ function study1OwnerE1WorkspaceRead_(lock){
    excluded++;continue;
   }
   const screening=screens[0];
+  study1BindingUtc_(screening[4]);
   if(typeof app[1]!=='string'||!['PENDING_EMAIL','EMAIL_VERIFIED'].includes(app[6])||
      !['ELIGIBLE','INELIGIBLE'].includes(screening[3])){excluded++;continue;}
   const related=first.booking.reservations.rows.filter(r=>r[1]===app[0]&&e1.has(r[2]));
@@ -1206,6 +1208,7 @@ function study1OwnerE1WorkspaceRead_(lock){
    noticeStatus:cs.length===0?'NOT_QUEUED':consentMatches?(byNotice.get(c.id)||{}).noticeStatus||'UNKNOWN':'SOURCE_MISMATCH'});
  }
  const calendar=slots.map(r=>{
+  study1BindingUtc_(r[1]);study1BindingUtc_(r[2]);
   const linked=first.booking.reservations.rows.filter(x=>x[2]===r[0]);
   const held=linked.filter(x=>study1FormalEffectiveStatus_(x,now)==='HELD').length;
   const confirmed=linked.filter(x=>x[3]==='CONFIRMED').length;
@@ -1273,4 +1276,25 @@ function study1OwnerE1SlotChangePreview(input){if(typeof study1V2PublicRpcDeny_=
     locationCode:input.locationCode,capacity:input.capacity,status:input.action==='CLOSE'?'CLOSED':existing?existing.status:'CLOSED'},
    preservesReservations:true,requiresPiApproval:true,actionAuthority:'NONE',written:false};
  }finally{lock.releaseLock();}
+}
+
+/** Original Index source, not sandbox text and not an alternate public site.
+ * Only extract plain headline/intro text from the current bundled homepage.
+ * No writes / no HTML submitted by the owner / no publication authority. */
+function study1OwnerE1RecruitmentDraft(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ const html=HtmlService.createHtmlOutputFromFile('Index').getContent();
+ const hero=html.match(/<section id="home" class="hero">([\s\S]*?)<div class="actions">/g);
+ if(!hero||hero.length!==1)throw Error('E1_RECRUITMENT_ORIGINAL_SOURCE_MISMATCH');
+ const parts=hero[0].match(/<h1>([\s\S]*?)<\/h1><p>([\s\S]*?)<\/p>/);
+ if(!parts)throw Error('E1_RECRUITMENT_ORIGINAL_SOURCE_MISMATCH');
+ const plain=value=>{
+  const text=value.replace(/<br\s*\/?\s*>/gi,'').replace(/<\/?span>/g,'').trim();
+  if(!text||/[<>\x00-\x1f]/.test(text))throw Error('E1_RECRUITMENT_ORIGINAL_TEXT_INVALID');
+  return text;
+ };
+ return {mode:'OWNER_RECRUITMENT_DRAFT',source:'gas/Index.html',
+  revision:study1BindingHmac_(['E1_RECRUITMENT_INDEX_V1',html]),
+  title:plain(parts[1]),intro:plain(parts[2]),open:false,
+  actionAuthority:'DRAFT_ONLY'};
 }

@@ -126,6 +126,16 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 </div>
 <div id="status" role="status" aria-live="polite">確認研究室權限中……</div>
 </section>
+<section id="e1RecruitmentDraft"><h2>E1 招募內容管理</h2>
+<p>直接讀取現行招募首頁標題與介紹。編輯及預覽只在本頁，匯出供研究團隊審核及原 GitHub 文案發布流程；不修改核准資格、研究條件、收件設定。</p>
+<button type="button" id="e1CopyLoad">載入現行首頁文案</button>
+<label for="e1CopyTitle">首頁標題</label><input id="e1CopyTitle" maxlength="120" disabled>
+<label for="e1CopyIntro">研究介紹</label><textarea id="e1CopyIntro" maxlength="1000" disabled></textarea>
+<button type="button" id="e1CopyPreview" disabled>預覽修改</button><button type="button" id="e1CopyExport" disabled>產生審核草稿</button>
+<div class="notice"><small>招募首頁文案預覽（報名維持關閉）</small><h3 id="e1CopyTitlePreview"></h3><p id="e1CopyIntroPreview"></p></div>
+<p id="e1CopyStatus" role="status" aria-live="polite">尚未載入原文案。</p>
+<label for="e1CopyDraft">審核草稿（可複製，不是已發布內容）</label><textarea id="e1CopyDraft" readonly></textarea>
+</section>
 <section id="e1Workspace">
 <h2>E1 研究管理工作區</h2><p>原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更目前僅送出預檢草稿，不寫入正式資料。</p>
 <div class="booking-filter-grid"><div><label for="e1WsQuery">姓名或參與者代碼</label><input id="e1WsQuery" maxlength="80" autocomplete="off"></div>
@@ -1227,6 +1237,48 @@ function e1OwnerBookingRepairSetup_(){
 e1OwnerBookingRepairSetup_();
 
 
+
+/* P0-B recruitment copy: intentionally no persistent browser storage. */
+function e1RecruitmentDraftSetup_(){
+ const el=id=>document.getElementById(id),load=el('e1CopyLoad');
+ if(!load||typeof load.addEventListener!=='function')return;
+ let source=null,busy=false;
+ const status=msg=>{el('e1CopyStatus').textContent=msg;};
+ const enable=v=>{for(const id of ['e1CopyTitle','e1CopyIntro','e1CopyPreview','e1CopyExport'])el(id).disabled=!v;};
+ const clear=()=>{source=null;enable(false);el('e1CopyTitle').value='';el('e1CopyIntro').value='';el('e1CopyDraft').value='';el('e1CopyTitlePreview').textContent='';el('e1CopyIntroPreview').textContent='';};
+ const proposal=()=>{
+  if(!source||busy)return null;
+  const title=el('e1CopyTitle').value.trim(),intro=el('e1CopyIntro').value.trim();
+  if(!title||title.length>120||!intro||intro.length>1000||
+    /[<>\x00-\x1f]/.test(title)||/[<>\x00-\x08\x0b\x0c\x0e-\x1f]/.test(intro)){
+   status('請輸入有效純文字標題及介紹，不接受 HTML。');return null;
+  }
+  return {kind:'RECRUITMENT_COPY_REVIEW_DRAFT',source:source.source,baseRevision:source.revision,
+   title,intro,open:false,approved:false,published:false};
+ };
+ load.addEventListener('click',()=>{
+  if(busy)return;busy=true;load.disabled=true;clear();status('載入原首頁…');
+  const done=()=>{busy=false;load.disabled=false;};
+  const fail=()=>{done();clear();status('無法核對原文案，請重新載入。');};
+  google.script.run.withFailureHandler(fail).withSuccessHandler(r=>{
+   if(!r||r.mode!=='OWNER_RECRUITMENT_DRAFT'||r.source!=='gas/Index.html'||r.open!==false||
+     r.actionAuthority!=='DRAFT_ONLY'||!/^[a-f0-9]{64}$/.test(r.revision||'')||
+     typeof r.title!=='string'||typeof r.intro!=='string'){fail();return;}
+   done();source=r;el('e1CopyTitle').value=r.title;el('e1CopyIntro').value=r.intro;
+   el('e1CopyTitlePreview').textContent=r.title;el('e1CopyIntroPreview').textContent=r.intro;
+   enable(true);status('已載入原首頁；修改尚未發布。');
+  }).study1OwnerE1RecruitmentDraft();
+ });
+ el('e1CopyPreview').addEventListener('click',()=>{const p=proposal();if(!p)return;
+  el('e1CopyTitlePreview').textContent=p.title;el('e1CopyIntroPreview').textContent=p.intro;
+  status('預覽完成；尚未核准或發布。');
+ });
+ el('e1CopyExport').addEventListener('click',()=>{const p=proposal();if(!p)return;
+  el('e1CopyDraft').value=JSON.stringify(p,null,2);status('審核草稿已產生，可複製；未儲存或發布。');
+ });
+ for(const id of ['e1CopyTitle','e1CopyIntro'])el(id).addEventListener('input',()=>{el('e1CopyDraft').value='';status('文案已修改，請重新預覽及產生草稿。');});
+}
+e1RecruitmentDraftSetup_();
 
 /* P0-B workspace: original owner RPCs, no fixture data in production. */
 function e1WorkspaceSetup_(){
