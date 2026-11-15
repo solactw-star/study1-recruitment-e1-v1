@@ -291,6 +291,84 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
+function privateOwnerReadOnlyCandidate(files){
+ // Offline only: never used by main(), localSources(), prepare(), apply(), or workflow.
+ // Start exclusively from the reviewed, closed public source inventory.
+ canonical(files);
+ require_(JSON.stringify(files.map(f=>f.name).sort())===JSON.stringify(APPROVED),
+  'private candidate requires the reviewed complete V2 inventory');
+ require_(closedManifest(files).webapp.access==='ANYONE',
+  'private candidate requires the unchanged login-only public baseline');
+ closedWebsite(files);
+ const patch=(source,from,to)=>{
+  require_(source.split(from).length===2,'private candidate source anchor drift');
+  return source.replace(from,()=>to);
+ };
+ const owners={
+  AdminSandbox:['study1ConsentVersionList','study1EConsentOwnerList',
+   'study1EConsentOwnerSignedPdfDownload','study1EConsentOwnerWithdrawalCases'],
+  Study1FormalBooking:['study1OwnerE1OperationsAudit'],
+  Study1WizardP0Bridge:['study1OwnerE1SlotAudit']
+ };
+ const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
+ const result=files.map(f=>{
+  let s=f.source;
+  if(f.name==='appsscript'){
+   const manifest=JSON.parse(s);
+   manifest.webapp.access='MYSELF';
+   s=JSON.stringify(manifest,null,2)+'\n';
+  }else if(f.name==='Website'){
+   s=patch(s,'function doGet(e){',`function doGet(e){
+ if(e&&e.parameter&&e.parameter.view==='admin'){
+  study1AdminOwnerRequired_();
+  return HtmlService.createHtmlOutputFromFile('AdminConsole')
+   .setTitle('Study 1｜OWNER 私人唯讀管理')
+   .addMetaTag('viewport','width=device-width, initial-scale=1');
+ }`);
+  }else if(f.name==='AdminConsole'){
+   s=patch(s,'<section><h2>測試研究內容','<section hidden><h2>測試研究內容');
+   s=patch(s,'<section><h2>測試預約設定','<section hidden><h2>測試預約設定');
+   s=patch(s,'\nreload();\n})();','\n// Private read-only candidate: no automatic sandbox RPC.\n})();');
+   s=patch(s,'<label for="e1PdfFile">','<div hidden><label for="e1PdfFile">');
+   s=patch(s,'<label for="e1PdfChoose">','</div><label for="e1PdfChoose">');
+   s=patch(s,'<label><input type="checkbox" id="e1PdfChooseAttest">',
+    '<div hidden><label><input type="checkbox" id="e1PdfChooseAttest">');
+   s=patch(s,'<h3>已完成簽署的完整 PDF｜OWNER 私人副本</h3>',
+    '</div><p>本私人唯讀候選僅供核對既有 PDF 與下載已核實副本；不提供上傳、選用或設定來源。</p><h3>已完成簽署的完整 PDF｜OWNER 私人副本</h3>');
+   s=patch(s,' <h3>OWNER 手動核對已簽 PDF 與原預約（禁止自動重試）</h3>',
+    ' <div hidden><h3>OWNER 手動核對已簽 PDF 與原預約（禁止自動重試）</h3>');
+   s=patch(s,'</section>\n\n<section id="staffWithdrawal"',
+    '</div></section>\n\n<section id="staffWithdrawal"');
+   s=patch(s,'<title>Study 1｜OWNER 後台（正式 E1 文件與隔離測試分區）</title>',
+    '<title>Study 1｜OWNER 私人唯讀管理</title>');
+   s=patch(s,'<header><h1>Study 1｜研究室 OWNER 後台</h1><p>正式 E1 文件與隔離測試分區；目前不接受真人報名、預約或電子簽署。</p></header>',
+    '<header><h1>Study 1｜研究室 OWNER 私人唯讀管理</h1><p>核對 E1 原始場次、PDF、預約與通知；不開放真人報名、預約或電子簽署。</p></header>');
+   s=patch(s,'<strong>隔離測試與正式文件分區</strong><p>測試設定不會修改正式研究資料；獨立的 E1 OWNER PDF 區將使用原私人 Drive 與同意書版本索引，但不開放真人收件。所有正式操作仍須通過伺服器端 OWNER 身分驗證。</p>',
+    '<strong>私人唯讀驗收候選｜非正式營運</strong><p>僅已驗證研究室 OWNER 可核對既有來源；所有寫入、寄信、場次調整、簽署與真人收件 RPC 仍被拒絕。資料是否齊備及正式啟用須另行核對及授權。</p>');
+  }else if(Object.hasOwn(owners,f.name)){
+   for(const name of owners[f.name]){
+    const re=new RegExp('^function '+name+'\\([^\\n]*\\)\\{','gm');
+    const hits=[...s.matchAll(re)];
+    require_(hits.length===1,'private candidate RPC declaration drift: '+name);
+    const prefix=hits[0][0],at=hits[0].index+prefix.length;
+    require_(s.slice(at).startsWith(gate)&&
+     /^\s*study1AdminOwnerRequired_\(\);/.test(s.slice(at+gate.length)),
+     'private candidate RPC must already require OWNER before reads: '+name);
+    s=patch(s,prefix+gate,prefix);
+   }
+  }
+  return {...f,source:s};
+ });
+ require_(closedManifest(result).webapp.access==='MYSELF',
+  'private candidate must remain MYSELF');
+ closedWebsite(result);
+ let publicRejected=false;
+ try{publicRpcSurface(result);}catch(e){
+  publicRejected=String(e.message).includes('unguarded public RPC');
+ }
+ require_(publicRejected,'private candidate must not pass public release guard');
+ return result;
+}
+module.exports={privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
  runnerPaths,aad,audit,prepare,apply};

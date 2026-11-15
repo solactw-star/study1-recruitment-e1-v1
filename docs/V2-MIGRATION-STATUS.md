@@ -497,3 +497,13 @@
 - LIMITATIONS：新的本人安全恢復只在同一仍開啟的 session 中保留既有 bearer、EmailProof、驗證結果及已簽 PDF Blob；若使用者關閉瀏覽器、重載或跨裝置而遺失憑證，仍須研究團隊依正式程序另行安全核對，不從同意 ID、Email 或已使用 OTP 自動恢復任意私有文件。OWNER 合成 source 並非真 Google API／MailApp，雙讀原來源不能防外部無鎖競寫/ABA 或視為 ACID。此 CI 僅證明 Github 程式離線安全測試通過，不等於正式部署、私人 OWNER UI 與參與者 UI 驗收。
 - WRITE_OWNER=唯一新 V2 GitHub `gas/Study1Visitor.html`、既有三個 tests、原 `docs/V2-MIGRATION-STATUS.md`；NEXT_ACTION=評估本人換裝置／重新載入後的本人可信身分恢復與可否不開新 OTP 的人工程序，優先確認 PI／REC 適用；或者優先處理授權 V2 GAS 同 SHA source sync 前的安全審查與 PI 核定 Slots／正式預簽 PDF 清單，但沒有另行授權時僅唯讀不寫 GAS。
 - BLOCKERS：新 V2 GAS HEAD、版本與部署未在本輪同步／驗證；正式 PI Slots、受保護預簽 PDF/REC 適用結論、真人 Google 登入雙角色 UI、真人信件 outbox／送達均無本輪完成證據。 `OPEN=false`、`CONSENT_READY=false`、`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`、`GAS_PUBLIC_SOURCE_SYNC_VERIFIED=false`、`PUBLIC_DEPLOYED=false`、`PUBLIC_UI_VERIFIED=false`。本文件追記為 docs-only commit，須另回讀新 main SHA 的同版 CI，勿拿舊 SHA 冒充成功。
+
+## 2026-11-15｜E1 私人 OWNER 後台不可達：唯讀候選與公版隔離
+- TASK_DOMAIN=`Study1_V2_E1_OWNER_PRIVATE_REACHABILITY`；SOURCE_OWNER=唯一新 V2 GitHub；SOURCE_ID/PATH=`docs/study1-system-spec.md` §70-S.34–36、`gas/Website.js`、`gas/appsscript.json`、原 `gas/AdminConsole.html`／三個 OWNER server 檔、`scripts/study1-v2-gas-head-only.cjs`、原測試及本進度檔。PRE_MAIN_SHA=`532367b876978e5d4980f764d1cb0bfb08404c2d`。
+- LAST_VERIFIED_STEP=原 main [Run #43525780981](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43525780981)／Job #132231045864 原始日誌 `304 tests / 304 PASS / 0 FAIL / 0 SKIP`，含三項 lost-browser safety guards；本輪新提交 CI 另待回讀。
+- FOUND_GAP：現行 GitHub manifest=ANYONE/USER_DEPLOYING，Website.doGet 對 admin/team/preview/demo 一律拒絕，敏感 RPC 也公版 deny-all。這是公開唯讀授權的正確保護，不是只換 URL 或同步 HEAD 可修的私有後台。歷史私人 version 1 不可當最新 OWNER 原程式驗收。
+- COMPLETED（候選）：原 HEAD-only 安全腳本新增純離線 `privateOwnerReadOnlyCandidate(files)`，從完整原公版清單生成同一 Script 的 MYSELF/USER_DEPLOYING 私人唯讀來源候選；只允許 OWNER 身分雙核對的 admin HTML 與六個原有讀取 RPC（場次、PDF 目錄／已簽索引／原副本下載、聯合預約與通知、撤回查核）。原公版 gas/ 不變；所有寫入、寄信、真人報名／簽署、修復 POST、測試／Demo RPC 保持拒絕，候選隱藏其 UI，不自動讀取 sandbox。候選必須無法通過原 ANYONE 公版防護。本函式不接入既有 main()/HEAD-only audit、prepare、apply 或任何部署工作流；不自動將候選寫入 GAS。
+- TESTS：新增原既有 HEAD-only 測試，包含基線不變、MYSELF／ANYONE 誤用拒絕、來源漂移、OWNER route 正向、非 OWNER/身分遮蔽負向、六項讀 RPC 在來源前拒絕及敏感寫入保持關閉；實際 CI 結果須按新 SHA 記錄。原安全測試保留。
+- BLOCKERS：仍需取得新提交同SHA CI，另明確核准唯一 V2 GAS 私人來源、備份／比較／回讀、版本與部署。此候選僅用於先解除管理查閱/UAT 入口阻塞，不代表可完成 PDF 上傳選用、正式場次寫入、真人報名預約。後續依實際 UAT 與適用 PI/REC 授權，逐步開放既有 E1 OWNER 必要操作，不擅自設定原始資料或擴大公開版權限。
+- NEXT_ACTION=同版 CI 驗收；若通過且繼續獲授權，集中完成同 V2 Script 私人 MYSELF 來源同步/不可變版本、OWNER 登入及六項唯讀功能真 UI。獨立公開唯讀版原路徑維持；正式 E1 收件須另外核准完整 participant release 與 PI/REC/場次/PDF/Email/權限驗證。
+- WRITE_OWNER=唯一新 V2 GitHub 三個既有原路徑；SYNC_STATUS=`CI_PENDING`，遠端 GAS/版本/部署/真人 UI/正式資料/收件本輪未執行，`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；未觸及舊 Repo/GAS、RIF 或 E-Prime。

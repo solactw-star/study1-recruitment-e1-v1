@@ -130,3 +130,60 @@ test('source and workflow have no deployment/Sheet mutation or auto trigger',()=
  assert.match(workflow,/secrets\.V2_GAS_CLASPRC_JSON/);
  assert.doesNotMatch(workflow,/CLASPRC_JSON: \$\{\{ secrets\.CLASPRC_JSON/);
 });
+
+
+test('offline private OWNER candidate keeps public release unchanged and only six read RPCs change',()=>{
+ const pub=m.localSources(),before=m.digest(pub);
+ const candidate=m.privateOwnerReadOnlyCandidate(pub);
+ assert.equal(m.digest(pub),before);
+ assert.equal(m.closedManifest(pub).webapp.access,'ANYONE');
+ assert.equal(m.closedManifest(candidate).webapp.access,'MYSELF');
+ assert.throws(()=>m.publicRpcSurface(candidate),/unguarded public RPC/);
+ const accidental=candidate.map(f=>f.name==='appsscript'?{...f,source:f.source.replace('"MYSELF"','"ANYONE"')}:f);
+ assert.throws(()=>m.closedManifest(accidental),/unguarded public RPC/);
+ assert.deepEqual(candidate.filter(f=>f.source!==pub.find(p=>p.name===f.name).source)
+  .map(f=>f.name).sort(),['AdminConsole','AdminSandbox','Study1FormalBooking','Study1WizardP0Bridge','Website','appsscript']);
+ const html=candidate.find(f=>f.name==='AdminConsole').source;
+ assert.match(html,/私人唯讀驗收候選｜非正式營運/);
+ assert.match(html,/<section hidden><h2>測試研究內容/);
+ assert.match(html,/<section hidden><h2>測試預約設定/);
+ assert.doesNotMatch(html,/\nreload\(\);\n\}\)\(\);/);
+ const original=pub.find(f=>f.name==='AdminSandbox');
+ const drift=pub.map(f=>f.name===original.name?{...f,source:f.source.replace('function study1EConsentOwnerList(){','function study1EConsentOwnerList(renamed) {')}:f);
+ assert.throws(()=>m.privateOwnerReadOnlyCandidate(drift),/private candidate RPC declaration drift/);
+});
+test('private candidate OWNER route and six existing read RPCs refuse non-owner before source access; writes stay closed',()=>{
+ const vm=require('node:vm'),candidate=m.privateOwnerReadOnlyCandidate(m.localSources());
+ const owner='solac.tw@gmail.com';
+ let active='',effective=owner,rendered=0,readAttempts=0;
+ const output={setTitle(){return this;},addMetaTag(){return this;}};
+ const c=vm.createContext({
+  Session:{getActiveUser:()=>({getEmail:()=>active}),getEffectiveUser:()=>({getEmail:()=>effective})},
+  HtmlService:{createHtmlOutputFromFile(name){assert.equal(name,'AdminConsole');rendered++;return output;}},
+  LockService:{getScriptLock(){readAttempts++;throw Error('OWNER_REACHED_READ_BOUNDARY');}},
+  PropertiesService:{getScriptProperties(){readAttempts++;throw Error('OWNER_REACHED_READ_BOUNDARY');}}
+ });
+ for(const name of ['Website','AdminSandbox','Study1FormalBooking','Study1WizardP0Bridge'])
+  vm.runInContext(candidate.find(f=>f.name===name).source,c);
+ const reads=['study1ConsentVersionList','study1EConsentOwnerList','study1EConsentOwnerSignedPdfDownload',
+  'study1EConsentOwnerWithdrawalCases','study1OwnerE1OperationsAudit','study1OwnerE1SlotAudit'];
+ for(const [a,e] of [['',owner],['other@example.invalid',owner],[owner,'other@example.invalid']]){
+  active=a;effective=e;
+  assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/管理身分無法驗證/);
+  for(const name of reads)assert.throws(()=>c[name](),/管理身分無法驗證/,name);
+ }
+ assert.equal(rendered,0);assert.equal(readAttempts,0);
+ active=effective=owner;
+ assert.equal(c.doGet({parameter:{view:'admin'}}),output);
+ assert.equal(rendered,1);
+ assert.throws(()=>c.study1OwnerE1SlotAudit(),/OWNER_REACHED_READ_BOUNDARY/);
+ assert.equal(readAttempts,1);
+ for(const name of ['study1ConsentVersionUpload','study1ConsentVersionSelect','study1ConsentVersionPublication',
+  'study1OwnerE1SignedBookingRepair','study1EConsentOwnerWithdraw','adminSaveSandboxConfig',
+  'study1FormalHoldSlot','getPublicConsentDocument'])assert.throws(()=>c[name](),/STUDY1_V2_PUBLIC_READ_ONLY/,name);
+ assert.equal(c.getPublicConfig().open,false);
+ assert.equal(c.getPublicConfig().consentReady,false);
+ assert.throws(()=>c.requestOtp(),/尚未開放/);
+ assert.throws(()=>c.doGet({parameter:{view:'demo'}}),/STUDY1_V2_PUBLIC_READ_ONLY/);
+ assert.equal(readAttempts,1);
+});
