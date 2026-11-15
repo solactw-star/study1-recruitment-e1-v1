@@ -507,3 +507,8 @@
 - BLOCKERS：仍需取得新提交同SHA CI，另明確核准唯一 V2 GAS 私人來源、備份／比較／回讀、版本與部署。此候選僅用於先解除管理查閱/UAT 入口阻塞，不代表可完成 PDF 上傳選用、正式場次寫入、真人報名預約。後續依實際 UAT 與適用 PI/REC 授權，逐步開放既有 E1 OWNER 必要操作，不擅自設定原始資料或擴大公開版權限。
 - NEXT_ACTION=同版 CI 驗收；若通過且繼續獲授權，集中完成同 V2 Script 私人 MYSELF 來源同步/不可變版本、OWNER 登入及六項唯讀功能真 UI。獨立公開唯讀版原路徑維持；正式 E1 收件須另外核准完整 participant release 與 PI/REC/場次/PDF/Email/權限驗證。
 - WRITE_OWNER=唯一新 V2 GitHub 三個既有原路徑；SYNC_STATUS=`CI_PENDING`，遠端 GAS/版本/部署/真人 UI/正式資料/收件本輪未執行，`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`；未觸及舊 Repo/GAS、RIF 或 E-Prime。
+
+### 2026-11-15｜私人 OWNER 唯讀候選：同版 CI 回讀完成
+- SOURCE_VERSION/CODE_SHA=`9cb521f03fcddbd976aff3d714ae691e8bf2993b`；[Run #43705006821](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/43705006821)，Job #132784091506 `completed/success`，完整日誌核對 checkout 同 SHA，`306 tests / 306 PASS / 0 FAIL / 0 SKIP`；兩組新測試（私有候選僅六項讀 RPC 改變與 MYSELF/ANYONE 隔離；OWNER route 與非 OWNER 讀取前拒絕、寫入仍關閉）均 PASS。原 304 項保留。
+- VERIFIED_BLOBS：`scripts/study1-v2-gas-head-only.cjs=5148fac1f3a577a2679b8f26fb1b1c9322f3395a`；`tests/study1-v2-gas-head-only.test.cjs=135ebaadf56186c61acd4274b00ac57c10729137`；原公版 gas/ 未改，三檔原子 commit/lease/main 已回讀。
+- LAST_VERIFIED_STEP=`MAIN_PRIVATE_OWNER_CANDIDATE_CI_VERIFIED_ON_9CB521F=true`。候選產生器僅離線、不連入原部署/HEAD 寫入流程；未部署、未開放資料寫入、未對正式資料執行讀寫 UAT。NEXT_ACTION=先核對同一 V2 GAS 的現存私人版本與公開版及來源差異；另取得私人候選來源同步／建版／部署的具體授權與安全備份、競寫檢核，再作 OWNER 六項真 UI 驗收。正式 E1 報名/預約/同意寫入、PI/REC、真人收件仍獨立阻塞。此追記若為 docs-only 新 main，CI 須獨立回讀；不得將 306 PASS 冒稱 GAS 或營運驗收。
