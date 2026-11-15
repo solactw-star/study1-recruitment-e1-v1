@@ -1344,7 +1344,7 @@ function e1WorkspaceSetup_(){
  const preview=action=>{
   if(busy||!data||(!selected&&!creating))return;
   let q;
-  try{q={action,revision:data.revision,slotId:val('e1WsDraftId').trim(),startAtUtc:utc(val('e1WsDraftStart')),endAtUtc:utc(val('e1WsDraftEnd')),locationCode:val('e1WsDraftLocation').trim(),capacity:Number(val('e1WsDraftCap'))};}catch(_){draft('日期格式不合法。');return;}
+  try{q={action,revision:data.revision,slotId:val('e1WsDraftId').trim(),startAtUtc:selected&&val('e1WsDraftStart')===local(selected.startAtUtc)?selected.startAtUtc:utc(val('e1WsDraftStart')),endAtUtc:selected&&val('e1WsDraftEnd')===local(selected.endAtUtc)?selected.endAtUtc:utc(val('e1WsDraftEnd')),locationCode:val('e1WsDraftLocation').trim(),capacity:Number(val('e1WsDraftCap'))};}catch(_){draft('日期格式不合法。');return;}
   const current=++epoch;busy=true;load.disabled=true;el('e1WsPreview').disabled=true;el('e1WsClose').disabled=true;
   const done=()=>{busy=false;load.disabled=false;return current===epoch;};
   const fail=()=>{resetDraft();draft('預檢未核實：可能是名額不足、已有預約、來源已改變或權限不足。請重新查詢。');};

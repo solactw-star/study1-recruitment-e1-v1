@@ -964,6 +964,8 @@ test('P0-B browser workspace renders real joined roster, filters, selects slot a
  const selected=g('e1WsSlots').children[0].children[8].children[0];selected.click();g('e1WsDraftCap').value='2';g('e1WsPreview').click();
  assert.match(g('e1WsDraftResult').textContent,/預檢通過（未儲存）/);
  assert.equal(b.calls.at(-1).method,'study1OwnerE1SlotChangePreview');
+ assert.equal(b.calls.at(-1).args[0].startAtUtc,h.tables.Slots.rows[0][1]);
+ assert.equal(b.calls.at(-1).args[0].endAtUtc,h.tables.Slots.rows[0][2]);
  g('e1WsQuery').value='NOT_PRESENT';g('e1WsLoad').click();assert.equal(g('e1WsRows').children.length,0);
  assert.equal(h.mutations.length,n);
  h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');g('e1WsLoad').click();
