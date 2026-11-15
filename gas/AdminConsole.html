@@ -1317,7 +1317,7 @@ function e1WorkspaceSetup_(){
  };
  const closeProfile=()=>{
   profileEpoch++;profile=null;resetProfilePdf();clear(el('e1ProfileSummary'));clear(el('e1ProfileContent'));clear(el('e1ProfileTimeline'));
-  profileStatus('');el('e1Profile').hidden=true;
+  profileStatus('');el('e1ProfileTab').disabled=true;el('e1ProfileOrder').disabled=true;el('e1Profile').hidden=true;
  };
  const time=v=>v?local(v).replace('T',' '):'—';
  const listField=(parent,label,v)=>{const p=document.createElement('p');p.textContent=label+'：'+(v==null||v===''?'—':String(v));parent.appendChild(p);};
@@ -1327,7 +1327,7 @@ function e1WorkspaceSetup_(){
   for(const e of items){
    const li=document.createElement('li'),btn=document.createElement('button');
    btn.type='button';btn.className='secondary';btn.textContent=time(e.atUtc)+'｜'+e.kind+'｜'+e.source+'／'+e.sourceId;
-   btn.addEventListener('click',()=>{if(!profile||profile.timeline.indexOf(e)<0)return;el('e1ProfileTab').value=e.tab;drawProfileTab();});
+   btn.addEventListener('click',()=>{if(!profile||profile.timeline.indexOf(e)<0)return;profileEpoch++;el('e1ProfileTab').value=e.tab;drawProfileTab();});
    li.appendChild(btn);parent.appendChild(li);
   }
  };
@@ -1377,11 +1377,11 @@ function e1WorkspaceSetup_(){
    profile=p;const head=el('e1ProfileSummary');clear(head);
    for(const [k,v] of [['參與者',p.applicantId+'｜'+p.basic.name],['實驗','E1'],['資格／信箱',p.summary.eligibility+'／'+p.summary.applicationStatus],['原預約／同意／通知',p.summary.bookingStatus+'／'+p.summary.consentState+'／'+p.summary.noticeStatus],['研究階段','未核實'],['下一次有效預約',p.nextAppointment?time(p.nextAppointment.startAtUtc)+'｜'+p.nextAppointment.slotId:'無可核實預約']])listField(head,k,v);
    profileStatus('同一原名單版本已核對；唯讀，不更正、不重新簽署或寄信。');
-   el('e1ProfileTab').value='basic';el('e1ProfileOrder').value='new';drawProfileTab();drawProfileTimeline();
+   el('e1ProfileTab').value='basic';el('e1ProfileTab').disabled=false;el('e1ProfileOrder').value='new';el('e1ProfileOrder').disabled=false;drawProfileTab();drawProfileTimeline();
   }).study1OwnerE1Profile({applicantId:row.applicantId,revision});
  };
  el('e1ProfileBack').addEventListener('click',closeProfile);
- el('e1ProfileTab').addEventListener('change',()=>{profileEpoch++;drawProfileTab();});
+ el('e1ProfileTab').addEventListener('change',()=>{if(profile){profileEpoch++;drawProfileTab();}});
  el('e1ProfileOrder').addEventListener('change',drawProfileTimeline);
  el('e1ProfilePdf').addEventListener('click',()=>{
   if(!profile||!profile.consent||profile.consent.pdfStatus!=='PRIVATE_SHA_VERIFIED'||el('e1ProfilePdf').disabled)return;

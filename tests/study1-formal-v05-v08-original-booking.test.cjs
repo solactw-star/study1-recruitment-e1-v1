@@ -937,7 +937,7 @@ test('P0-B recruitment source is the original Index; no write or public read of 
  assert.throws(()=>h.ctx.study1OwnerE1RecruitmentDraft(),/PUBLIC_READ_ONLY/);
  assert.equal(h.mutations.length,n);
 });
-function workspaceBrowser(server){
+function workspaceBrowser(server,options={}){
  const src=fs.readFileSync(path.join(__dirname,'../gas/AdminConsole.html'),'utf8');
  const begin=src.indexOf('/* P0-B recruitment copy:'),end=src.indexOf('function e1RecoverySetup_(){',begin);
  assert.ok(begin>=0&&end>begin);
@@ -956,10 +956,14 @@ function workspaceBrowser(server){
  const proxy=new Proxy({}, {get(_t,p){
   if(p==='withSuccessHandler')return f=>{success=f;return proxy;};
   if(p==='withFailureHandler')return f=>{failure=f;return proxy;};
-  return (...args)=>{calls.push({method:p,args});const s=success,f=failure;try{s(server[p](...args));}catch(err){f(err);}};
+  return (...args)=>{calls.push({method:p,args});const s=success,f=failure;const reply=()=>{try{s(server[p](...args));}catch(err){f(err);}};if(options.defer===p)pending.push(reply);else reply();};
  }});
- vm.runInNewContext(src.slice(begin,end),{document:{getElementById:get,createElement:node},google:{script:{run:proxy}},Date,Number,JSON,Error});
- return {get,calls};
+ const pending=[],urls=[],revoked=[];
+ vm.runInNewContext(src.slice(begin,end),{document:{getElementById:get,createElement:node},google:{script:{run:proxy}},Date,Number,JSON,Error,Uint8Array,
+  atob:x=>Buffer.from(x,'base64').toString('latin1'),Blob:class {constructor(parts){this.parts=parts}},
+  crypto:{subtle:{digest:async(_name,bytes)=>Uint8Array.from(crypto.createHash('sha256').update(bytes).digest()).buffer}},
+  URL:{createObjectURL:()=>{const u='blob:case:'+urls.length;urls.push(u);return u;},revokeObjectURL:u=>revoked.push(u)}});
+ return {get,calls,pending,urls,revoked};
 }
 test('P0-B browser workspace renders real joined roster, filters, selects slot and previews without a mutation',()=>{
  const h=wsHarness(),a=h.person('A');h.holdSlot(h.proof(a),h.S1);
@@ -1177,4 +1181,46 @@ test('P0-B B04 wrong case response and failed refresh clear selected private dat
  g('e1WsRows').children[0].children[9].children[0].click();assert.equal(g('e1Profile').hidden,false);
  h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');g('e1WsLoad').click();
  assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileContent').children.length,0);assert.equal(g('e1WsRows').children.length,0);
+});
+
+test('P0-B B04 withdrawal timestamp is read from the original envelope and malformed time cannot invent a signing event',()=>{
+ const {h,a}=profileHarness(),c=addCaseConsent(h,a);c.state='WITHDRAWN';c.withdrawal={sha:'9'.repeat(64)};
+ const at=ts(h.clock.now,-200);
+ h.ctx.study1EConsentEvent_=()=>({recordedAt:at,data:{signatureHash:c.signature.sha,confirmationHash:c.confirmation.sha}});
+ const q=profileRequest(h,a.applicantId);
+ let p=h.ctx.study1OwnerE1Profile(q);
+ assert.equal(p.consent.withdrawalAtUtc,at);assert.ok(p.timeline.some(x=>x.source==='WITHDRAWAL'&&x.atUtc===at));
+ const verified=h.ctx.study1OwnerE1SignedPdfVerified_;
+ h.ctx.study1OwnerE1SignedPdfVerified_=x=>({...verified(x),confirmedAtUtc:'not-a-date'});
+ p=h.ctx.study1OwnerE1Profile(q);
+ assert.equal(p.consent.pdfStatus,'UNKNOWN_REQUIRES_REVIEW');assert.ok(!p.timeline.some(x=>x.source==='SIGNATURE'||x.source==='CONFIRMATION'));
+});
+test('P0-B B04 browser hashes exact selected private PDF, rejects mismatched bytes, revokes on leaving',async()=>{
+ const {h,a}=profileHarness(),c=addCaseConsent(h,a),bytes=Buffer.from('%PDF-'+ 'synthetic private pdf '.repeat(10));
+ c.signedPdf.sha=crypto.createHash('sha256').update(bytes).digest('hex');
+ const verify=h.ctx.study1OwnerE1SignedPdfVerified_;
+ h.ctx.study1OwnerE1SignedPdfVerified_=entry=>({...verify(entry),bytes:bytes.length,base64:bytes.toString('base64')});
+ const b=workspaceBrowser(h.ctx),g=b.get;
+ g('e1WsQuery').value=a.applicantId;g('e1WsLoad').click();g('e1WsRows').children[0].children[9].children[0].click();
+ g('e1ProfileTab').value='consent';g('e1ProfileTab').handlers.change();g('e1ProfilePdf').click();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(g('e1ProfileDownload').hidden,false);assert.equal(b.urls.length,1);
+ g('e1ProfileTab').value='basic';g('e1ProfileTab').handlers.change();assert.equal(g('e1ProfileDownload').hidden,true);assert.deepEqual(b.revoked,b.urls);
+ const original=h.ctx.study1OwnerE1ProfilePdf;
+ h.ctx.study1OwnerE1ProfilePdf=q=>({...original(q),base64:Buffer.alloc(bytes.length,65).toString('base64')});
+ g('e1ProfileTab').value='consent';g('e1ProfileTab').handlers.change();g('e1ProfilePdf').click();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(g('e1ProfileDownload').hidden,true);assert.equal(b.urls.length,1);assert.match(g('e1ProfileStatus').textContent,/未核實/);
+});
+test('P0-B B04 delayed prior-case response cannot replace a new selection or reopen a closed profile',()=>{
+ const {h,a,z}=profileHarness(),b=workspaceBrowser(h.ctx,{defer:'study1OwnerE1Profile'}),g=b.get;
+ g('e1WsLoad').click();
+ const rows=g('e1WsRows').children;
+ rows[0].children[9].children[0].click();rows[1].children[9].children[0].click();
+ assert.equal(b.pending.length,2);b.pending[1]();
+ const selected=b.calls.filter(c=>c.method==='study1OwnerE1Profile')[1].args[0].applicantId;
+ assert.ok(g('e1ProfileSummary').children.some(x=>x.textContent.includes(selected)));
+ b.pending[0]();assert.ok(g('e1ProfileSummary').children.some(x=>x.textContent.includes(selected)));
+ rows[0].children[9].children[0].click();g('e1ProfileBack').click();b.pending[2]();
+ assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileSummary').children.length,0);
 });

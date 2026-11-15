@@ -1576,6 +1576,10 @@ function study1OwnerE1ProfileSource_(x,id,lock){
     if(verified.recordId!==c.id||verified.sourceSha256!==c.documentSha||verified.signedPdfSha256!==c.signedPdf.sha)
      throw Error('E1_PROFILE_PDF_MISMATCH');
     study1BindingUtc_(verified.signedAtUtc);
+    if(verified.confirmedAtUtc){
+     study1BindingUtc_(verified.confirmedAtUtc);
+     if(Date.parse(verified.confirmedAtUtc)<Date.parse(verified.signedAtUtc))throw Error('E1_PROFILE_CONFIRMATION_TIME_CONFLICT');
+    }
     consent.pdfStatus='PRIVATE_SHA_VERIFIED';consent.signedPdfSha256=verified.signedPdfSha256;
     consent.signedAtUtc=verified.signedAtUtc;pdf=verified;
     event(verified.signedAtUtc,'本人簽署完整 PDF','SIGNATURE',c.id,'consent');
@@ -1586,9 +1590,11 @@ function study1OwnerE1ProfileSource_(x,id,lock){
      const w=study1EConsentEvent_(c.withdrawal,c,'WITHDRAWAL');
      if(w.data.signatureHash!==c.signature.sha||w.data.confirmationHash!==c.confirmation.sha)
       throw Error('E1_PROFILE_WITHDRAWAL_MISMATCH');
-     study1BindingUtc_(w.recordedAtUtc);
-     consent.withdrawalAtUtc=w.recordedAtUtc;
-     event(w.recordedAtUtc,'撤回存證（資料處置另核）','WITHDRAWAL',c.id,'consent');
+     // The original evidence envelope is recordedAt (not recordedAtUtc).
+     study1BindingUtc_(w.recordedAt);
+     if(consent.signedAtUtc&&Date.parse(w.recordedAt)<Date.parse(consent.signedAtUtc))throw Error('E1_PROFILE_WITHDRAWAL_TIME_CONFLICT');
+     consent.withdrawalAtUtc=w.recordedAt;
+     event(w.recordedAt,'撤回存證（資料處置另核）','WITHDRAWAL',c.id,'consent');
     }catch(_){consent.withdrawalEvidence='UNKNOWN_REQUIRES_REVIEW';}
    }
   }

@@ -1030,7 +1030,7 @@ function study1OwnerE1SignedPdfVerified_(x){
  return {experiment:'E1',recordId:x.id,version:x.documentVersion,
   researcherPreSigned:true,sourceSha256:x.documentSha,
   signedPdfSha256:x.signedPdf.sha,bytes:bytes.length,
-  signedAtUtc:signature.data.serverSignedAt,confirmedAtUtc:confirmed.data.recordedAtUtc||null,
+  signedAtUtc:signature.data.serverSignedAt,confirmedAtUtc:confirmed.recordedAt||null,
   mime:'application/pdf',base64:Utilities.base64Encode(bytes)};
 }
 
