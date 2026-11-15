@@ -525,3 +525,10 @@
 - VERIFIED_BLOBS：`scripts/study1-v2-gas-head-only.cjs=c207e4bd4adc42c3139295af86b704ece3a8da88`；`tests/study1-v2-gas-head-only.test.cjs=26b75ba1ce44b3b5d4f3223892b85555ccd2a632`；`tests/study1-owner-presigned-pdf-ui.test.cjs=52cabb9a296e7a437d7ba77ce67cbe16c59f30e0`。原 gas/ 未變。
 - 由同版 CI 離線產生之 PRIVATE_E1_MANAGEMENT_CANDIDATE_SHA256=`b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3`。此 SHA 僅候選內容，不代表遠端 HEAD 或版本。LAST_VERIFIED_STEP=`PRIVATE_OWNER_MANAGEMENT_CANDIDATE_CI_VERIFIED_ON_79CCEDD`。
 - NEXT_ACTION=優先使現有 V2 發布工具支援新版候選的獨立唯讀遠端 inventory、確切 27-source candidate digest 與人工確認／備份／競寫／來源／不可變版本回讀；不得將舊 32-file TARGET 或其 audit 視為新遠端核驗。候選尚不連入 HEAD apply/deploy；正式 PDF 上傳選用及來源指定真 UAT、GAS HEAD/版本/部署與真人收件均未執行或授權，`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。本追記只修改進度檔；其新 SHA CI 另查，不冒稱遠端成功。
+
+## 2026-11-15｜新版私人 E1 管理發布工具接續
+- TASK_DOMAIN=`Study1_V2_E1_PRIVATE_RELEASE_TOOLING`；PRE_MAIN_SHA=`2ce4fc41fd0f21408d7628c3115dccd6324e9cd7`，Run #43705417219 309 PASS；原候選 SHA `b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3` 不變。讀 AGENTS、§70-S.34–36、原 HEAD/private deploy 工具及安全測試。
+- COMPLETED（工程待 CI）：原 HEAD-only workflow 增加 private_e1_management profile，從原既有候選精確綁定 27-source SHA；private apply 獨立確認字串、遠端完整 HEAD SHA 及 inventory fingerprint，保留加密備份 artifact，PUT 前／後核對 inventory、開發部署 MYSELF、既有不可變版本／部署、最新 main；無 CAS 仍禁止人工同時修改，PUT 結果不明不重送。
+- 原 private deploy workflow 分離 audit/ version/ deploy。audit 允許先讀遠端與目標不同的 HEAD、完整版本/部署 metadata 與原始內容 SHA/manifest，未知來源標記不安全且不允許寫入。版本建立與指定不可變版本部署各自須明確確認、最新 main、完整 inventory fingerprint；建立後/部署前重新稽核；每階段單次 POST，GET 回讀原版本/部署及 ACL，禁止盲目重送；既有版本/部署不改。舊 32-file SHA 僅歷史來源核對，不能代替新 candidate；公版原 gas/ 不改。
+- TESTS=保留原公版、HEAD、私人部署測試；原 32-source 測試改核定現行 27-source candidate，原合併版本/部署情境以分段測試助手維持完整正/負向案例；新增遠端未同步 audit、分段授權、候選 SHA、競寫及回讀等測試。兩套 CI 各自回讀。
+- BLOCKERS=當前 connector 無 Apps Script GET 或 workflow dispatch，需由 OWNER 執行新 GET-only audit 才能核對遠端現況。本輪僅 GitHub 工程，不執行 GAS HEAD PUT、version POST、deployment POST、正式資料寫入、真人收件、舊系統或其他研究。SYNC_STATUS=`CI_PENDING`；NEXT_ACTION=同 SHA CI、公開/私人原始日誌確認，再手動執行 audit（不填任何寫入確認）；依新 audit 另獨立授權，依序 HEAD、建版、部署。 

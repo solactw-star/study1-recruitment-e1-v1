@@ -3,13 +3,18 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path');
 const core=require('../scripts/study1-v2-gas-head-only.cjs');
 const d=require('../scripts/study1-v2-private-deploy.cjs');
-const baseFiles=()=>core.localSources();
+const baseFiles=()=>core.privateOwnerManagementCandidate(core.localSources());
 const gas=()=>({scriptId:d.SID,files:baseFiles()});
 const runEnv=()=>({GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',
  GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_SHA:'a'.repeat(40),
  REVIEWED_SHA:'a'.repeat(40),PRIVATE_MODE:'deploy',
- CONFIRMATION:d.CONFIRM,EXPECTED_INVENTORY_SHA256:d.fingerprint([],[]),
+ CONFIRMATION:d.CONFIRM,PRIVATE_VERSION:'1',REVIEWED_TARGET_SHA256:d.TARGET,EXPECTED_INVENTORY_SHA256:d.fingerprint([],[],d.TARGET,[]),
  GITHUB_RUN_ID:'999'});
+async function stagedRelease(api,env,assertMain=()=>{},sleep){
+ const version=await d.createImmutableVersion(api,{...env,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},assertMain,sleep);
+ const fresh=await d.audit(api);
+ return d.deploy(api,{...env,PRIVATE_MODE:'deploy',PRIVATE_VERSION:String(version.version),EXPECTED_INVENTORY_SHA256:fresh.fp},assertMain,sleep);
+}
 function fakeApi(){
  let version=0,versionDescription='private',deploy=null,puts=0,versionCreates=0;
  const api={
@@ -29,10 +34,10 @@ function fakeApi(){
  };
  return {api,counts:()=>({puts,versionCreates})};
 }
-test('V2 source is exactly 32 reviewed GAS files with closed private manifest',()=>{
+test('V2 source is exactly 27 reviewed GAS files with closed private manifest',()=>{
  const f=baseFiles();
- assert.equal(f.length,32);
- assert.equal(d.reviewedLocal().length,32);
+ assert.equal(f.length,27);
+ assert.equal(d.reviewedLocal().length,27);
  assert.equal(core.digest(f),d.TARGET);
  assert.equal(core.closedManifest(f).webapp.access,'MYSELF');
  assert.doesNotThrow(()=>core.closedWebsite(f));
@@ -46,8 +51,8 @@ test('strict manual main and independent deploy confirmation',()=>{
   {EXPECTED_INVENTORY_SHA256:'x'}, {PRIVATE_MODE:'audit'}])
   assert.throws(()=>d.invocation({...e,...c},'deploy'),/V2_PRIVATE_BLOCKED/);
 });
-test('HEAD must match reviewed 32-file SHA and new Script ID',()=>{
- assert.deepEqual(d.checkHead(gas()),{sha:d.TARGET,files:32});
+test('HEAD must match reviewed 27-file SHA and new Script ID',()=>{
+ assert.deepEqual(d.checkHead(gas()),{sha:d.TARGET,files:27});
  assert.throws(()=>d.checkHead({...gas(),scriptId:'old'}),/Script ID/);
  const f=baseFiles();f[0]={...f[0],source:f[0].source+' '};
  assert.throws(()=>d.checkHead({scriptId:d.SID,files:f}),/diverged/);
@@ -119,7 +124,7 @@ test('read-only audit accepts nonliteral HEAD and correctly counts versioned dep
  }];
  f.api.getVersionContent=async()=>{versionContentReads++;return gas();};
  const result=await d.audit(f.api);
- assert.equal(result.head.files.length,32);
+ assert.equal(result.head.files.length,27);
  assert.equal(result.deploymentCount,1);
  assert.equal(result.versionedDeployments,0);
  assert.equal(d.normalizedDeployments(result.deps)[0].kind,'HEAD');
@@ -129,7 +134,7 @@ test('read-only audit accepts nonliteral HEAD and correctly counts versioned dep
 });
 test('public or wrong-execution deployment is rejected before any mutations',async()=>{
  const f=fakeApi(),b=await d.audit(f.api);
- assert.equal(b.head.files.length,32);
+ assert.equal(b.head.files.length,27);
  assert.equal(b.versionCount,0);assert.equal(b.deploymentCount,0);
  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
  const publicDep={deploymentId:'PUBLIC',deploymentConfig:{scriptId:d.SID,versionNumber:1,manifestFileName:'appsscript'},
@@ -139,7 +144,7 @@ test('public or wrong-execution deployment is rejected before any mutations',asy
  assert.throws(()=>d.normalizedDeployments([other]),/execution identity/);
 });
 test('successful private deploy creates exactly one version and one V2 deployment',async()=>{
- const f=fakeApi(),e=runEnv(),r=await d.deploy(f.api,e,()=>{});
+ const f=fakeApi(),e=runEnv(),r=await stagedRelease(f.api,e,()=>{});
  assert.equal(r.id,'PRIVATE-ONLY-V2-001');assert.equal(r.version,1);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
  const verified=await d.audit(f.api);
@@ -148,11 +153,11 @@ test('successful private deploy creates exactly one version and one V2 deploymen
 test('failed previous run orphan is reused only after audited provenance and immutable source verification',async()=>{
  const f=fakeApi(),e=runEnv();
  const prefix='Study1 V2 PRIVATE MYSELF HEAD '+d.TARGET+
-  ' GitHub 9d6bc139e47818f3fddc1e168f504b54bb57f0e9 Run ';
+  ' GitHub '+e.GITHUB_SHA+' Run ';
  const orphan=await f.api.createVersion(prefix+'43182160131');
  assert.equal(orphan.versionNumber,1);
  const reviewed=await d.audit(f.api);
- const resumed=await d.deploy(f.api,
+ const resumed=await stagedRelease(f.api,
   {...e,EXPECTED_INVENTORY_SHA256:reviewed.fp},()=>{},async()=>{});
  assert.equal(resumed.version,1);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
@@ -171,7 +176,7 @@ test('GET-only readback tolerates a temporarily stale versions list after single
   if(created&&stale++===0)return [];
   return getVersions();
  };
- const deployed=await d.deploy(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
+ const deployed=await stagedRelease(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
  assert.equal(deployed.version,1);
  assert.deepEqual(sleeps,[1000]);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
@@ -185,7 +190,7 @@ test('ambiguous multiple matching orphans stop before any new POST',async()=>{
   {scriptId:d.SID,versionNumber:2,description:text+'124'}
  ];
  const before=await d.audit(f.api);
- await assert.rejects(d.deploy(f.api,
+ await assert.rejects(stagedRelease(f.api,
   {...e,EXPECTED_INVENTORY_SHA256:before.fp},()=>{},async()=>{}),
   /multiple matching orphan versions/);
  assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
@@ -201,7 +206,7 @@ test('new deployment may appear one GET behind without repeating POST',async()=>
   if(created&&stale++===0)return [];
   return getDeps();
  };
- const deployed=await d.deploy(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
+ const deployed=await stagedRelease(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
  assert.equal(deployed.version,1);
  assert.deepEqual(sleeps,[1000]);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
@@ -219,11 +224,11 @@ test('HEAD drift after version creation cannot publish deployment',async()=>{
  const original=f.api.createVersion;
  f.api.createVersion=async s=>{const result=await original(s);created=true;return result;};
  f.api.getHead=async()=>{const h=gas();if(created){h.files[0]={...h.files[0],source:h.files[0].source+'DRIFT'};}return h;};
- await assert.rejects(d.deploy(f.api,e,()=>{}),/diverged/);
+ await assert.rejects(stagedRelease(f.api,e,()=>{}),/diverged/);
  assert.deepEqual(f.counts(),{puts:0,versionCreates:1});
 });
 test('repeated deploy is not allowed and cannot create duplicate endpoints',async()=>{
- const f=fakeApi(),e=runEnv();await d.deploy(f.api,e,()=>{});
+ const f=fakeApi(),e=runEnv();await stagedRelease(f.api,e,()=>{});
  const updated=await d.audit(f.api);
  await assert.rejects(d.deploy(f.api,{...e,EXPECTED_INVENTORY_SHA256:updated.fp},()=>{}),/already exists/);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
@@ -337,7 +342,44 @@ test('workflow cannot be auto-triggered or upload code and has no legacy target'
   'sheets.googleapis.com','SpreadsheetApp','clasp push','putContent(','MailApp','script.run']){
   assert.ok(!script.includes(banned),banned);
  }
- assert.ok(script.includes("const TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7'"));
+ assert.ok(script.includes("const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7'"));
+ assert.equal(d.TARGET,core.PRIVATE_TARGET);
  assert.ok(wf.includes("secrets.V2_GAS_CLASPRC_JSON"));
  assert.ok(wf.includes('group: study1-v2-gas-head-only'));
+});
+
+test('new audit reports unsynced HEAD without granting mutation; prior audit binds full HEAD bytes',async()=>{
+ const f=fakeApi();
+ const changed=gas();changed.files[0]={...changed.files[0],source:changed.files[0].source+' '};
+ f.api.getHead=async()=>changed;
+ const result=await d.audit(f.api);
+ assert.notEqual(result.headSha,d.TARGET);assert.equal(result.safe,false);
+ assert.notEqual(result.fp,d.fingerprint([],[],d.TARGET,[]));
+ await assert.rejects(d.createImmutableVersion(f.api,{...runEnv(),PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM,EXPECTED_INVENTORY_SHA256:result.fp},()=>{}),/diverged/);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+});
+test('version and deployment are separately authorized, audit-bound and exact version only',async()=>{
+ const f=fakeApi(),e=runEnv();
+ await assert.rejects(d.createImmutableVersion(f.api,{...e,PRIVATE_MODE:'version'},()=>{}),/approval missing/);
+ await assert.rejects(d.deploy(f.api,e,()=>{}),/immutable candidate version/);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+ const v=await d.createImmutableVersion(f.api,{...e,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},()=>{});
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:1});
+ await assert.rejects(d.deploy(f.api,e,()=>{}),/inventory differs/);
+ const a=await d.audit(f.api);
+ await assert.rejects(d.deploy(f.api,{...e,PRIVATE_VERSION:'2',EXPECTED_INVENTORY_SHA256:a.fp},()=>{}),/immutable candidate version/);
+ await d.deploy(f.api,{...e,PRIVATE_VERSION:String(v.version),EXPECTED_INVENTORY_SHA256:a.fp},()=>{});
+ assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
+});
+test('private HEAD synchronization refuses unproven or public development ACL',async()=>{
+ const f=fakeApi();
+ const state=await d.audit(f.api);
+ assert.throws(()=>d.requirePrivateHeadBaseline(state),/development deployment/);
+ const dev={deploymentId:'HEAD',deploymentConfig:{scriptId:d.SID},entryPoints:[{webApp:{entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'}}}]};
+ f.api.getDeployments=async()=>[dev];
+ assert.doesNotThrow(()=>d.requirePrivateHeadBaseline({...state,deps:[dev]}));
+ f.api.getDeployments=async()=>[{...dev,entryPoints:[{webApp:{entryPointConfig:{access:'ANYONE',executeAs:'USER_DEPLOYING'}}}]}];
+ const mixed=await d.audit(f.api);
+ assert.equal(mixed.safe,false);
+ assert.throws(()=>d.requirePrivateHeadBaseline(mixed),/unverified/);
 });

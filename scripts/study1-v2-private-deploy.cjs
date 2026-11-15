@@ -1,8 +1,8 @@
 'use strict';
 /**
  * Study1 E1 V2 private preview: read-only inventory audit first; only a
- * separately confirmed manual deployment may create ONE V2 immutable version
- * and ONE MYSELF deployment. No GAS HEAD write, Sheet access or function run.
+ * separately confirmed manual phases create ONE V2 immutable version OR
+ * ONE MYSELF deployment of an independently audited version. No GAS HEAD write, Sheet access or function run.
  * Do not import the legacy GAS deployment clients (bound to original Script ID).
  */
 const core=require('./study1-v2-gas-head-only.cjs');
@@ -10,24 +10,29 @@ const fs=require('node:fs');
 const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
-const TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
+const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
+const TARGET=core.PRIVATE_TARGET;
+const VERSION_CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_VERSION';
 const CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY';
 const assert=(ok,message)=>{if(!ok)throw Error('V2_PRIVATE_BLOCKED: '+message)};
 const report=message=>{if(process.env.V2_PRIVATE_TEST_MODE!=='true')console.log(message);};
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
 function invocation(env,mode){
- assert(mode==='audit'||mode==='deploy','unknown mode');
+ assert(['audit','version','deploy'].includes(mode),'unknown mode');
  assert(env.GITHUB_REPOSITORY===REPO && env.GITHUB_REF==='refs/heads/main' &&
   env.GITHUB_EVENT_NAME==='workflow_dispatch','V2 manual main workflow only');
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
   env.REVIEWED_SHA===env.GITHUB_SHA,'exact reviewed GitHub HEAD required');
  assert(env.PRIVATE_MODE===mode,'manual mode mismatch');
- if(mode==='deploy'){
-  assert(env.CONFIRMATION===CONFIRM,'independent private deployment approval missing');
+ assert(env.REVIEWED_TARGET_SHA256===TARGET,'exact reviewed private E1 candidate SHA required');
+ if(mode!=='audit'){
+  assert(env.CONFIRMATION===(mode==='version'?VERSION_CONFIRM:CONFIRM),'independent private '+mode+' approval missing');
   assert(/^[a-f0-9]{64}$/.test(env.EXPECTED_INVENTORY_SHA256||''),
    'verified inventory fingerprint from separate read-only audit required');
  }
+ if(mode==='deploy')assert(/^[1-9][0-9]*$/.test(String(env.PRIVATE_VERSION||''))&&Number.isSafeInteger(Number(env.PRIVATE_VERSION)),
+  'explicit immutable version number required');
 }
 function latestMain(env){
  const shaLocal=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -36,18 +41,31 @@ function latestMain(env){
  assert(shaLocal===env.GITHUB_SHA&&shaRemote===shaLocal,'V2 main moved since review');
 }
 function reviewedLocal(){
- const files=core.localSources();
- assert(files.length===32&&core.digest(files)===TARGET,
-  'reviewed complete 32-file V2 source SHA mismatch');
- core.closedManifest(files);core.closedWebsite(files);
+ const files=core.releaseFiles({SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:TARGET});
+ assert(files.length===core.APPROVED.length&&core.digest(files)===TARGET,'reviewed private E1 source SHA mismatch');
+ assert(core.closedManifest(files).webapp.access==='MYSELF','private manifest required');
+ core.closedWebsite(files);
  return files;
 }
 function checkHead(head){
  assert(head?.scriptId===SID,'remote Script ID mismatch');
- assert(Array.isArray(head.files)&&head.files.length===32,'V2 HEAD missing 32 source files');
+ assert(Array.isArray(head.files)&&head.files.length===core.APPROVED.length,'V2 HEAD missing reviewed source inventory');
  assert(core.digest(head.files)===TARGET,'V2 HEAD diverged from verified source SHA');
- core.closedManifest(head.files);core.closedWebsite(head.files);
- return {sha:TARGET,files:32};
+ assert(core.closedManifest(head.files).webapp.access==='MYSELF','private manifest required');
+ core.closedWebsite(head.files);
+ return {sha:TARGET,files:core.APPROVED.length};
+}
+function sourceProof(obj){
+ assert(obj?.scriptId===SID,'remote Script ID mismatch');
+ const remote=core.verifyRemote(obj);
+ let access='UNKNOWN',known=false;
+ try{
+  const manifest=core.closedManifest(obj.files);core.closedWebsite(obj.files);
+  access=manifest.webapp.access;
+  known=(access==='MYSELF'&&(remote.sha===TARGET||remote.sha===HISTORICAL_TARGET))||
+   (access==='ANYONE'&&remote.sha===core.digest(core.localSources()));
+ }catch(_){}
+ return {sha:remote.sha,count:remote.count,access,known};
 }
 // Only GET is idempotent/read-only here. Bounded HTTP 503 / 429 retries are
 // safe; never retry POST, HTTP 401/403, malformed JSON or network exceptions.
@@ -191,7 +209,7 @@ function normalizedDeployments(d){
    if(e.web){
     // API can omit resolved access metadata; immutable version manifest
     // will be checked separately. Explicit public access is never tolerated.
-    assert(e.web.access===null||e.web.access==='MYSELF',
+    assert(e.web.access===null||['MYSELF','ANYONE'].includes(e.web.access),
      'existing web app publicly accessible');
     assert(e.web.executeAs===null||e.web.executeAs==='USER_DEPLOYING',
      'unexpected existing web app execution identity');
@@ -202,42 +220,48 @@ function normalizedDeployments(d){
    points:points.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))};
  }).sort((a,b)=>a.id.localeCompare(b.id,'en'));
 }
-function fingerprint(versions,deps){
+function fingerprint(versions,deps,headSha='',proofs=[]){
  return sha(JSON.stringify({versions:normalizedVersions(versions),
-  deployments:normalizedDeployments(deps)}));
+  deployments:normalizedDeployments(deps),headSha,proofs}));
 }
 async function inventory(api){
- const [head,versions,deps]=await Promise.all([
-  api.getHead(),api.getVersions(),api.getDeployments()
- ]);
- checkHead(head);
- // Print only enum/presence diagnostics, never deployment IDs, URLs or OAuth.
- report('V2_PRIVATE_DEPLOY_VERSION_SHAPES_JSON='+
-  JSON.stringify(redactedDeploymentShapes(deps)));
- const vn=normalizedVersions(versions),dn=normalizedDeployments(deps);
+ const [head,versions,deps]=await Promise.all([api.getHead(),api.getVersions(),api.getDeployments()]);
+ const hp=sourceProof(head),vn=normalizedVersions(versions),dn=normalizedDeployments(deps);
+ assert(vn.length<=100,'version inventory too large for complete verification');
+ const proofs=[];
+ for(const v of vn)proofs.push({version:v.version,...sourceProof(await api.getVersionContent(v.version))});
+ let safe=hp.known;
  for(const dep of dn){
-  const obj=dep.version===null?head:await api.getVersionContent(dep.version);
-  assert(obj?.scriptId===SID,'deployed version contains unexpected Script ID');
-  core.closedManifest(obj.files);
-  core.closedWebsite(obj.files);
-  // Existing deployments may have older code, but cannot be public or accept
-  // intake. Do NOT treat unverified old deployment as safe.
+  const proof=dep.version===null?hp:proofs.find(x=>x.version===dep.version);
+  assert(proof,'deployment version missing from complete inventory');
+  if(!proof.known||dep.points.some(x=>x.web&&x.web.access&&x.web.access!==proof.access))safe=false;
  }
- const fp=fingerprint(versions,deps);
- return {head,versions,deps,fp,versionCount:vn.length,
-  deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
+ const fp=fingerprint(versions,deps,hp.sha,proofs);
+ const stable=sha(JSON.stringify({versions:vn,deployments:dn.filter(x=>x.kind==='VERSIONED'),proofs}));
+ return {head,versions,deps,fp,stable,headSha:hp.sha,headProof:hp,proofs,safe,
+  versionCount:vn.length,deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
+}
+function requirePrivateHeadBaseline(s){
+ const development=normalizedDeployments(s.deps).filter(x=>x.kind==='HEAD');
+ assert(s.safe&&s.headProof.known&&s.headProof.access==='MYSELF','private HEAD baseline or existing deployment unverified');
+ assert(development.length===1&&development[0].points.some(x=>x.web?.access==='MYSELF'&&x.web.executeAs==='USER_DEPLOYING'),
+  'development deployment must be explicitly verified MYSELF');
 }
 function summarize(s){
  report('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
- report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({version:d.version,access:'MYSELF',executeAs:'USER_DEPLOYING'}))));
- report('V2_PRIVATE_HEAD_SHA256='+TARGET);
- report('V2_PRIVATE_HEAD_FILE_COUNT=32');
+ report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({version:d.version,
+  access:(d.version===null?s.headProof:s.proofs.find(p=>p.version===d.version))?.access||'UNKNOWN'}))));
+ report('V2_PRIVATE_HEAD_SHA256='+s.headSha);
+ report('V2_PRIVATE_HEAD_FILE_COUNT='+s.headProof.count);
+ report('V2_PRIVATE_HEAD_ACCESS='+s.headProof.access);
+ report('V2_PRIVATE_HEAD_MATCHES_REVIEWED_TARGET='+(s.headSha===TARGET));
+ report('V2_PRIVATE_REVIEWED_TARGET_SHA256='+TARGET);
+ report('V2_PRIVATE_VERSION_PROOFS_JSON='+JSON.stringify(s.proofs));
  report('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
  report('V2_PRIVATE_DEPLOYMENT_COUNT='+s.deploymentCount);
  report('V2_PRIVATE_VERSIONED_DEPLOYMENT_COUNT='+s.versionedDeployments);
  report('V2_PRIVATE_INVENTORY_SHA256='+s.fp);
- report('V2_PRIVATE_MANIFEST_MYSELF=true');
- report('V2_PRIVATE_INTAKE_CLOSED=true');
+ report('V2_PRIVATE_INVENTORY_KNOWN_SAFE='+s.safe);
 }
 async function audit(api){
  const state=await inventory(api);
@@ -256,11 +280,14 @@ async function settleVersionInventory(api,before,number,createdNew,
  for(let i=0;i<READBACK_DELAYS_MS.length;i++){
   if(i)await sleep(READBACK_DELAYS_MS[i]);
   const state=await inventory(api);
+  checkHead(state.head);assert(state.safe,'unverified deployment inventory during version readback');
   const versions=normalizedVersions(state.versions);
   assert(JSON.stringify(normalizedDeployments(state.deps))===JSON.stringify(oldDeps),
    'deployment inventory changed during version readback');
-  if(versions.length===count&&versions.some(v=>v.version===number))
+  if(versions.length===count&&versions.some(v=>v.version===number)){
+   assert(JSON.stringify(versions.filter(v=>!createdNew||v.version!==number))===JSON.stringify(oldVersions),'previous immutable version inventory changed');
    return state;
+  }
   assert(createdNew&&JSON.stringify(versions)===JSON.stringify(oldVersions),
    'version inventory changed unexpectedly during readback');
  }
@@ -272,6 +299,8 @@ async function settleDeploymentInventory(api,before,newId,
  for(let i=0;i<READBACK_DELAYS_MS.length;i++){
   if(i)await sleep(READBACK_DELAYS_MS[i]);
   const state=await inventory(api);
+  checkHead(state.head);assert(state.safe,'unverified deployment inventory during deployment readback');
+  assert(JSON.stringify(normalizedVersions(state.versions))===JSON.stringify(normalizedVersions(before.versions))&&JSON.stringify(state.proofs)===JSON.stringify(before.proofs),'immutable version inventory changed');
   const now=normalizedDeployments(state.deps);
   if(now.length===oldDeps.length+1&&now.some(d=>d.id===newId))
    return state;
@@ -281,96 +310,83 @@ async function settleDeploymentInventory(api,before,newId,
  throw Error('V2_PRIVATE_BLOCKED: new deployment not visible after bounded GET readback; use new audit');
 }
 
-async function deploy(api,env,assertMain=latestMain,sleep){
- // An actual prior audit with this exact inventory fingerprint is required.
+async function reviewedMutation(api,env,mode,assertMain){
+ invocation(env,mode);
  const before=await inventory(api);
- assert(before.fp===env.EXPECTED_INVENTORY_SHA256,
-  'version/deployment inventory differs from prior audited state');
- summarize(before);
- // No mutation if the same workflow previously deployed a V2 private preview:
- // a new deployment would be redundant and could create unwanted endpoints.
- assert(!normalizedDeployments(before.deps).some(x=>
-  x.description.startsWith('Study1 V2 PRIVATE MYSELF HEAD '+TARGET)),
-  'matching private deployment already exists; use read-only audit');
- const recheck=await inventory(api);
- assert(recheck.fp===before.fp,'deployment/version inventory raced');
+ assert(before.fp===env.EXPECTED_INVENTORY_SHA256,'version/deployment inventory differs from prior audited state');
+ checkHead(before.head);assert(before.safe,'unverified existing deployment inventory');
+ const again=await inventory(api);
+ assert(again.fp===before.fp,'deployment/version inventory raced');
  assertMain(env);
- assert(core.digest(recheck.head.files)===TARGET,
-  'HEAD changed immediately before version creation');
- const descriptionBase='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
-  ' GitHub '+env.GITHUB_SHA+' Run ';
- const description=descriptionBase+env.GITHUB_RUN_ID;
- const deployedVersions=new Set(normalizedDeployments(before.deps)
-  .map(x=>x.version).filter(x=>x!==null));
- // Exact verified failure origin: Run 43182160131 created an orphan at
- // this V2 main SHA, before only the deployment tooling (not GAS) changed.
- const KNOWN_ORPHAN_SOURCE_SHA='9d6bc139e47818f3fddc1e168f504b54bb57f0e9';
- const allowedOrigins=new Set([env.GITHUB_SHA,KNOWN_ORPHAN_SOURCE_SHA]);
- const orphanPattern=new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+TARGET+
-  ' GitHub ([a-f0-9]{40}) Run ([0-9]+)$');
- // Recover only ONE authorized orphan after an independently audited inventory
- // and mandatory immutable 32-file SHA verification. Reject other origins.
- const orphans=normalizedVersions(before.versions).filter(v=>{
-  const m=v.description.match(orphanPattern);
-  return m&&allowedOrigins.has(m[1])&&!deployedVersions.has(v.version);
- });
- assert(orphans.length<=1,'multiple matching orphan versions; manual review required');
- let version,createdNew=false;
- if(orphans.length){
-  version={scriptId:SID,versionNumber:orphans[0].version};
-  checkHead(await api.getVersionContent(version.versionNumber));
+ return again;
+}
+function targetVersions(s){return s.proofs.filter(v=>v.sha===TARGET&&v.known&&v.access==='MYSELF');}
+function targetDeployed(s){const nums=new Set(targetVersions(s).map(v=>v.version));
+ return normalizedDeployments(s.deps).some(d=>d.version!==null&&nums.has(d.version));
+}
+async function createImmutableVersion(api,env,assertMain=latestMain,sleep){
+ const before=await reviewedMutation(api,env,'version',assertMain);
+ assert(!targetDeployed(before),'matching private deployment already exists; use read-only audit');
+ const matches=targetVersions(before);
+ assert(matches.length<=1,'multiple matching orphan versions; manual review required');
+ if(matches.length){
+  const number=matches[0].version,v=normalizedVersions(before.versions).find(x=>x.version===number);
+  assert(new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub [a-f0-9]{40} Run [0-9]+$').test(v.description),
+   'matching orphan provenance not verified');
+  checkHead(await api.getVersionContent(number));
   report('V2_PRIVATE_REUSED_VERIFIED_ORPHAN_VERSION=true');
- }else{
-  // No suitable orphan: exactly one version POST, never an automatic retry.
-  try{version=await api.createVersion(description);}
-  catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
-  assert(version?.scriptId===SID&&Number.isSafeInteger(version.versionNumber)&&
-   version.versionNumber>0,'version create response ambiguous; stop');
-  createdNew=true;
-  checkHead(await api.getVersionContent(version.versionNumber));
+  report('V2_PRIVATE_VERSION='+number);
+  return {version:number,createdNew:false};
  }
- // Following a successful POST, retry GET-only inventory until eventual
- // consistency is observed. No new endpoint if HEAD or deployments drift.
- const preDeploy=await settleVersionInventory(
-  api,before,version.versionNumber,createdNew,sleep);
- assert(core.digest(preDeploy.head.files)===TARGET,'HEAD changed after version verification');
+ const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
+ let v;
+ try{v=await api.createVersion(description);}
+ catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
+ assert(v?.scriptId===SID&&Number.isSafeInteger(v.versionNumber)&&v.versionNumber>0,'version create response ambiguous; stop');
+ checkHead(await api.getVersionContent(v.versionNumber));
+ const after=await settleVersionInventory(api,before,v.versionNumber,true,sleep);
+ assert(after.proofs.some(x=>x.version===v.versionNumber&&x.sha===TARGET),'immutable version readback mismatch');
+ report('V2_PRIVATE_VERSION_VERIFIED=true');
+ report('V2_PRIVATE_VERSION='+v.versionNumber);
+ report('V2_PRIVATE_VERSION_SHA256='+TARGET);
+ report('V2_PRIVATE_DEPLOYMENT_MUTATIONS=0');
+ return {version:v.versionNumber,createdNew:true};
+}
+async function deploy(api,env,assertMain=latestMain,sleep){
+ const before=await reviewedMutation(api,env,'deploy',assertMain);
+ assert(!targetDeployed(before),'matching private deployment already exists; use read-only audit');
+ const number=Number(env.PRIVATE_VERSION);
+ const matches=targetVersions(before);
+ assert(matches.length===1&&matches[0].version===number,'specified immutable candidate version not uniquely verified');
+ checkHead(await api.getVersionContent(number));
+ const recheck=await inventory(api);
+ assert(recheck.fp===before.fp,'deployment/version inventory raced before POST');
  assertMain(env);
+ const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
  let created;
- try{created=await api.createDeployment(version.versionNumber,description);}
+ try{created=await api.createDeployment(number,description);}
  catch(e){throw Error('V2_PRIVATE_DEPLOY_POST_UNKNOWN_NO_RETRY: '+e.message);}
  assert(created?.deploymentId&&created?.deploymentConfig?.scriptId===SID&&
-  created.deploymentConfig.versionNumber===version.versionNumber,
-  'deployment creation response ambiguous; no retry');
+  created.deploymentConfig.versionNumber===number,'deployment creation response ambiguous; no retry');
  const got=await api.getDeployment(created.deploymentId);
  const after=await settleDeploymentInventory(api,before,created.deploymentId,sleep);
- assert(got?.deploymentId===created.deploymentId &&
-  got.deploymentConfig?.scriptId===SID &&
-  got.deploymentConfig.versionNumber===version.versionNumber,
-  'deployed ID/version readback failed');
- // getContent(version) is the immutable security authority for access mode.
- checkHead(await api.getVersionContent(version.versionNumber));
- assert(after.deploymentCount===before.deploymentCount+1,
-  'unexpected number of deployments after creation');
+ assert(got?.deploymentId===created.deploymentId&&got.deploymentConfig?.scriptId===SID&&
+  got.deploymentConfig.versionNumber===number,'deployed ID/version readback failed');
+ checkHead(await api.getVersionContent(number));
  const old=normalizedDeployments(before.deps),now=normalizedDeployments(after.deps);
- assert(JSON.stringify(now.filter(x=>x.id!==created.deploymentId))===
-  JSON.stringify(old),'existing deployment changed');
- assert(after.versionCount===before.versionCount+(createdNew?1:0),'version count drift after deployment');
- const newDep=now.find(x=>x.id===created.deploymentId);
- assert(newDep&&newDep.version===version.versionNumber,'new deployment missing from list');
- assert(!newDep.points.some(x=>x.web?.access&&x.web.access!=='MYSELF'),
-  'new deployment has non-private access');
- assert(!newDep.points.some(x=>x.web?.executeAs&&x.web.executeAs!=='USER_DEPLOYING'),
-  'new deployment has wrong executeAs');
+ assert(after.deploymentCount===before.deploymentCount+1&&JSON.stringify(now.filter(x=>x.id!==created.deploymentId))===JSON.stringify(old),'existing deployment changed');
+ assert(after.versionCount===before.versionCount,'version count drift after deployment');
+ const newDep=now.find(x=>x.id===created.deploymentId),direct=normalizedDeployments([got])[0];
+ assert(newDep&&newDep.version===number&&JSON.stringify(newDep)===JSON.stringify(direct),'new deployment GET/list mismatch');
+ assert(newDep.points.some(x=>x.web?.access==='MYSELF'&&x.web.executeAs==='USER_DEPLOYING'),'new deployment explicit private ACL not verified');
  report('V2_PRIVATE_DEPLOY_VERIFIED=true');
- report('V2_PRIVATE_VERSION='+version.versionNumber);
- report('V2_PRIVATE_DEPLOY_ID_REDACTED=true');
+ report('V2_PRIVATE_VERSION='+number);
  report('V2_PRIVATE_VERSION_SHA256='+TARGET);
  report('V2_PRIVATE_ACCESS=MYSELF');
  report('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
  report('V2_PRIVATE_NO_HEAD_UPDATE=true');
- report('V2_PRIVATE_NO_SHEET_OPERATIONS=true');
  report('V2_PRIVATE_LIVE_INTAKE_ENABLED=false');
- return {id:created.deploymentId,version:version.versionNumber};
+ return {id:created.deploymentId,version:number};
 }
 async function main(){
  const mode=process.argv[2];invocation(process.env,mode);
@@ -379,13 +395,14 @@ async function main(){
  const c=core.credentials(process.env.V2_GAS_CLASPRC_JSON);
  const api=await makeApi(c);
  if(mode==='audit')await audit(api);
+ else if(mode==='version')await createImmutableVersion(api,process.env);
  else await deploy(api,process.env);
 }
 if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={SID,REPO,TARGET,CONFIRM,invocation,reviewedLocal,
+module.exports={SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,

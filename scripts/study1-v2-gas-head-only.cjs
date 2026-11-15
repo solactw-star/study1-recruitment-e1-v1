@@ -8,6 +8,20 @@ const {execFileSync} = require('node:child_process');
 const REPO = 'solactw-star/study1-recruitment-e1-v1';
 const SID = '1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f';
 const CONFIRM = 'I_AUTHORIZE_STUDY1_V2_HEAD_ONLY';
+const PRIVATE_CONFIRM = 'I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_HEAD_ONLY';
+const PRIVATE_TARGET = 'b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
+function releaseProfile(env){const profile=env.SOURCE_PROFILE||'public_readonly';
+ require_(['public_readonly','private_e1_management'].includes(profile),'invalid V2 source profile');
+ return profile;
+}
+function releaseFiles(env,base=localSources()){
+ const profile=releaseProfile(env);
+ const files=profile==='private_e1_management'?privateOwnerManagementCandidate(base):base;
+ require_(profile!=='private_e1_management'||digest(files)===PRIVATE_TARGET,
+  'reviewed private E1 management SHA mismatch');
+ require_(!env.REVIEWED_TARGET_SHA256||env.REVIEWED_TARGET_SHA256===digest(files),'reviewed target SHA mismatch');
+ return files;
+}
 const TYPES = Object.freeze({'.js':'SERVER_JS','.gs':'SERVER_JS','.html':'HTML','.json':'JSON'});
 // The retired synthetic UI/fixture modules remain in the repo for historical
 // offline test imports, but must never be executable in formal E1 GAS HEAD.
@@ -145,12 +159,16 @@ function invocation(env,mode){
   env.GITHUB_EVENT_NAME==='workflow_dispatch' && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
   env.GITHUB_SHA===env.REVIEWED_SHA,'manual, main, exact SHA and V2 repository required');
  if(mode!=='audit'){
-  require_(env.SYNC_MODE==='apply' && env.CONFIRMATION===CONFIRM,
+  require_(env.SYNC_MODE==='apply' && env.CONFIRMATION===(releaseProfile(env)==='private_e1_management'?PRIVATE_CONFIRM:CONFIRM),
    'explicit V2 apply confirmation required');
   require_(/^[a-f0-9]{64}$/.test(env.EXPECTED_REMOTE_SHA256||''),
    'verified remote SHA from a preceding audit required');
  }
  if(mode==='audit')require_(env.SYNC_MODE==='audit','audit selection required');
+ if(releaseProfile(env)==='private_e1_management'){
+  require_(env.REVIEWED_TARGET_SHA256===PRIVATE_TARGET,'exact private E1 management target SHA required');
+  if(mode!=='audit')require_(/^[a-f0-9]{64}$/.test(env.EXPECTED_INVENTORY_SHA256||''),'private HEAD apply requires prior full inventory audit');
+ }
 }
 function latestMain(env){
  const local=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -239,7 +257,7 @@ async function prepare(api,files,c,env){
  const p=runnerPaths(env);
  fs.writeFileSync(p.backup,JSON.stringify(enc),{mode:0o600,flag:'wx'});
  fs.writeFileSync(p.state,JSON.stringify({scriptId:SID,githubSha:env.GITHUB_SHA,runId:env.GITHUB_RUN_ID,
-  before:before.sha,target,backupSha:sha(JSON.stringify(enc)),backup:p.backup}),{mode:0o600,flag:'wx'});
+  before:before.sha,target,profile:releaseProfile(env),inventory:env.EXPECTED_INVENTORY_SHA256||'',backupSha:sha(JSON.stringify(enc)),backup:p.backup}),{mode:0o600,flag:'wx'});
  require_(sha(fs.readFileSync(p.backup,'utf8'))===sha(JSON.stringify(enc)),
   'encrypted backup local readback failed');
  const after=verifyRemote(await api.getContent());
@@ -250,11 +268,12 @@ async function prepare(api,files,c,env){
  console.log('V2_PREWRITE_BACKUP_SHA256='+sha(JSON.stringify(enc)));
  return {before:before.sha,target};
 }
-async function apply(api,files,c,env){
+async function apply(api,files,c,env,beforePut=async()=>{},afterPut=async()=>{}){
  const p=runnerPaths(env);
  const s=JSON.parse(fs.readFileSync(p.state,'utf8'));
  require_(s.scriptId===SID && s.githubSha===env.GITHUB_SHA && s.runId===env.GITHUB_RUN_ID &&
-  s.before===env.EXPECTED_REMOTE_SHA256 && s.target===digest(files) && s.backup===p.backup,
+  s.before===env.EXPECTED_REMOTE_SHA256 && s.target===digest(files) && s.backup===p.backup &&
+  s.profile===releaseProfile(env)&&s.inventory===(env.EXPECTED_INVENTORY_SHA256||''),
   'wrong or stale prewrite state');
  const encrypted=fs.readFileSync(p.backup,'utf8');
  require_(sha(encrypted)===s.backupSha,'encrypted backup changed after upload');
@@ -263,11 +282,13 @@ async function apply(api,files,c,env){
   verifyRemote(copy.head).sha===s.before,'prewrite backup does not match remote baseline');
  const current=verifyRemote(await api.getContent());
  require_(current.sha===s.before,'remote HEAD modified after encrypted backup');
+ await beforePut();
  // No atomic CAS in the Google Apps Script API. Never retry/rollback an ambiguous PUT.
  try{
   await api.putContent(files);
   const after=verifyRemote(await api.getContent());
   require_(after.sha===s.target && after.count===files.length,'full remote HEAD readback mismatch');
+  await afterPut();
   console.log('V2_HEAD_ONLY_SYNC_VERIFIED=true');
   console.log('V2_HEAD_SHA256='+after.sha);
   console.log('V2_HEAD_FILE_COUNT='+after.count);
@@ -278,19 +299,38 @@ async function apply(api,files,c,env){
 async function main(){
  const mode=process.argv[2];invocation(process.env,mode);
  latestMain(process.env);
- const files=localSources();
+ const files=releaseFiles(process.env);
  require_(process.env.V2_GAS_CLASPRC_JSON?.length>0,
   'GitHub secret V2_GAS_CLASPRC_JSON is absent');
  const c=credentials(process.env.V2_GAS_CLASPRC_JSON);
  const api=await apiFromCredentials(c);
+ if(releaseProfile(process.env)==='private_e1_management'){
+  const d=require('./study1-v2-private-deploy.cjs');
+  const inventoryApi=await d.makeApi(c);
+  const first=await d.audit(inventoryApi);
+  if(mode==='audit'){await audit(api,files);return;}
+  const guard=async()=>{
+   const now=await d.inventory(inventoryApi);
+   d.requirePrivateHeadBaseline(now);
+   require_(now.fp===process.env.EXPECTED_INVENTORY_SHA256,'private HEAD inventory differs from prior audit');
+   require_(now.headSha===process.env.EXPECTED_REMOTE_SHA256,'private HEAD baseline differs');
+   latestMain(process.env);
+   return now;
+  };
+  d.requirePrivateHeadBaseline(first);
+  require_(first.fp===process.env.EXPECTED_INVENTORY_SHA256,'private HEAD inventory differs from prior audit');
+  if(mode==='prepare'){await guard();await prepare(api,files,c,process.env);}
+  else await apply(api,files,c,process.env,guard,async()=>{
+   const after=await d.inventory(inventoryApi);
+   d.requirePrivateHeadBaseline(after);
+   require_(after.headSha===PRIVATE_TARGET&&after.stable===first.stable,'private HEAD or immutable deployment inventory readback mismatch');
+  });
+  return;
+ }
  if(mode==='audit')await audit(api,files);
  else if(mode==='prepare')await prepare(api,files,c,process.env);
- else await apply(api,files,c,process.env);
+ else await apply(api,files,c,process.env,async()=>latestMain(process.env));
 }
-if(require.main===module)main().catch(e=>{
- console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
- process.exitCode=1;
-});
 function privateOwnerReadOnlyCandidate(files){
  // Offline only: never used by main(), localSources(), prepare(), apply(), or workflow.
  // Start exclusively from the reviewed, closed public source inventory.
@@ -420,6 +460,10 @@ function privateOwnerManagementCandidate(files){
  require_(rejected,'private management candidate rejected by public release guard');
  return result;
 }
-module.exports={privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
+module.exports={PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
  runnerPaths,aad,audit,prepare,apply};
+if(require.main===module)main().catch(e=>{
+ console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
+ process.exitCode=1;
+});

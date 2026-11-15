@@ -9,6 +9,20 @@ on:
         type: choice
         options: [audit, apply]
         default: audit
+      source_profile:
+        description: 'public_readonly or already reviewed private E1 management'
+        required: true
+        type: choice
+        options: [public_readonly, private_e1_management]
+        default: public_readonly
+      reviewed_target_sha256:
+        description: 'Exact reviewed candidate SHA-256 (required for private profile)'
+        required: false
+        type: string
+      expected_inventory_sha256:
+        description: 'Private apply only: V2_PRIVATE_INVENTORY_SHA256 from separate audit'
+        required: false
+        type: string
       reviewed_sha:
         description: 'Exact 40-character latest V2 main commit SHA'
         required: true
@@ -46,6 +60,9 @@ jobs:
           node --test tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
       - name: Reject stale main, wrong repository, and missing explicit inputs
         env:
+          SOURCE_PROFILE: ${{ inputs.source_profile }}
+          REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
           CONFIRMATION: ${{ inputs.confirmation }}
@@ -57,7 +74,14 @@ jobs:
           test "$GITHUB_SHA" = "$REVIEWED_SHA"
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
           if [ "$SYNC_MODE" = apply ]; then
-            test "$CONFIRMATION" = I_AUTHORIZE_STUDY1_V2_HEAD_ONLY
+            if [ "$SOURCE_PROFILE" = private_e1_management ]; then
+              test "$CONFIRMATION" = I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_HEAD_ONLY
+              [[ "$EXPECTED_INVENTORY_SHA256" =~ ^[a-f0-9]{64}$ ]]
+              [[ "$REVIEWED_TARGET_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            else
+              test "$SOURCE_PROFILE" = public_readonly
+              test "$CONFIRMATION" = I_AUTHORIZE_STUDY1_V2_HEAD_ONLY
+            fi
             [[ "$EXPECTED_REMOTE_SHA256" =~ ^[a-f0-9]{64}$ ]]
           else
             test "$SYNC_MODE" = audit
@@ -65,6 +89,9 @@ jobs:
       - name: V2 HEAD audit or verified encrypted prewrite backup (NO GAS mutation)
         env:
           V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+          SOURCE_PROFILE: ${{ inputs.source_profile }}
+          REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
           CONFIRMATION: ${{ inputs.confirmation }}
@@ -91,6 +118,9 @@ jobs:
         if: ${{ inputs.mode == 'apply' }}
         env:
           V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+          SOURCE_PROFILE: ${{ inputs.source_profile }}
+          REVIEWED_TARGET_SHA256: ${{ inputs.reviewed_target_sha256 }}
+          EXPECTED_INVENTORY_SHA256: ${{ inputs.expected_inventory_sha256 }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
           EXPECTED_REMOTE_SHA256: ${{ inputs.expected_remote_sha256 }}
           CONFIRMATION: ${{ inputs.confirmation }}

@@ -250,3 +250,30 @@ test('private candidate select and source pointer reject E2, non-presigned and s
  assert.throws(()=>c.study1ConsentVersionSelect({id:entry.id,expectedRevision:1}),/版本選用衝突/);
  assert.equal(writes,0);assert.equal(checks,1);assert.equal(locks,5);
 });
+
+test('private HEAD release binds previously reviewed 27-source digest and separate authorization',()=>{
+ const base=m.localSources(),pub=m.releaseFiles({},base),env0=env();
+ const e={...env0,SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:m.PRIVATE_TARGET,
+  EXPECTED_INVENTORY_SHA256:'a'.repeat(64),CONFIRMATION:m.PRIVATE_CONFIRM};
+ assert.equal(m.digest(m.releaseFiles(e,base)),m.PRIVATE_TARGET);
+ assert.equal(m.closedManifest(pub).webapp.access,'ANYONE');
+ assert.doesNotThrow(()=>m.invocation(e,'prepare'));
+ for(const b of [{CONFIRMATION:m.CONFIRM},{EXPECTED_INVENTORY_SHA256:''},{REVIEWED_TARGET_SHA256:'a'.repeat(64)}])
+  assert.throws(()=>m.invocation({...e,...b},'prepare'),/V2_HEAD_ONLY_BLOCKED/);
+ assert.throws(()=>m.releaseFiles({...e,REVIEWED_TARGET_SHA256:'a'.repeat(64)},base),/reviewed target SHA/);
+ fs.rmSync(env0.RUNNER_TEMP,{recursive:true,force:true});
+});
+test('before-PUT inventory guard and after-PUT readback gate prevent blind retries',async()=>{
+ const e=env(),c=creds(),f=fixtures(),before=remote();
+ e.EXPECTED_REMOTE_SHA256=m.digest(before.files);
+ const updated=f.map(x=>x.name==='Index'?{...x,source:'new'}:x);
+ let writes=0,current=before;
+ const api={getContent:async()=>current,putContent:async files=>{writes++;current={scriptId:m.SID,files}}};
+ try{
+  await m.prepare(api,updated,c,e);
+  await assert.rejects(m.apply(api,updated,c,e,async()=>{throw Error('INVENTORY_RACED')}),/INVENTORY_RACED/);
+  assert.equal(writes,0);
+  await assert.rejects(m.apply(api,updated,c,e,async()=>{},async()=>{throw Error('DEPLOYMENT_READBACK_MISMATCH')}),/POST_PUT_UNKNOWN_NO_RETRY_NO_ROLLBACK/);
+  assert.equal(writes,1);
+ }finally{fs.rmSync(e.RUNNER_TEMP,{recursive:true,force:true});}
+});
