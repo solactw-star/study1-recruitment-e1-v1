@@ -14,8 +14,8 @@ const SID=core.SID,REPO=core.REPO;
 const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
 const TARGET=core.PRIVATE_TARGET;
 // One authorized execution only, bound to the reviewed parent and push event.
-const RELEASE_PARENT='50d3d832fe73d83b58b71c4195e6540c9cf5ee45';
-const RELEASE_MESSAGE='release(v2): authorized one-time private E1 OWNER launch 2026-11-15';
+const RELEASE_PARENT='e6020f1b4d9e51c669409c8ddd4fadc69db34c66';
+const RELEASE_MESSAGE='release-v2 authorized one-time private E1 OWNER launch 2026-11-15';
 const RELEASE_TARGET='b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
 const RELEASE_BASE_FP='4d85ca4609ccab451221012b454957d80d605603602cb283addff8d0e6846d2e';
 const VERSION_CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_VERSION';

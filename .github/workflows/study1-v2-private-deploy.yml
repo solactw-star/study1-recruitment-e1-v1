@@ -149,7 +149,10 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/study1-v2-private-prewrite-$GITHUB_RUN_ID.json.enc"
   private-approved-once:
-    if: ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' && github.event.before == '50d3d832fe73d83b58b71c4195e6540c9cf5ee45' && github.event.head_commit.message == 'release(v2): authorized one-time private E1 OWNER launch 2026-11-15' && github.run_attempt == 1 }}
+    if: >-
+      ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1'
+      && github.ref == 'refs/heads/main' && github.event.before == 'e6020f1b4d9e51c669409c8ddd4fadc69db34c66'
+      && github.event.head_commit.message == 'release-v2 authorized one-time private E1 OWNER launch 2026-11-15' && github.run_attempt == 1 }}
     needs: automatic-inventory
     runs-on: ubuntu-latest
     timeout-minutes: 30
