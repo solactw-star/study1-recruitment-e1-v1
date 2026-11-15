@@ -148,6 +148,48 @@ jobs:
       - name: Purge ephemeral encrypted release backup
         if: always()
         run: rm -f "$RUNNER_TEMP/study1-v2-private-prewrite-$GITHUB_RUN_ID.json.enc"
+  private-version2-resume:
+    if: >-
+      ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1'
+      && github.ref == 'refs/heads/main' && github.event.before == '4f500f4b923d76db58a7194f42162f9e85e1ca22'
+      && github.event.head_commit.message == 'release-v2 authorized resume private version 2 deployment 2026-11-15' && github.run_attempt == 1 }}
+    needs: automatic-inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare existing version 2 deployment backup (GET only)
+        env:
+          V2_ONCE_RELEASE: '1'
+          V2_RESUME_DEPLOY: '1'
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs resume-prepare
+      - name: Preserve encrypted deployment backup before POST
+        uses: actions/upload-artifact@v4
+        with:
+          name: study1-v2-resume-deploy-${{ github.run_id }}
+          path: ${{ runner.temp }}/study1-v2-private-prewrite-${{ github.run_id }}-deploy.json.enc
+          if-no-files-found: error
+          retention-days: 7
+      - name: Deploy existing version 2 once and verify
+        env:
+          V2_ONCE_RELEASE: '1'
+          V2_RESUME_DEPLOY: '1'
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs resume-deploy
+      - name: Read-only reconcile if deployment fails (no repeat)
+        if: failure()
+        env:
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs auto-audit
+      - name: Purge local encrypted backup
+        if: always()
+        run: rm -f "$RUNNER_TEMP/study1-v2-private-prewrite-$GITHUB_RUN_ID-deploy.json.enc"
   private-approved-once:
     if: >-
       ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1'

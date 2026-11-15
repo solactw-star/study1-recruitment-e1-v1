@@ -20,6 +20,11 @@ const RELEASE_PARENT='e6020f1b4d9e51c669409c8ddd4fadc69db34c66';
 const RELEASE_MESSAGE='release-v2 authorized one-time private E1 OWNER launch 2026-11-15';
 const RELEASE_TARGET='b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
 const RELEASE_BASE_FP='4d85ca4609ccab451221012b454957d80d605603602cb283addff8d0e6846d2e';
+// Consumed only by the authorized single deployment continuation; no HEAD or version mutation.
+const RESUME_PARENT='4f500f4b923d76db58a7194f42162f9e85e1ca22';
+const RESUME_MESSAGE='release-v2 authorized resume private version 2 deployment 2026-11-15';
+const RESUME_FP='6cab520e1d8250d11094f62088ee4f1743bcb5e06b974bd88d01f0e7001511a1';
+const RESUME_VERSION=2;
 const VERSION_CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_VERSION';
 const CONFIRM='I_AUTHORIZE_STUDY1_V2_PRIVATE_MYSELF_DEPLOY';
 const assert=(ok,message)=>{if(!ok)throw Error('V2_PRIVATE_BLOCKED: '+message)};
@@ -30,7 +35,8 @@ function invocation(env,mode){
  assert(['audit','version','deploy'].includes(mode),'unknown mode');
  if(env.V2_ONCE_RELEASE==='1'){
   oneShotInvocation(env);
-  assert(mode==='version'||mode==='deploy','one-time authorization only for these mutation stages');
+  if(env.V2_RESUME_DEPLOY==='1')assert(mode==='deploy'&&env.PRIVATE_VERSION===String(RESUME_VERSION),'resume authorizes only existing version 2 deployment');
+  else assert(mode==='version'||mode==='deploy','one-time authorization only for these mutation stages');
  }else assert(env.GITHUB_REPOSITORY===REPO && env.GITHUB_REF==='refs/heads/main' &&
   env.GITHUB_EVENT_NAME==='workflow_dispatch','V2 manual main workflow only');
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
@@ -329,6 +335,11 @@ async function reviewedMutation(api,env,mode,assertMain){
  const before=await inventory(api);
  assert(before.fp===env.EXPECTED_INVENTORY_SHA256,'version/deployment inventory differs from prior audited state');
  checkHead(before.head);assert(before.safe,'unverified existing deployment inventory');
+ if(env.V2_RESUME_DEPLOY==='1'){
+  requirePrivateHeadBaseline(before);
+  assert(before.proofs.some(p=>p.version===RESUME_VERSION&&p.sha===VERIFIED_VERSION2_SHA&&p.known&&p.access==='MYSELF'),'resume version 2 content not verified');
+  assert(!targetDeployed(before),'matching private deployment already exists; read-only reconciliation only');
+ }
  // A new invocation reaches this gate after the independently persisted backup.
  // This full fresh inventory is already compared with the exact reviewed snapshot.
  assertMain(env);
@@ -455,8 +466,9 @@ function oneShotInvocation(env,event){
  assert(env.V2_ONCE_RELEASE==='1'&&env.GITHUB_REPOSITORY===REPO&&env.GITHUB_REF==='refs/heads/main'&&
   env.GITHUB_EVENT_NAME==='push'&&env.GITHUB_RUN_ATTEMPT==='1','one-time release requires trusted main push and first attempt');
  const e=event||JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH,'utf8'));
- assert(e.before===RELEASE_PARENT&&e.after===env.GITHUB_SHA&&e.ref==='refs/heads/main'&&
-  e.head_commit?.id===env.GITHUB_SHA&&e.head_commit?.message===RELEASE_MESSAGE&&
+ const resume=env.V2_RESUME_DEPLOY==='1';
+ assert(e.before===(resume?RESUME_PARENT:RELEASE_PARENT)&&e.after===env.GITHUB_SHA&&e.ref==='refs/heads/main'&&
+  e.head_commit?.id===env.GITHUB_SHA&&e.head_commit?.message===(resume?RESUME_MESSAGE:RELEASE_MESSAGE)&&
   e.forced===false&&e.deleted===false&&e.created===false&&e.commits?.length===1&&
   e.repository?.full_name===REPO,'one-time release authorization event mismatch');
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')&&/^[0-9]+$/.test(env.GITHUB_RUN_ID||'')&&
@@ -483,6 +495,7 @@ function onceEnv(env,mode,s,version){
 }
 async function oneShotPhase(phase,env,c,api,headApi,assertMain=latestMain){
  oneShotInvocation(env);assertMain(env);
+ assert(env.V2_RESUME_DEPLOY!=='1','resume cannot invoke original multi-stage release');
  assert(ONCE_PHASES.includes(phase),'unknown one-time phase');
  assert(!fs.existsSync(oncePath(env,phase)),'one-time phase already recorded; no rerun');
  const files=reviewedLocal();
@@ -569,8 +582,29 @@ async function oneShotMain(phase,env){
  await oneShotPhase(phase,env,c,api,headApi);
 }
 
+function resumeEnv(env){
+ assert(env.V2_RESUME_DEPLOY==='1','explicit continuation selection required');
+ oneShotInvocation(env);
+ assert(TARGET===VERIFIED_VERSION2_SHA,'authorized version 2 differs from current reviewed candidate');
+ return onceEnv(env,'deploy',{fp:RESUME_FP,headSha:TARGET},RESUME_VERSION);
+}
+async function resumeMain(phase,env){
+ assert(['resume-prepare','resume-deploy'].includes(phase),'resume only permits deployment backup or deployment');
+ const e=resumeEnv(env);latestMain(e);reviewedLocal();
+ const c=core.credentials(e.V2_GAS_CLASPRC_JSON);
+ const api=await makeApi(c,undefined,undefined,undefined,phase==='resume-prepare');
+ if(phase==='resume-prepare')return prepareReleaseBackup(api,c,e);
+ verifyReleaseBackup(c,e);
+ // No HEAD write or version creation client is called by this continuation.
+ const v=await deploy(api,e);
+ report('V2_RESUME_DEPLOY_VERIFIED=true');
+ report('V2_RESUME_DEPLOY_VERSION='+v.version);
+ report('V2_RESUME_NO_HEAD_OR_VERSION_MUTATIONS=true');
+}
+
 async function main(){
  const phase=process.argv[2];
+ if(phase?.startsWith('resume-')){await resumeMain(phase,process.env);return;}
  if(phase?.startsWith('once-')){await oneShotMain(phase.slice(5),process.env);return;}
  if(phase==='auto-audit'){await automaticAudit(process.env);return;}
  const mode=phase==='prepare'?process.env.PRIVATE_MODE:phase;
@@ -592,7 +626,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,

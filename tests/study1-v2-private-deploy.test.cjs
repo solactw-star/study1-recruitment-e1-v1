@@ -504,3 +504,27 @@ test('deploy reuses the fresh reviewed immutable inventory before one POST and r
  assert.ok(lists>listsAtPost&&reads>readsAtPost);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
 });
+
+test('version 2 continuation only accepts its exact new event; original stages cannot run',async()=>{
+ const e={...runEnv(),V2_ONCE_RELEASE:'1',V2_RESUME_DEPLOY:'1',GITHUB_EVENT_NAME:'push',
+  GITHUB_SHA:'d'.repeat(40),REVIEWED_SHA:'d'.repeat(40),PRIVATE_VERSION:'2',EXPECTED_INVENTORY_SHA256:d.RESUME_FP};
+ const event={before:d.RESUME_PARENT,after:e.GITHUB_SHA,ref:'refs/heads/main',forced:false,deleted:false,created:false,
+  repository:{full_name:d.REPO},head_commit:{id:e.GITHUB_SHA,message:d.RESUME_MESSAGE},commits:[{id:e.GITHUB_SHA}]};
+ const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'v2-resume-'));e.GITHUB_EVENT_PATH=path.join(dir,'event.json');
+ fs.writeFileSync(e.GITHUB_EVENT_PATH,JSON.stringify(event));
+ try{
+  const next=d.resumeEnv(e);
+  assert.equal(next.PRIVATE_VERSION,'2');assert.equal(next.EXPECTED_INVENTORY_SHA256,d.RESUME_FP);
+  assert.doesNotThrow(()=>d.invocation(next,'deploy'));
+  assert.throws(()=>d.invocation({...next,PRIVATE_VERSION:'1'},'deploy'),/only existing version 2 deployment/);
+  assert.throws(()=>d.invocation({...next,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},'version'),/only existing version 2 deployment/);
+  await assert.rejects(d.oneShotPhase('head-prepare',next,{},fakeApi().api,null,()=>{}),/cannot invoke original multi-stage/);
+  assert.throws(()=>d.resumeEnv({...e,GITHUB_RUN_ATTEMPT:'2'}),/first attempt/);
+  assert.throws(()=>d.oneShotInvocation(e,{...event,before:d.RELEASE_PARENT}),/authorization event mismatch/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+ const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
+ const job=wf.slice(wf.indexOf('  private-version2-resume:'),wf.indexOf('  private-approved-once:'));
+ assert.ok(job.includes(d.RESUME_PARENT)&&job.includes(d.RESUME_MESSAGE)&&job.includes('github.run_attempt == 1'));
+ assert.ok(job.indexOf('resume-prepare')<job.indexOf('uses: actions/upload-artifact@v4')&&job.indexOf('uses: actions/upload-artifact@v4')<job.indexOf('resume-deploy'));
+ assert.doesNotMatch(job,/once-head|once-version|clasp push/);
+});
