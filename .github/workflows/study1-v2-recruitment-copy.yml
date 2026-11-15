@@ -1,0 +1,63 @@
+name: Study1 B11 original recruitment copy review (no deploy)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [save, publish]
+        required: true
+      draft:
+        description: 'save: exact JSON from OWNER B11'
+        type: string
+        required: false
+      pr:
+        description: 'publish: original B11 PR number'
+        type: string
+        required: false
+      head:
+        description: 'publish: exact reviewed 40-character head SHA'
+        type: string
+        required: false
+      approval_ref:
+        description: 'publish: independent PI approval reference, matching approved review'
+        type: string
+        required: false
+      reason:
+        description: 'publish: reason for approved copy update'
+        type: string
+        required: false
+      confirmation:
+        description: 'I_SAVE_STUDY1_COPY_DRAFT or I_PUBLISH_APPROVED_STUDY1_COPY_TO_MAIN'
+        type: string
+        required: true
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: study1-b11-original-copy
+  cancel-in-progress: false
+jobs:
+  review-copy:
+    if: ${{ github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify original copy contract with isolated adapters
+        run: node --test tests/study1-v2-recruitment-copy.test.cjs
+      - name: Save draft or merge independently reviewed exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COPY_MODE: ${{ inputs.mode }}
+          COPY_DRAFT: ${{ inputs.draft }}
+          COPY_PR: ${{ inputs.pr }}
+          COPY_HEAD: ${{ inputs.head }}
+          COPY_APPROVAL: ${{ inputs.approval_ref }}
+          COPY_REASON: ${{ inputs.reason }}
+          COPY_CONFIRM: ${{ inputs.confirmation }}
+        run: node scripts/study1-v2-recruitment-copy.cjs

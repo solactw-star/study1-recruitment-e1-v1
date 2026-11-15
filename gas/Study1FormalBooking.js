@@ -1478,12 +1478,13 @@ function study1OwnerE1RecruitmentDraft(){if(typeof study1V2PublicRpcDeny_==='fun
  const parts=hero[0].match(/<h1>([\s\S]*?)<\/h1><p>([\s\S]*?)<\/p>/);
  if(!parts)throw Error('E1_RECRUITMENT_ORIGINAL_SOURCE_MISMATCH');
  const plain=value=>{
-  const text=value.replace(/<br\s*\/?\s*>/gi,'').replace(/<\/?span>/g,'').trim();
-  if(!text||/[<>\x00-\x1f]/.test(text))throw Error('E1_RECRUITMENT_ORIGINAL_TEXT_INVALID');
+  const text=value.replace(/<br\s*\/?\s*>/gi,'').replace(/<\/?span>/g,'').trim().replace(/&amp;/g,'&');
+  if(!text||/[<>\x00-\x08\x0b\x0c\x0d-\x1f]/.test(text))throw Error('E1_RECRUITMENT_ORIGINAL_TEXT_INVALID');
   return text;
  };
  return {mode:'OWNER_RECRUITMENT_DRAFT',source:'gas/Index.html',
   revision:study1BindingHmac_(['E1_RECRUITMENT_INDEX_V1',html]),
+  baseSha256:study1EConsentHash_(html),
   title:plain(parts[1]),intro:plain(parts[2]),open:false,
   actionAuthority:'DRAFT_ONLY'};
 }

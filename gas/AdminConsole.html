@@ -127,14 +127,16 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <div id="status" role="status" aria-live="polite">確認研究室權限中……</div>
 </section>
 <section id="e1RecruitmentDraft"><h2>E1 招募內容管理</h2>
-<p>直接讀取現行招募首頁標題與介紹。編輯及預覽只在本頁，匯出供研究團隊審核及原 GitHub 文案發布流程；不修改核准資格、研究條件、收件設定。</p>
+<p>直接讀取原首頁標題與介紹。預覽後將草稿儲存至原 GitHub 的 Index 分支；經版本差異審核、PI 核定及獨立 GitHub review 後，才可合併至原 main。正式 GAS 發布另行授權，不修改資格、研究條件或收件設定。</p>
 <button type="button" id="e1CopyLoad">載入現行首頁文案</button>
 <label for="e1CopyTitle">首頁標題</label><input id="e1CopyTitle" maxlength="120" disabled>
 <label for="e1CopyIntro">研究介紹</label><textarea id="e1CopyIntro" maxlength="1000" disabled></textarea>
 <button type="button" id="e1CopyPreview" disabled>預覽修改</button><button type="button" id="e1CopyExport" disabled>產生審核草稿</button>
 <div class="notice"><small>招募首頁文案預覽（報名維持關閉）</small><h3 id="e1CopyTitlePreview"></h3><p id="e1CopyIntroPreview"></p></div>
 <p id="e1CopyStatus" role="status" aria-live="polite">尚未載入原文案。</p>
-<label for="e1CopyDraft">審核草稿（可複製，不是已發布內容）</label><textarea id="e1CopyDraft" readonly></textarea>
+<label for="e1CopyDraft">審核草稿（可複製，不是已儲存或發布內容）</label><textarea id="e1CopyDraft" readonly></textarea>
+<p><a id="e1CopySaveLink" href="https://github.com/solactw-star/study1-recruitment-e1-v1/actions/workflows/study1-v2-recruitment-copy.yml" target="_blank" rel="noopener noreferrer">儲存草稿／核准原始碼發布（GitHub）</a> · <a href="https://github.com/solactw-star/study1-recruitment-e1-v1/pulls" target="_blank" rel="noopener noreferrer">審核草稿與版本差異</a> · <a href="https://github.com/solactw-star/study1-recruitment-e1-v1/commits/main/gas/Index.html" target="_blank" rel="noopener noreferrer">正式文案版本歷史</a></p>
+<ol><li>複製上方完整草稿；在 GitHub Run workflow 選 save，貼入 draft 欄並確認。</li><li>工作紀錄提供原 Index 草稿分支及 PR（若 Repository 禁止 Actions 建立 PR，使用分支連結人工開啟 PR）。獨立有權審核者核對差異及 PI 核定資料，以 Approve review 附 PI_APPROVAL_REF=核定參照。</li><li>在同一 workflow 選 publish，填 PR 編號、已審核 head SHA、核定參照及原因、確認字串。通過驗證才合併原 main。此處不觸發 GAS 部署；公開網站仍是原部署版本。</li></ol>
 </section>
 <section id="e1Workspace">
 <h2>E1 研究管理工作區</h2><p>原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更須先預檢，且只有獨立核定的完全相同草稿、正式資料寫入授權及安全條件均通過時才可儲存；未核定不寫入。開放單一場次不代表啟用招募。</p>
@@ -1256,7 +1258,7 @@ function e1RecruitmentDraftSetup_(){
    status('請輸入有效純文字標題及介紹，不接受 HTML。');return null;
   }
   return {kind:'RECRUITMENT_COPY_REVIEW_DRAFT',source:source.source,baseRevision:source.revision,
-   title,intro,open:false,approved:false,published:false};
+   baseSha256:source.baseSha256,title,intro,open:false,approved:false,published:false};
  };
  load.addEventListener('click',()=>{
   if(busy)return;busy=true;load.disabled=true;clear();status('載入原首頁…');
@@ -1264,7 +1266,7 @@ function e1RecruitmentDraftSetup_(){
   const fail=()=>{done();clear();status('無法核對原文案，請重新載入。');};
   google.script.run.withFailureHandler(fail).withSuccessHandler(r=>{
    if(!r||r.mode!=='OWNER_RECRUITMENT_DRAFT'||r.source!=='gas/Index.html'||r.open!==false||
-     r.actionAuthority!=='DRAFT_ONLY'||!/^[a-f0-9]{64}$/.test(r.revision||'')||
+     r.actionAuthority!=='DRAFT_ONLY'||!/^[a-f0-9]{64}$/.test(r.revision||'')||!/^[a-f0-9]{64}$/.test(r.baseSha256||'')||
      typeof r.title!=='string'||typeof r.intro!=='string'){fail();return;}
    done();source=r;el('e1CopyTitle').value=r.title;el('e1CopyIntro').value=r.intro;
    el('e1CopyTitlePreview').textContent=r.title;el('e1CopyIntroPreview').textContent=r.intro;
@@ -1276,7 +1278,7 @@ function e1RecruitmentDraftSetup_(){
   status('預覽完成；尚未核准或發布。');
  });
  el('e1CopyExport').addEventListener('click',()=>{const p=proposal();if(!p)return;
-  el('e1CopyDraft').value=JSON.stringify(p,null,2);status('審核草稿已產生，可複製；未儲存或發布。');
+  el('e1CopyDraft').value=JSON.stringify(p,null,2);status('審核草稿已產生，可複製至 GitHub save；本頁未儲存或發布。');
  });
  for(const id of ['e1CopyTitle','e1CopyIntro'])el(id).addEventListener('input',()=>{el('e1CopyDraft').value='';status('文案已修改，請重新預覽及產生草稿。');});
 }

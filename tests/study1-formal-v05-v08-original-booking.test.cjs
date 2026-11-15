@@ -874,6 +874,7 @@ test('V08 evidence prepare detects changed unrelated original rows before any ca
 const wsFilter={query:'',status:'ALL',eligibility:'ALL',slotId:'',offset:0};
 function wsHarness(){
  const h=harness();h.ctx.study1AdminOwnerRequired_=()=>true;
+ h.ctx.study1EConsentHash_=v=>crypto.createHash('sha256').update(v,'utf8').digest('hex');
  h.props.set('STUDY1_PARTICIPANT_DATA_USE_APPROVED','true');
  h.props.set('STUDY1_ECONSENT_LIVE_SHEETS_APPROVED','true');
  h.ctx.study1OwnerE1NoticeSnapshot_=()=>({rows:h.tables.Notifications.rows.map(r=>r.slice()),rowCount:h.tables.Notifications.rows.length+1});
@@ -930,7 +931,7 @@ test('P0-B recruitment source is the original Index; no write or public read of 
   assert.equal(name,'Index');return {getContent:()=>fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')};
  }};
  const r=h.ctx.study1OwnerE1RecruitmentDraft();
- assert.match(r.title,/記憶與身體感覺/);assert.match(r.intro,/身體訊號覺察/);assert.equal(r.actionAuthority,'DRAFT_ONLY');assert.equal(r.open,false);
+ assert.match(r.title,/記憶與身體感覺/);assert.match(r.intro,/身體訊號覺察/);assert.equal(r.actionAuthority,'DRAFT_ONLY');assert.equal(r.open,false);assert.equal(r.baseSha256,crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../gas/Index.html'))).digest('hex'));
  h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
  assert.throws(()=>h.ctx.study1OwnerE1RecruitmentDraft(),/PUBLIC_READ_ONLY/);
  assert.equal(h.mutations.length,n);
@@ -981,7 +982,7 @@ test('P0-B browser recruitment editing preview and review export never publish a
  g('e1CopyTitle').value='審核中的招募標題';g('e1CopyPreview').click();
  assert.equal(g('e1CopyTitlePreview').textContent,'審核中的招募標題');
  g('e1CopyExport').click();
- const draft=JSON.parse(g('e1CopyDraft').value);assert.equal(draft.published,false);assert.equal(draft.open,false);assert.equal(draft.approved,false);
+ const draft=JSON.parse(g('e1CopyDraft').value);assert.equal(draft.baseSha256,crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../gas/Index.html'))).digest('hex'));assert.equal(draft.published,false);assert.equal(draft.open,false);assert.equal(draft.approved,false);
  g('e1CopyTitle').value='<script>';g('e1CopyTitle').handlers.input();g('e1CopyExport').click();
  assert.equal(g('e1CopyDraft').value,'');assert.match(g('e1CopyStatus').textContent,/不接受 HTML/);
  assert.deepEqual(b.calls.map(x=>x.method),['study1OwnerE1RecruitmentDraft']);
