@@ -137,7 +137,7 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <label for="e1CopyDraft">審核草稿（可複製，不是已發布內容）</label><textarea id="e1CopyDraft" readonly></textarea>
 </section>
 <section id="e1Workspace">
-<h2>E1 研究管理工作區</h2><p>原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更目前僅送出預檢草稿，不寫入正式資料。</p>
+<h2>E1 研究管理工作區</h2><p>原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更須先預檢，且只有獨立核定的完全相同草稿、正式資料寫入授權及安全條件均通過時才可儲存；未核定不寫入。開放單一場次不代表啟用招募。</p>
 <div class="booking-filter-grid"><div><label for="e1WsQuery">姓名或參與者代碼</label><input id="e1WsQuery" maxlength="80" autocomplete="off"></div>
 <div><label for="e1WsStatus">報名狀態</label><select id="e1WsStatus"><option value="ALL">全部</option><option value="PENDING_EMAIL">待驗證</option><option value="EMAIL_VERIFIED">信箱已驗證</option></select></div>
 <div><label for="e1WsEligibility">資格</label><select id="e1WsEligibility"><option value="ALL">全部</option><option value="ELIGIBLE">符合</option><option value="INELIGIBLE">不符合</option></select></div>
@@ -147,7 +147,7 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <h3>參與者名單</h3><div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>代碼</th><th>姓名</th><th>信箱驗證</th><th>資格</th><th>場次</th><th>預約</th><th>同意</th><th>同意對應預約</th><th>通知</th></tr></thead><tbody id="e1WsRows"></tbody></table></div>
 <h3>場次與名額（臺灣時間）</h3><label for="e1WsDate">日期篩選</label><input id="e1WsDate" type="date">
 <div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th><th>狀態</th><th>容量</th><th>暫留</th><th>確認</th><th>候補</th><th>剩餘</th><th>操作</th></tr></thead><tbody id="e1WsSlots"></tbody></table></div>
-<h3>場次變更草稿（PI 核定前預檢）</h3>
+<h3>場次變更預檢及核定後儲存</h3>
 <button id="e1WsNew" type="button" disabled>新增場次草稿</button>
 <div class="booking-filter-grid"><div><label for="e1WsDraftId">原場次識別碼</label><input id="e1WsDraftId" maxlength="64"></div><div><label for="e1WsDraftStart">開始（臺灣時間）</label><input id="e1WsDraftStart" type="datetime-local"></div><div><label for="e1WsDraftEnd">結束（臺灣時間）</label><input id="e1WsDraftEnd" type="datetime-local"></div><div><label for="e1WsDraftLocation">地點代碼</label><input id="e1WsDraftLocation" maxlength="80"></div><div><label for="e1WsDraftCap">名額</label><input id="e1WsDraftCap" type="number" min="1" step="1"></div></div>
 <button id="e1WsPreview" type="button" disabled>檢查新增／修改草稿</button><button id="e1WsClose" type="button" disabled>預檢關閉場次</button><button id="e1WsOpen" type="button" disabled>預檢開放場次</button><p id="e1WsDraftResult" class="booking-feedback" role="status"></p>
@@ -1358,7 +1358,7 @@ function e1WorkspaceSetup_(){
    if(!/^[a-f0-9]{64}$/.test(r.proposal||'')||typeof r.canCommit!=='boolean'){fail();return;}
    const old=r.before?'原 '+r.before.status+'／名額 '+r.before.capacity+'／已暫留 '+r.before.held+'／已確認 '+r.before.confirmed+'／候補 '+r.before.waitlisted:'原場次不存在';
    draft('預檢通過（未儲存）：'+r.after.slotId+'｜'+old+' → '+r.after.status+'｜名額 '+r.after.capacity+'；原預約保留。核定草稿代碼：'+r.proposal+
-    (r.canCommit?'｜核定依據：'+r.approvalRef+'；原因：'+r.approvalReason:'；仍待適用 PI 核定、正式寫入授權及安全條件。'));
+    (r.canCommit?'｜核定依據：'+r.approvalRef+'；原因：'+r.approvalReason:r.commitBlocker==='AUDIT_REVIEW_REQUIRED'?'；原稽核未核實或存在未結異動，禁止儲存。':r.commitBlocker==='NOT_SAFE_OR_NO_CHANGE'?'；存在未處理暫留／候補，或沒有實質變更，禁止儲存。':'；仍待適用 PI 核定、正式寫入授權及安全條件。'));
    if(r.canCommit&&!writeUncertain&&typeof r.approvalRef==='string'&&typeof r.approvalReason==='string'){
     approvedDraft={request:q,proposal:r.proposal,status:r.after.status};el('e1WsConfirm').disabled=false;
    }

@@ -1055,7 +1055,10 @@ test('P0-B after audit source drift prevents slot write and requires manual revi
  assert.deepEqual(h.tables.Slots.rows[0],old);
  assert.equal(h.tables.AuditLogs.rows.length,1);
  const fresh=slotDraft(h,h.S1,'UPDATE',{capacity:3});
- assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(approveSlot(h,fresh)),/AUDIT_UNRESOLVED_REVIEW_REQUIRED/);
+ const freshRequest=approveSlot(h,fresh);
+ const preview=h.ctx.study1OwnerE1SlotChangePreview(fresh);
+ assert.equal(preview.canCommit,false);assert.equal(preview.commitBlocker,'AUDIT_REVIEW_REQUIRED');
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(freshRequest),/AUDIT_UNRESOLVED_REVIEW_REQUIRED/);
 });
 test('P0-B browser commits approved exact slot draft once and reloads original capacity',()=>{
  const h=wsHarness(),q=slotDraft(h,h.S1,'UPDATE',{capacity:2});
@@ -1069,4 +1072,22 @@ test('P0-B browser commits approved exact slot draft once and reloads original c
  assert.equal(h.tables.Slots.rows[0][3],2);
  assert.equal(b.calls.filter(x=>x.method==='study1OwnerE1SlotChangeCommit').length,1);
  g('e1WsCommit').click();assert.equal(h.tables.AuditLogs.rows.length,2);
+});
+
+test('P0-B browser ambiguous slot-save response locks resubmission even after original readback',()=>{
+ const h=wsHarness(),q=slotDraft(h,h.S1,'UPDATE',{capacity:2});approveSlot(h,q);
+ const commit=h.ctx.study1OwnerE1SlotChangeCommit;
+ h.ctx.study1OwnerE1SlotChangeCommit=input=>{commit(input);throw Error('SYNTHETIC_RESPONSE_LOST');};
+ const b=workspaceBrowser(h.ctx),g=b.get;
+ g('e1WsLoad').click();g('e1WsSlots').children[0].children[8].children[0].click();
+ g('e1WsDraftCap').value='2';g('e1WsPreview').click();
+ g('e1WsConfirm').checked=true;g('e1WsConfirm').handlers.change();g('e1WsCommit').click();
+ assert.match(g('e1WsCommitResult').textContent,/結果未知/);
+ assert.equal(h.tables.Slots.rows[0][3],2);assert.equal(h.tables.AuditLogs.rows.length,2);
+ const next=slotDraft(h,h.S1,'UPDATE',{capacity:3});approveSlot(h,next);
+ g('e1WsLoad').click();g('e1WsSlots').children[0].children[8].children[0].click();
+ g('e1WsDraftCap').value='3';g('e1WsPreview').click();
+ assert.equal(g('e1WsConfirm').disabled,true);assert.equal(g('e1WsCommit').disabled,true);
+ g('e1WsCommit').click();assert.equal(b.calls.filter(x=>x.method==='study1OwnerE1SlotChangeCommit').length,1);
+ assert.equal(h.tables.AuditLogs.rows.length,2);
 });

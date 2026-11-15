@@ -1322,7 +1322,18 @@ function study1OwnerE1SlotChangePreview(input){if(typeof study1V2PublicRpcDeny_=
  try{
   const project=study1OwnerE1SlotDraftProject_(q,study1OwnerE1WorkspaceRead_(lock));
   const approval=study1OwnerE1SlotApproval_(project);
-  return {...project,canCommit:!!approval&&study1OwnerE1SlotCanSave_(project),
+  let commitBlocker=!approval?'PI_APPROVAL_REQUIRED':!study1OwnerE1SlotCanSave_(project)?'NOT_SAFE_OR_NO_CHANGE':null;
+  if(!commitBlocker){
+   try{
+    const sourceId=study1BindingSheetId_('slots'),book=SpreadsheetApp.openById(sourceId);
+    if(!book||book.getId()!==sourceId)throw Error('E1_SLOT_SOURCE_MISMATCH');
+    const first=study1OwnerE1SlotAuditRead_(book),second=study1OwnerE1SlotAuditRead_(book);
+    if(!bookingReadOnlySameTab_(first,second))throw Error('E1_SLOT_AUDIT_CHANGED');
+    const events=study1OwnerE1SlotAuditPending_(second);
+    if(events.has(project.proposal))throw Error('E1_SLOT_CHANGE_ALREADY_RECORDED');
+   }catch(_){commitBlocker='AUDIT_REVIEW_REQUIRED';}
+  }
+  return {...project,canCommit:commitBlocker===null,commitBlocker,
    approvalRef:approval?approval.approvalRef:null,approvalReason:approval?approval.reason:null};
  }finally{lock.releaseLock();}
 }
