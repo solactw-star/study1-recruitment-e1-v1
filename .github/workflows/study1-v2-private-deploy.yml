@@ -1,6 +1,13 @@
-name: Study1 V2 PRIVATE MYSELF inventory and deploy (manual only)
-# Independent from HEAD-only source sync. Uses only the new V2 Script ID.
+name: Study1 V2 PRIVATE MYSELF inventory (auto GET) and deploy (manual only)
+# Main push: GET-only audit. All mutation phases remain separate manual jobs.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'gas/**'
+      - 'scripts/study1-v2-gas-head-only.cjs'
+      - 'scripts/study1-v2-private-deploy.cjs'
+      - '.github/workflows/study1-v2-private-deploy.yml'
   workflow_dispatch:
     inputs:
       mode:
@@ -36,8 +43,27 @@ concurrency:
   group: study1-v2-gas-head-only
   cancel-in-progress: false
 jobs:
+  automatic-inventory:
+    if: ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Source and audit safety tests (no credentials)
+        env:
+          V2_PRIVATE_TEST_MODE: 'true'
+        run: node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
+      - name: Automatic V2 inventory (project GET only)
+        env:
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+        run: node scripts/study1-v2-private-deploy.cjs auto-audit
   private-preview:
-    if: ${{ github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

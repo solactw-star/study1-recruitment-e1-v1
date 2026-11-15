@@ -85,7 +85,7 @@ function safeApiRoute(sub){
  const route=sub.split('?')[0];
  return ['/content','/versions','/deployments'].includes(route)?route:'[V2_API_ROUTE]';
 }
-async function makeApi(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random){
+async function makeApi(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random,readOnly=false){
  const params=new URLSearchParams({grant_type:'refresh_token',
   refresh_token:c.refresh_token,client_id:c.client_id,client_secret:c.client_secret});
  const auth=await fetcher('https://oauth2.googleapis.com/token',{
@@ -97,6 +97,7 @@ async function makeApi(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout
  const base='https://script.googleapis.com/v1/projects/'+encodeURIComponent(SID);
  async function req(method,sub,body){
   assert(['GET','POST'].includes(method),'unapproved HTTP method');
+  assert(!readOnly||method==='GET','read-only inventory cannot mutate GAS');
   assert(!/\/\/|%2f/i.test(sub),'malformed V2-only relative path');
   const route=safeApiRoute(sub);
   // Single attempt for POST even if its response is ambiguous or HTTP 503.
@@ -427,14 +428,30 @@ function verifyReleaseBackup(c,env){
  return copy.fp;
 }
 
+function autoAuditInvocation(env){
+ assert(env.GITHUB_REPOSITORY===REPO&&env.GITHUB_REF==='refs/heads/main'&&env.GITHUB_EVENT_NAME==='push',
+  'automatic audit restricted to trusted V2 main push');
+ assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||''),'exact checkout SHA required');
+ assert(!env.CONFIRMATION&&!env.PRIVATE_VERSION&&!env.EXPECTED_INVENTORY_SHA256,
+  'automatic audit cannot accept mutation inputs');
+}
+async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
+ autoAuditInvocation(env);assertMain(env);reviewedLocal();
+ assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
+ const c=core.credentials(env.V2_GAS_CLASPRC_JSON);
+ const api=await apiFactory(c,undefined,undefined,undefined,true);
+ return audit(api);
+}
 async function main(){
- const phase=process.argv[2],mode=phase==='prepare'?process.env.PRIVATE_MODE:phase;
+ const phase=process.argv[2];
+ if(phase==='auto-audit'){await automaticAudit(process.env);return;}
+ const mode=phase==='prepare'?process.env.PRIVATE_MODE:phase;
  invocation(process.env,mode);
  if(phase==='prepare')assert(mode!=='audit','audit has no write-preparation step');
  latestMain(process.env);reviewedLocal();
  assert(process.env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
  const c=core.credentials(process.env.V2_GAS_CLASPRC_JSON);
- const api=await makeApi(c);
+ const api=await makeApi(c,undefined,undefined,undefined,mode==='audit'||phase==='prepare');
  if(mode==='audit')await audit(api);
  else if(phase==='prepare')await prepareReleaseBackup(api,c,process.env);
  else{
@@ -447,7 +464,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,

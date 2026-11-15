@@ -540,3 +540,8 @@
 - LAST_VERIFIED_STEP=`PRIVATE_E1_RELEASE_TOOLING_CODE_CI_VERIFIED`。既有 HEAD-only 與 private-deploy workflows 現分離 private HEAD apply、version、deploy，均先獨立 audit、精確 target/remote/inventory、加密備份、競寫核對、首次 run attempt、單次遠端 mutation、回讀。遠端 API 無原子 CAS，仍須排除外部/人工競寫。UNKNOWN 未獨立釐清不得新 dispatch 或重送。
 - NEXT_ACTION=由 OWNER 開啟既有 [私人 inventory workflow](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/workflows/study1-v2-private-deploy.yml)，branch=main、mode=audit、reviewed_sha=當下最新通過 CI 的 main SHA、reviewed_target_sha256=上述私人候選 SHA。private_version、expected_inventory_sha256、confirmation 留空。讀回 HEAD SHA、access、版本 proofs、部署清單及 inventory 指紋，確認是否仍為歷史私人 HEAD、是否有未知來源／部署。若 audit 判定不安全，停止後續 mutation，不把舊 32 檔證據當現況；後續 HEAD 同步、建版、部署各須使用獨立新授權及最新 audit。
 - SYNC_STATUS=`GAS_REMOTE_AUDIT_REQUIRED`；本輪連線不支援遠端 Apps Script GET 或 workflow dispatch，未執行新的遠端 audit、PUT、version/deploy POST、正式研究資料寫入、真 UI 或真人收件。不得聲稱已上線。原正式規格、舊系統、RIF/E-Prime 不變。文件追記後同 SHA 雙 CI 另查。
+
+## 2026-11-15｜解除 OWNER 手動登入依賴：自動唯讀遠端稽核
+- TASK_DOMAIN=`Study1_V2_E1_RELEASE_AUTO_AUDIT`；PRE_MAIN_SHA=`132b22d655d2c986c4812447798d8e6b2c6db6af`；原 311/51 CI 及私人來源 SHA 不變。使用者要求減少施工安全層及人工登入，正式規格 §70-S.37 增量記錄開發期唯讀新觸發。
+- COMPLETED=既有私人 workflow 增加獨立 main push GET-only job，固定 V2 Script／main／已驗候選；不需人工 dispatch，不輸出憑證或部署 URL。原 manual mutation job 明確限定 workflow_dispatch；API readOnly 防止 project POST，audit/prepare 同樣使用唯讀 client。原 CI 保留並新增自動／人工隔離及 HTTP 負測；公版 gas/ 與私人候選未改。
+- LAST_VERIFIED_STEP=`AUTO_AUDIT_COMMIT_PENDING_CI`；需原始 CI 與實際遠端 job 日誌證實，自動稽核成功不等於部署。若 OAuth、遠端未知來源或 Actions 權限失敗，記錄確切阻塞，不重送 mutation。無 GAS PUT、version/deployment POST 或真人資料操作授權；`FORMAL_READY=false`、`LIVE_INTAKE_ENABLED=false`。

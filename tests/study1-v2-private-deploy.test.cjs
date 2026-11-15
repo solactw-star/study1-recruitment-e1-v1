@@ -333,11 +333,17 @@ test('POST versions/deployments never retry even when server says 503 or 429',as
   assert.deepEqual(waits,[]);
  }
 });
-test('workflow cannot be auto-triggered or upload code and has no legacy target',()=>{
+test('only automatic inventory can run on main push; mutation job stays manual and cannot upload code',()=>{
  const script=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-private-deploy.cjs'),'utf8');
  const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
  assert.match(wf,/workflow_dispatch:/);
- assert.doesNotMatch(wf,/\n\s+push:|\n\s+schedule:/);
+ assert.match(wf,/\n  push:\s*\n    branches: \[main\]/);
+ assert.doesNotMatch(wf,/\n\s+schedule:/);
+ const auto=wf.slice(wf.indexOf('  automatic-inventory:'),wf.indexOf('  private-preview:'));
+ const manual=wf.slice(wf.indexOf('  private-preview:'));
+ assert.ok(auto.includes("github.event_name == 'push'")&&manual.includes("github.event_name == 'workflow_dispatch'"));
+ assert.match(auto,/node scripts\/study1-v2-private-deploy\.cjs auto-audit/);
+ assert.doesNotMatch(auto,/\.cjs (prepare|version|deploy)|upload-artifact|CONFIRMATION:|PRIVATE_MODE:/);
  for(const banned of ['1hPERspy11hI56dJobIVgCElGNaWYJJTdrDh7CRlORTom9VHti2xyR93Z',
   'sheets.googleapis.com','SpreadsheetApp','clasp push','putContent(','MailApp','script.run']){
   assert.ok(!script.includes(banned),banned);
@@ -412,4 +418,31 @@ test('deployment workflow saves authenticated ciphertext before mutation, and au
  assert.match(wf,/if-no-files-found: error/);
  assert.match(wf,/study1-v2-private-prewrite-\$\{\{ github.run_id \}\}\.json\.enc/);
  assert.ok((wf.match(/inputs\.mode != 'audit'/g)||[]).length>=3);
+});
+
+test('automatic audit is trusted-main-only and rejects all mutation input or invocation modes',async()=>{
+ const e={GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',
+  GITHUB_SHA:'a'.repeat(40),V2_GAS_CLASPRC_JSON:JSON.stringify({tokens:{default:{refresh_token:'mock-long-refresh-token',client_id:'mock-client',client_secret:'mock-secret'}}})};
+ const f=fakeApi(),state=await d.automaticAudit(e,()=>{},async(c,fet,sleep,random,ro)=>{
+  assert.equal(ro,true);return f.api;
+ });
+ assert.equal(state.headSha,d.TARGET);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+ for(const change of [{GITHUB_EVENT_NAME:'pull_request'},{GITHUB_REF:'refs/heads/feature'},
+  {GITHUB_REPOSITORY:'other/repo'},{CONFIRMATION:d.CONFIRM},{PRIVATE_VERSION:'1'},
+  {EXPECTED_INVENTORY_SHA256:'a'.repeat(64)}])
+  assert.throws(()=>d.autoAuditInvocation({...e,...change}),/V2_PRIVATE_BLOCKED/);
+ assert.throws(()=>d.invocation({...runEnv(),GITHUB_EVENT_NAME:'push'},'version'),/manual main/);
+ assert.throws(()=>d.invocation({...runEnv(),GITHUB_EVENT_NAME:'push'},'deploy'),/manual main/);
+});
+test('read-only API rejects project POST before network; OAuth token exchange is not a project write',async()=>{
+ const calls=[];
+ const api=await d.makeApi({refresh_token:'mock',client_id:'mock',client_secret:'mock'},async(url,o)=>{
+  calls.push([url,o.method]);return {ok:true,json:async()=>url.includes('oauth2.googleapis.com')?{access_token:'mock-token-long-enough'}:gas()};
+ },undefined,undefined,true);
+ assert.equal((await api.getHead()).scriptId,d.SID);
+ await assert.rejects(api.createVersion('test'),/read-only inventory cannot mutate GAS/);
+ await assert.rejects(api.createDeployment(1,'test'),/read-only inventory cannot mutate GAS/);
+ assert.equal(calls.length,2);
+ assert.equal(calls[1][1],'GET');
 });
