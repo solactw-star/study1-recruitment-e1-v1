@@ -253,7 +253,8 @@ async function inventory(api){
  for(const dep of dn){
   const proof=dep.version===null?hp:proofs.find(x=>x.version===dep.version);
   assert(proof,'deployment version missing from complete inventory');
-  if(!proof.known||dep.points.some(x=>x.web&&x.web.access&&x.web.access!==proof.access))safe=false;
+  if(!proof.known||dep.points.some(x=>x.web&&x.web.access&&x.web.access!==proof.access&&
+   !(dep.kind==='HEAD'&&proof.access==='ANYONE'&&x.web.access==='MYSELF')))safe=false;
  }
  const fp=fingerprint(versions,deps,hp.sha,proofs);
  const stable=sha(JSON.stringify({versions:vn,deployments:dn.filter(x=>x.kind==='VERSIONED'),proofs}));

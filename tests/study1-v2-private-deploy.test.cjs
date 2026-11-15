@@ -535,3 +535,38 @@ test('version 2 continuation only accepts its exact new event; original stages c
  assert.ok(job.indexOf('resume-prepare')<job.indexOf('uses: actions/upload-artifact@v4')&&job.indexOf('uses: actions/upload-artifact@v4')<job.indexOf('resume-deploy'));
  assert.doesNotMatch(job,/once-head|once-version|clasp push/);
 });
+
+test('authorized public release adapter allows only exact main event and login-only verified URL',()=>{
+ const p=require('../scripts/study1-v2-public-release.cjs');
+ const env={V2_PUBLIC_RELEASE:'1',GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'d'.repeat(40),GITHUB_RUN_ID:'1'};
+ const event={before:p.PARENT,after:env.GITHUB_SHA,ref:env.GITHUB_REF,head_commit:{id:env.GITHUB_SHA,message:p.MESSAGE},
+  commits:[{}],repository:{full_name:d.REPO},forced:false,created:false,deleted:false};
+ assert.doesNotThrow(()=>p.authorize(env,event));
+ for(const c of [{before:'b'.repeat(40)},{forced:true},{head_commit:{id:env.GITHUB_SHA,message:'ordinary change'}}])
+  assert.throws(()=>p.authorize(env,{...event,...c}),/authorization event mismatch/);
+ assert.throws(()=>p.authorize({...env,GITHUB_RUN_ATTEMPT:'2'},event),/first main event/);
+ const dep={deploymentId:'PUBLIC',deploymentConfig:{scriptId:d.SID,versionNumber:3,manifestFileName:'appsscript'},
+  entryPoints:[{entryPointType:'WEB_APP',webApp:{entryPointConfig:{access:'ANYONE',executeAs:'USER_DEPLOYING'},url:'https://script.google.com/macros/s/public/exec'}}]};
+ assert.equal(p.publicLink(dep,3),'https://script.google.com/macros/s/public/exec');
+ assert.throws(()=>p.publicLink(dep,2),/unexpected published/);
+ for(const access of ['MYSELF','ANYONE_ANONYMOUS']){
+  const bad=JSON.parse(JSON.stringify(dep));bad.entryPoints[0].webApp.entryPointConfig.access=access;
+  assert.throws(()=>p.publicLink(bad,3));
+ }
+ const wf=fs.readFileSync(path.join(__dirname,'../.github/workflows/study1-v2-private-deploy.yml'),'utf8');
+ const job=wf.slice(wf.indexOf('  public-readonly-approved-once:'));
+ assert.ok(job.includes(p.PARENT)&&job.includes(p.MESSAGE)&&job.includes('github.run_attempt == 1'));
+ assert.ok(job.indexOf('public-release.cjs prepare')<job.indexOf('uses: actions/upload-artifact@v4')&&job.indexOf('uses: actions/upload-artifact@v4')<job.indexOf('public-release.cjs apply'));
+});
+test('public HEAD permits more restrictive development access but not mismatched versioned ACL',async()=>{
+ const f=fakeApi(),pub={scriptId:d.SID,files:core.localSources()};
+ f.api.getHead=async()=>pub;
+ const dep={deploymentId:'DEV',deploymentConfig:{scriptId:d.SID},entryPoints:[{webApp:{entryPointConfig:{access:'MYSELF',executeAs:'USER_DEPLOYING'}}}]};
+ f.api.getDeployments=async()=>[dep];
+ assert.equal((await d.inventory(f.api)).safe,true);
+ f.api.getVersions=async()=>[{scriptId:d.SID,versionNumber:1}];
+ f.api.getVersionContent=async()=>pub;
+ f.api.getDeployments=async()=>[{...dep,deploymentConfig:{scriptId:d.SID,versionNumber:1,manifestFileName:'appsscript'}}];
+ assert.equal((await d.inventory(f.api)).safe,false);
+});
