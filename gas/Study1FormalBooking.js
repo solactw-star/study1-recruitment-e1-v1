@@ -1003,11 +1003,11 @@ function study1FormalTxnReadFile_(file,prefix){
  const raw=file.getBlob().getDataAsString();let e;
  try{e=JSON.parse(raw);}catch(_){throw Error('E1_TXN_FILE_JSON_INVALID');}
  const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
- if(!e||Array.isArray(e)||e.schema!==1||!hex(e.key)||!hex(e.mac)||
+ if(!e||JSON.stringify(e)!==raw||Array.isArray(e)||e.schema!==1||!hex(e.key)||!hex(e.mac)||
     e.mac!==study1FormalTxnMac_(e)||e.prefix!==prefix||
     !['HOLD','MOVE','CANCEL','JOIN','CLAIM','CONSENT_ISSUE','CONSENT_SIGN','BOOKING_CONFIRM'].includes(e.action)||
     !['PREPARED','COMMITTED'].includes(e.stage)||file.getName()!==study1FormalTxnName_(prefix,e)||
-    Object.keys(e).sort().join(',')!=='action,atUtc,key,mac,prepareMac,prefix,schema,stage,subjects'||
+    Object.keys(e).sort().join(',')!=='action,atUtc,key,mac,prefix,prepareMac,schema,stage,subjects'||
     !Array.isArray(e.subjects)||e.subjects.length<1||e.subjects.length>2||
     new Set(e.subjects.map(x=>x.kind+':'+x.id)).size!==e.subjects.length||
     e.subjects.some(x=>!x||Object.keys(x).sort().join(',')!=='after,before,id,kind'||

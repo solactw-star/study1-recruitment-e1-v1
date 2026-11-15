@@ -38,7 +38,7 @@ function harness(){
   Verification:{headers:['challenge_id','applicant_id','purpose','otp_hmac',
    'expires_at_utc','attempts','used_at_utc','email','created_at_utc'],rows:[]}
  };
- const evidenceFiles=[];
+ const evidenceFiles=[];let evidenceCreateHook=null;
  const cursor=items=>{let i=0;return {hasNext:()=>i<items.length,next:()=>items[i++]};};
  const folder={
   searchFiles:q=>{const prefix=q.match(/title contains '([^']+)'/)[1];return cursor(evidenceFiles.filter(f=>f.name.includes(prefix)));},
@@ -49,7 +49,7 @@ function harness(){
     getMimeType(){return 'application/json'},getSize(){return Buffer.byteLength(this.raw)},
     getParents(){return cursor([{getId:()=> 'ORIGINAL_CONSENT_FOLDER'}])},
     getBlob(){return {getDataAsString:()=>this.raw}},setSharing(){this.access='PRIVATE'}};
-   evidenceFiles.push(f);return f;
+   evidenceFiles.push(f);if(evidenceCreateHook)evidenceCreateHook(f);return f;
   }};
  let personRecords=new Map();
  function person(label){
@@ -197,6 +197,7 @@ function harness(){
  }
  return {ctx,tables,props,person,proof,holdSlot,S1,S2,S3,clock,
   mutations,locks,evidenceFiles,folder,get held(){return held},
+  set evidenceCreateHook(fn){evidenceCreateHook=fn;},
   set intercept(x){intercept=x},
   set failAppend(x){failAppend=x}};
 }
@@ -807,7 +808,6 @@ test('durable waitlist JOIN and CLAIM preserve original key and use shared priva
  const r=h.ctx.study1OwnerE1RecoveryAudit(z.applicantId);
  assert.deepEqual(Array.from(r.transactionEvidence.events,x=>x.action),['JOIN','CLAIM']);
  assert.ok(r.transactionEvidence.events.every(x=>x.status==='COMMITTED_EVIDENCE'));
- h.evidenceFiles.find(f=>f.name.includes('_PREPARED')).raw+=' '; // whitespace alone does not alter canonical HMAC; tamper actual content
  const f=h.evidenceFiles.find(f=>f.raw.includes('"action":"CLAIM"'));f.raw=f.raw.replace('"CLAIM"','"CANCEL"');
  assert.throws(()=>h.ctx.study1OwnerE1RecoveryAudit(z.applicantId),/E1_TXN_FILE_EVIDENCE_INVALID/);
 });
@@ -831,4 +831,30 @@ test('candidate consent issue and sign evidence ties original registry digest, n
  l.releaseLock();
  assert.ok(result.events.every(x=>x.status==='COMMITTED_EVIDENCE'));
  assert.equal(result.events.find(x=>x.action==='CONSENT_SIGN').currentObservation,'AFTER_OBSERVED');
+});
+
+test('write-before evidence captures competing external write; no operation is applied and unresolved intent blocks another session',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a);
+ h.evidenceCreateHook=f=>{if(f.raw.includes('"action":"HOLD"')&&f.raw.includes('"stage":"PREPARED"'))h.tables.Slots.rows[0][3]=2;};
+ assert.throws(()=>h.holdSlot(p,h.S1),/E1_TXN_PREPARED_SOURCE_CHANGED/);
+ assert.equal(h.tables.Reservations.rows.length,0);assert.equal(h.evidenceFiles.length,1);
+ h.evidenceCreateHook=null;
+ h.tables.Slots.rows[0][3]=1;
+ assert.throws(()=>h.holdSlot(h.proof(a),h.S2,'REQ_NEW_SESSION_12345678'),/E1_TXN_UNRESOLVED/);
+ assert.equal(h.tables.Reservations.rows.length,0);
+});
+test('missing COMMITTED evidence remains UNKNOWN even when original HOLD was persisted; no replay or new mutation',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a);
+ h.evidenceCreateHook=f=>{if(f.raw.includes('"stage":"COMMITTED"')){h.evidenceFiles.pop();throw Error('SYNTHETIC_COMMIT_EVIDENCE_NOT_PERSISTED');}};
+ assert.throws(()=>h.holdSlot(p,h.S1),/SYNTHETIC_COMMIT_EVIDENCE_NOT_PERSISTED/);
+ assert.equal(h.tables.Reservations.rows.length,1);
+ h.evidenceCreateHook=null;h.ctx.study1AdminOwnerRequired_=()=>true;
+ const audit=h.ctx.study1OwnerE1RecoveryAudit(a.applicantId);
+ const e=audit.transactionEvidence.events[0];
+ assert.equal(e.status,'UNKNOWN');assert.equal(e.currentObservation,'AFTER_OBSERVED');
+ const n=h.mutations.length;
+ assert.throws(()=>h.ctx.study1FormalCancel({emailProof:h.proof(a),reservationId:h.tables.Reservations.rows[0][0],requestId:'REQ_FRESH_CANCEL_12345678'}),/E1_TXN_UNRESOLVED/);
+ assert.equal(h.mutations.length,n);
 });

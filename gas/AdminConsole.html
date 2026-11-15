@@ -1234,6 +1234,12 @@ function e1RecoverySetup_(){
     for(const x of r.reservations)lines.push('原預約 '+x.reservationId+'｜'+x.slotId+'｜'+x.status);
     for(const x of r.consents)lines.push('原同意 '+x.consentId+'｜'+x.reservationId+'｜'+x.state);
     if(!r.reservations.length&&!r.consents.length)lines.push('未查得原列，不代表原交易未執行。');
+    const evidence=r.transactionEvidence;
+    if(evidence&&evidence.mode==='APPROVED_EVIDENCE_ONLY'&&Array.isArray(evidence.events)){
+     lines.push('原交易存證（觀察不等於寫入授權）：');
+     for(const e of evidence.events)lines.push(e.eventKey+'｜'+e.action+'｜'+e.status+'｜'+e.currentObservation+'｜'+e.preparedAtUtc);
+     if(!evidence.events.length)lines.push('未查得交易存證，不代表原交易未執行。');
+    }else lines.push('原交易存證尚未核准或未提供；只顯示原列觀察。');
     out.textContent=lines.join('\n');
    }).study1OwnerE1RecoveryAudit(applicant);
  });
