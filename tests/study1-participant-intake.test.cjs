@@ -591,3 +591,17 @@ test('recovery wrong reference/mail, stale consent authority, and disabled publi
  assert.throws(()=>x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken}),/PUBLIC_READ_ONLY/);
  assert.throws(()=>x.scope.study1ParticipantRecoveryVerify({...r,code:'12345678'}),/PUBLIC_READ_ONLY/);
 });
+
+test('pending enrollment rejects recovery purpose as ordinary OTP even before original email is verified',()=>{
+ const x=env(),a=x.begin();x.flags.set('STUDY1_E1_CASE_RECOVERY_APPROVED','true');
+ const r={applicantId:a.applicantId,email:x.input.email,requestId:'REQ_'+'c'.repeat(40)};
+ x.scope.study1ParticipantRecoverySend({...r,humanToken:x.input.humanToken});
+ const raw=x.records.Verification[0].slice(),code=x.mail[0].body.match(/驗證碼：(\d{8})/)[1];
+ const wrong=x.scope.study1ParticipantVerifyOtp({applicantId:a.applicantId,screeningId:a.screeningId,experiment:'E1',email:r.email,challengeId:raw[0],code});
+ assert.equal(wrong.verified,false);assert.deepEqual(x.records.Verification[0],raw);
+ assert.equal(x.records.Applicants[0][6],'PENDING_EMAIL');
+ assert.equal(x.records.Screenings.length,1);
+ x.time.now+=600001;
+ assert.equal(x.scope.study1ParticipantRecoveryVerify({...r,code}).verified,false);
+ assert.deepEqual(x.records.Verification[0],raw);
+});

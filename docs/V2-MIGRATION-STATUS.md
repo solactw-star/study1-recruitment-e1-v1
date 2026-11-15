@@ -674,3 +674,5 @@
 - LAST_VERIFIED_STEP=PATCH_PREPARED；SYNC_STATUS=CI_PENDING；NEXT_ACTION=同 SHA CI 與原進度回讀；BLOCKERS=REC_REVIEW_REQUIRED（新 verification purpose/重新接續程序需核准）、自助異動/失去簽署 token 的重新授權未實作、無持久 V08 因果、公開 UI/inventory/真人 UAT；WRITE_OWNER=唯一 V2 repo。
 
 - 初輪 code SHA `9cbcc9c` 的核心 CI Run #43725442612 原始 log：331/332 PASS、1 FAIL（新增 test 呼叫不存在 RPC 名稱）；修正測試使用現有原 RPC，另加 recovery purpose 不取代原 OTP HMAC authority 驗收及查核失敗不揭示個案存在邊界；不得以初輪結果宣稱完成。
+
+- 第二輪 `4ef87b0` 核心 CI #43725514659 332/332 PASS；檢查 run 測試清單發現原 self-report authority 測試未納入公版 CI，故增列原 authority 與 OTP 核心/節流套件及相同發布前檢查，新增 browser VM 查核信失敗/驗證 UNKNOWN 不重送、普通申請 PENDING 時 recovery OTP 亦拒轉普通用途及過期拒絕。僅增加測試覆蓋，不降低既有限制；待新 SHA 全部核實。

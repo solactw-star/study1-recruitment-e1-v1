@@ -58,7 +58,13 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
  const eProof={version:1,applicantId:'APP_BROWSER_SYNTH_1234',screeningId:'SCR_BROWSER_SYNTH_1234',
   challengeId:'CHL_BROWSER_SYNTH_1234',experiment:'E1',signature:'b'.repeat(64)};
  const server={
-  study1ParticipantReadiness:()=>({ready:true,experiment:'E1',siteKey:'OFFLINE_TEST_SITEKEY_1234567890'}),
+  study1ParticipantReadiness:()=>({ready:true,experiment:'E1',siteKey:'OFFLINE_TEST_SITEKEY_1234567890',recoveryReady:options.recoveryReady===true}),
+  study1ParticipantRecoverySend:()=>{if(options.recoveryLostSend)throw Error('SYNTHETIC_MAIL_OUTCOME_UNKNOWN');return {accepted:true,delivery:'UNVERIFIED'};},
+  study1ParticipantRecoveryVerify:req=>{
+   if(options.recoveryLostVerify)throw Error('SYNTHETIC_VERIFY_OUTCOME_UNKNOWN');
+   if(req.code!=='12345678')return {verified:false,reason:'REJECTED'};
+   return {verified:true,scope:'ORIGINAL_CASE_READ_ONLY',experiment:'E1',applicantId:req.applicantId,actionAuthority:'NONE',disposition:'OWNER_REVIEW_REQUIRED',reservations:[{reservationId:'RSV_ORIGINAL_12345678',slotId:S1,status:'HELD'}],consents:[{reservationId:'RSV_ORIGINAL_12345678',state:'CONFIRMED'}]};
+  },
   study1ParticipantBegin:()=>({accepted:true,applicantId:eProof.applicantId,screeningId:eProof.screeningId,phase:'PENDING_EMAIL'}),
   study1ParticipantSendOtp:()=>({sent:true,reason:'ISSUED',challengeId:eProof.challengeId}),
   study1ParticipantVerifyOtp:()=>({verified:true,emailProof:eProof}),
@@ -247,7 +253,12 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
   assert.equal(node('step-slots').hidden,false);
   assert.equal(calls.some(x=>x.name==='study1FormalV05Slots'),true);
  }
- return {enter,click,node,act,findButton,slots,reservations,calls,errors,S1,S2,
+ function enterRecovery(){
+  assert.equal(click('chooseE1'),true);
+  node('formalRecoveryApplicant').value=eProof.applicantId;node('formalEmail').value='synthetic@example.org';
+  turnstile.config.callback('SYNTHETIC_TURNSTILE_TOKEN_123456789');
+ }
+ return {enter,enterRecovery,click,node,act,findButton,slots,reservations,calls,errors,S1,S2,
   staffExplain:()=>{staffExplained=true;consent='EXPLAINED';},
   staffConfirm:()=>{staffConfirmed=true;consent='CONFIRMED';},
   isWithdrawn:()=>withdrawn,
@@ -564,4 +575,28 @@ test('fresh browser cannot recover HOLD, V08 or consent authority from a manuall
   assert.equal(fresh.click('chooseE1'),true);
   assert.match(fresh.node('status').textContent,/勿重新申請/);
  }
+});
+
+test('new browser case recovery remains read-only through lost send response and one consumed code',()=>{
+ const h=simulate(undefined,false,false,'none','none',{recoveryReady:true,recoveryLostSend:true});
+ h.enterRecovery();
+ assert.equal(h.click('formalRecoverySend'),true);
+ assert.equal(h.click('formalRecoverySend'),false);
+ assert.equal(h.click('screenNext'),false);
+ h.node('formalRecoveryCode').value='12345678';
+ assert.equal(h.click('formalRecoveryVerify'),true);
+ assert.match(h.node('formalRecoveryResult').textContent,/唯讀|原案件/);
+ assert.match(h.node('formalRecoveryResult').textContent,/CONFIRMED/);
+ assert.equal(h.click('formalRecoveryVerify'),false);
+ assert.equal(h.calls.filter(x=>x.name==='study1ParticipantRecoverySend').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1ParticipantRecoveryVerify').length,1);
+ assert.ok(!h.calls.some(x=>/ParticipantBegin|FormalHoldSlot|ConsentBegin|SignPdf|SignedPdfCopy|ParticipantEmailStatus/.test(x.name)));
+});
+test('case recovery candidate disabled by default and lost verification outcome is never replayed',()=>{
+ const closed=simulate();closed.enterRecovery();assert.equal(closed.click('formalRecoverySend'),false);
+ const h=simulate(undefined,false,false,'none','none',{recoveryReady:true,recoveryLostVerify:true});
+ h.enterRecovery();h.click('formalRecoverySend');h.node('formalRecoveryCode').value='12345678';h.click('formalRecoveryVerify');
+ assert.match(h.node('formalRecoveryResult').textContent,/結果不明/);
+ assert.equal(h.click('formalRecoveryVerify'),false);assert.equal(h.click('screenNext'),false);
+ assert.ok(!h.calls.some(x=>/ParticipantBegin|FormalHoldSlot|ConsentBegin|SignPdf/.test(x.name)));
 });
