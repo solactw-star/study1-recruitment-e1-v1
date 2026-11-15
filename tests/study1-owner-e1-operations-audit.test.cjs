@@ -649,3 +649,12 @@ test('E1 signed consent with CANCELLED original booking and absent notice stays 
  assert.equal(x.actionAuthority,'NONE');
  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
 });
+
+test('OWNER manual repair rejects a result for a different original reservation despite matching consent',()=>{
+ const h=repairBrowser(preflight,{...repaired,reservationId:'RSV_OTHER_12345678'}),n=h.nodes;
+ n.get('e1RepairConsentId').value=targetId;h.fire('e1RepairPreflight');
+ n.get('e1RepairAttest').checked=true;h.fire('e1RepairAttest','change');h.fire('e1RepairCommit');
+ assert.match(n.get('e1RepairStatus').textContent,/未核實/);
+ h.fire('e1RepairPreflight');h.fire('e1RepairCommit');
+ assert.equal(h.requests.filter(x=>x.type==='commit').length,1);
+});

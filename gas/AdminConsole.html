@@ -1102,12 +1102,12 @@ function e1OwnerBookingRepairSetup_(){
   attest=$('e1RepairAttest'),commit=$('e1RepairCommit'),status=$('e1RepairStatus');
  if(!id||!read||!attest||!commit||!status||
     typeof read.addEventListener!=='function')return;
- let pending=null,busy=false,selectionEpoch=0;
+ let pending=null,pendingReservationId=null,busy=false,selectionEpoch=0;
  // Per-page anti-replay latch: even a response UNKNOWN is a submitted action.
  // Re-reading a HELD row never silently grants a second POST of this case.
  const submitted=new Set();
  function reset(){
-  pending=null;attest.checked=false;attest.disabled=true;commit.disabled=true;
+  pending=null;pendingReservationId=null;attest.checked=false;attest.disabled=true;commit.disabled=true;
  }
  function control(){
   commit.disabled=busy||!pending||!attest.checked||
@@ -1163,6 +1163,7 @@ function e1OwnerBookingRepairSetup_(){
       status.textContent='本頁對此案件已提交過一次，即使原來源仍為 HELD 也禁止第二次 POST。請交研究團隊獨立核對原紀錄與上一筆結果。';
      }else{
       pending={consentId,consentRevision:x.consentRevision,receipt:x.receipt};
+      pendingReservationId=x.reservationId;
       attest.disabled=false;
       status.textContent='原始證據與有效 HELD 唯讀預檢通過，仍非 CONFIRMED；OWNER 獨立確認後才可單次收尾。';
      }
@@ -1174,7 +1175,7 @@ function e1OwnerBookingRepairSetup_(){
  commit.addEventListener('click',()=>{
   if(busy||!pending||!attest.checked||id.value.trim()!==pending.consentId||
      submitted.has(pending.consentId))return;
-  const once={...pending};
+  const once={...pending},expectedReservationId=pendingReservationId,epoch=selectionEpoch;
   submitted.add(once.consentId);
   e1OwnerOperationsInvalidate_('OWNER 已送出一次原預約收尾，結果須重新獨立核對');
   reset();busy=true;read.disabled=true;
@@ -1186,7 +1187,10 @@ function e1OwnerBookingRepairSetup_(){
     '。不得重送；請重新唯讀預檢原 Reservations 與通知 outbox。';
   }).withSuccessHandler(x=>{
    done();
-   if(!x||x.consentId!==once.consentId||
+   if(selectionEpoch!==epoch||id.value.trim()!==once.consentId){
+    status.textContent='先前案件已提交，選取已變更；請獨立唯讀查核原案件，不重送。';return;
+   }
+   if(!x||x.consentId!==once.consentId||x.reservationId!==expectedReservationId||
       x.bookingConfirmed!==true||x.bookingStatus!=='CONFIRMED'||
       x.notification!=='NOT_SENT_BY_RECONCILIATION'){
     status.textContent='原預約結果未核實；不能宣稱已完成，請唯讀回查。';return;

@@ -23,6 +23,7 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
  const date=Object.fromEntries(taipei.map(p=>[p.type,p.value]));
  const taipeiDate=date.year+'/'+date.month+'/'+date.day;
  let consent='ISSUED',staffExplained=false,staffConfirmed=false,withdrawn=false,originalIssueNonce=null;
+ let holdOutcomeReads=0,bookingReads=0;
 
  function element(kind,id){
   const n={kind,id,hidden:id==='formalHumanCheck',disabled:false,textContent:'',value:'',checked:false,children:[],handlers:new Map(),attributes:{},
@@ -74,11 +75,13 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
     return {held:true,reservationId:r.reservationId};
   },
   study1FormalStatus:()=>{
+   if(options.firstBookingReadFails&&++bookingReads===1)throw Error('STATUS_TEMPORARILY_UNAVAILABLE');
    if(options.bookingReadFailureAfterSigned&&staffConfirmed)
     throw Error('SYNTHETIC_ORIGINAL_RESERVATIONS_NETWORK_UNKNOWN');
    return {experiment:'E1',reservations:reservations.map(x=>({...x}))};
   },
   study1FormalHoldOutcome:input=>{
+   if(options.firstHoldOutcomeMissing&&++holdOutcomeReads===1)return {resolved:false,status:'UNKNOWN'};
    const rows=reservations.filter(x=>x.requestId===input.requestId);
    if(rows.length!==1)return {resolved:false,status:'UNKNOWN'};
    return {resolved:true,status:rows[0].status,reservationId:rows[0].reservationId,slotId:rows[0].slotId};
@@ -452,4 +455,39 @@ test('E1 signed PDF and Reservations confirm independently; status refresh never
  assert.equal(h.calls.filter(x=>x.name==='study1EConsentSignPdf').length,1);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalFinalizeSignedE1Booking_').length,0);
  assert.equal(h.calls.filter(x=>x.name==='study1ParticipantBookingNotice_').length,0);
+});
+
+test('E1 HOLD lost reply and initial unknown: same signed quote read can recover without replay',()=>{
+ const h=simulate(undefined,false,false,'after_commit','none',{firstHoldOutcomeMissing:true});
+ h.enter();h.click('hold');
+ assert.equal(h.node('formalHoldRetry').hidden,false);
+ assert.equal(h.node('hold').disabled,true);
+ assert.equal(h.node('step-confirm').hidden,true);
+ assert.equal(h.click('formalHoldRetry'),true);
+ assert.equal(h.node('step-confirm').hidden,false);
+ assert.equal(h.node('formalHoldRetry').hidden,true);
+ const reads=h.calls.filter(x=>x.name==='study1FormalHoldOutcome');
+ assert.equal(reads.length,2);assert.deepEqual(reads[0].payload,reads[1].payload);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+ assert.equal(h.reservations.length,1);
+});
+test('E1 successful HOLD followed by failed Reservations GET is recovered by exact original quote',()=>{
+ const h=simulate(undefined,false,false,'none','none',{firstBookingReadFails:true});
+ h.enter();h.click('hold');
+ assert.equal(h.node('formalHoldRetry').hidden,false);
+ assert.equal(h.node('step-confirm').hidden,true);
+ assert.equal(h.click('formalHoldRetry'),true);
+ assert.equal(h.node('step-confirm').hidden,false);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldOutcome').length,1);
+});
+test('E1 unresolved original HOLD never adopts a different active reservation or repeats the write',()=>{
+ const h=simulate(undefined,false,false,'before_commit');
+ h.enter();h.click('hold');
+ h.reservations.push({reservationId:'RSV_UNRELATED_12345678',slotId:h.S1,status:'HELD',holdUntilUtc:new Date(Date.now()+600000).toISOString()});
+ assert.equal(h.click('formalHoldRetry'),true);
+ assert.equal(h.node('step-confirm').hidden,true);
+ assert.equal(h.node('hold').disabled,true);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
+ assert.match(h.node('status').textContent,/UNKNOWN/);
 });

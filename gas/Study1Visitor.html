@@ -114,7 +114,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
 <p id="v05Status" class="help" role="status" aria-live="polite">請先核對日期來源。</p>
 <div id="v05Choices" class="v05SlotCards" role="group" aria-label="當日可預約的時段"></div>
 <label class="field" for="slot">當日核定場次（可使用鍵盤與選單操作）</label><select id="slot"></select>
-<div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost" hidden disabled>重新載入正式場次</button></div>
+<div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost" hidden disabled>重新載入正式場次</button><button id="formalHoldRetry" type="button" class="ghost" hidden disabled>唯讀核對原暫留結果（不重送）</button></div>
 <div id="v08WaitBox" class="box" aria-label="純TEST候補順位與有效期限">
  <strong>E1 額滿候補與遞補回覆</strong>
  <p class="help">只可在原GAS額滿的未來時段排候補；順位依入列順序，需OWNER人工處理。十分鐘邀請不寄信、不自動成立預約；逾期不得接受。</p>
@@ -204,7 +204,7 @@ if(typeof document==='undefined'||!document.body||
    document.body.dataset.siteMode!=='FORMAL')return;
 const el=id=>document.getElementById(id);
 const state={ready:false,app:null,mail:null,busy:false,requestId:null,humanToken:'',captchaWidget:null,
- emailProof:null,emailStatusConfirmed:false,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
+ emailProof:null,emailStatusConfirmed:false,otpRequestId:null,otpVerifyUnknown:false,slots:[],chosenDay:null,monthIndex:0,activeBooking:null,pendingHoldRequestId:null,pendingHoldReservationId:null,pendingHoldQuote:null,pendingHoldSlotId:null,beginUnknown:false,pendingConsentRequestId:null,pendingConsentReservationId:null};
 const genRequest=()=>{
  if(!globalThis.crypto||typeof crypto.getRandomValues!=='function')
   throw Error('瀏覽器無法安全建立申請識別碼');
@@ -299,7 +299,7 @@ const sampleCode=document.querySelector('#otpInputWrap > .box');
 if(sampleCode)sampleCode.hidden=true;
 if(el('otpPaste'))el('otpPaste').hidden=true;
 if(el('otpInputWrap'))el('otpInputWrap').hidden=true;
-for(const id of ['formalEmailContinue','formalSlotsRetry']){el(id).hidden=true;el(id).disabled=true;}
+for(const id of ['formalEmailContinue','formalSlotsRetry','formalHoldRetry']){el(id).hidden=true;el(id).disabled=true;}
 const otpLead=document.querySelector('#step-otp .lead');
 if(otpLead)otpLead.textContent='系統將寄送八位數電子郵件驗證碼至您剛提供的電子郵件地址，10分鐘內有效。';
 const slotLead=document.querySelector('#step-slots .lead');
@@ -1140,7 +1140,7 @@ function formalV08Panel_(reservation){
  show('confirm');
 }
 function formalV08Read_(){
- if(!state.emailProof)return;
+ if(!state.emailProof||state.busy)return;
  rpc('study1FormalStatus',state.emailProof,result=>{
   if(!result||result.experiment!=='E1'||!Array.isArray(result.reservations)){
    status('原預約狀態尚未核實，請勿重複送出異動。');return;
@@ -1148,6 +1148,14 @@ function formalV08Read_(){
   const active=result.reservations.filter(r=>
    r.status==='WAITLISTED'||(r.status==='HELD'&&
     new Date(r.holdUntilUtc).getTime()>Date.now()));
+  if(state.pendingHoldRequestId){
+   const matched=active.filter(r=>r.status==='HELD'&&
+    r.reservationId===state.pendingHoldReservationId&&r.slotId===state.pendingHoldSlotId);
+   if(matched.length!==1||active.length!==1){
+    formalHoldRetryControl_(true);
+    status('原暫留與Reservations尚未取得唯一一致結果，仍為UNKNOWN；請唯讀查核原請求或聯絡研究團隊。');return;
+   }
+  }
   if(active.length){
    const chosen=active.find(r=>r.status==='HELD')||active[0];
    if(formalConsent&&formalConsent.reservationId!==chosen.reservationId)
@@ -1156,23 +1164,45 @@ function formalV08Read_(){
    if(state.pendingHoldRequestId&&chosen.status==='HELD'&&
       state.pendingHoldReservationId===chosen.reservationId){
     state.pendingHoldRequestId=null;state.pendingHoldReservationId=null;
+    state.pendingHoldQuote=null;state.pendingHoldSlotId=null;formalHoldRetryControl_(false);
    }
    formalV08Panel_(chosen);
   }else{
    formalConsentReset_();state.activeBooking=null;show('slots');formalV05Read_();
    status('已唯讀核對原Reservations：目前沒有有效暫留或候補。');
   }
+ },()=>{
+  if(state.pendingHoldRequestId)formalHoldRetryControl_(true);
+  status('原Reservations唯讀查詢失敗，結果仍UNKNOWN；請勿重送。');
  });
 }
+function formalHoldRetryControl_(available){
+ const button=el('formalHoldRetry');
+ button.hidden=!available;button.disabled=!available||state.busy;
+ if(state.pendingHoldRequestId)el('hold').disabled=true;
+}
+el('formalHoldRetry').addEventListener('click',()=>{
+ if(!state.emailProof||state.busy||!state.pendingHoldRequestId||!state.pendingHoldQuote||
+    !state.pendingHoldSlotId)return;
+ formalHoldUnknown_(state.pendingHoldSlotId,state.pendingHoldRequestId,state.pendingHoldQuote);
+});
 function formalHoldUnknown_(slotId,requestId,quote){
- // The original request may already have committed. One GET, never a second HOLD.
+ // Preserve the exact original signed quote and nonce; repeat only the read.
+ if(state.busy||state.pendingHoldRequestId!==requestId||
+    state.pendingHoldSlotId!==slotId||state.pendingHoldQuote!==quote)return;
+ formalHoldRetryControl_(false);
+ const unchanged=()=>state.pendingHoldRequestId===requestId&&
+  state.pendingHoldSlotId===slotId&&state.pendingHoldQuote===quote;
+ const unknown=message=>{if(!unchanged())return;formalHoldRetryControl_(true);status(message);};
  rpc('study1FormalHoldOutcome',{emailProof:state.emailProof,slotId,requestId,quote},r=>{
+  if(!unchanged())return;
   if(!r||r.resolved!==true){
-   status('原預約結果仍為UNKNOWN，未見有效原列不代表失敗；請勿重送原操作。');return;
+   unknown('原預約結果仍為UNKNOWN，未見有效原列不代表失敗；請勿重送原操作。');return;
   }
   if(r.slotId!==slotId||typeof r.reservationId!=='string'||
-     !/^RSV_[A-Za-z0-9_-]{8,76}$/.test(r.reservationId)){
-   status('原預約來源不一致，仍為UNKNOWN；請研究團隊核對。');return;
+     !/^RSV_[A-Za-z0-9_-]{8,76}$/.test(r.reservationId)||
+     (state.pendingHoldReservationId&&state.pendingHoldReservationId!==r.reservationId)){
+   unknown('原預約來源不一致，仍為UNKNOWN；請研究團隊核對。');return;
   }
   if(r.status==='HELD'){
    state.pendingHoldReservationId=r.reservationId;
@@ -1180,12 +1210,14 @@ function formalHoldUnknown_(slotId,requestId,quote){
    formalV08Read_();return;
   }
   if(r.status==='CONFIRMED'){
-   status('原Reservations已CONFIRMED；仍須核對PDF與本人副本。');formalV08Read_();return;
+   state.pendingHoldReservationId=r.reservationId;
+   unknown('原Reservations已CONFIRMED；不代表知情同意已核實，請研究團隊核對PDF與本人副本，勿重新報名。');return;
   }
-  status(r.status==='EXPIRED'?
-   '原暫留已EXPIRED，舊請求不得恢復或重送。':
-   '原預約已CANCELLED，禁止自動補留或重送。');
- },()=>status('原Reservations唯讀回查失敗，結果仍UNKNOWN；勿重送。'));
+  unknown(r.status==='EXPIRED'?
+   '原暫留已EXPIRED，舊請求不得恢復或重送；請研究團隊核對。':
+   r.status==='CANCELLED'?'原預約已CANCELLED，禁止自動補留或重送。':
+   '原預約狀態仍UNKNOWN，請研究團隊核對；勿重送。');
+ },()=>unknown('原Reservations唯讀回查失敗，結果仍UNKNOWN；勿重送。'));
 }
 el('hold').addEventListener('click',()=>{
  if(!state.emailProof||state.busy||state.pendingHoldRequestId)return;
@@ -1209,6 +1241,7 @@ el('hold').addEventListener('click',()=>{
   }
   // Preserve the original idempotency key across an ambiguous response.
   state.pendingHoldRequestId=requestId;
+  state.pendingHoldSlotId=chosen.slotId;state.pendingHoldQuote=quote.quote;
   rpc('study1FormalHoldSlot',{emailProof:state.emailProof,
    quote:quote.quote},held=>{
    if(!held||held.held!==true){formalHoldUnknown_(chosen.slotId,requestId,quote.quote);return;}
