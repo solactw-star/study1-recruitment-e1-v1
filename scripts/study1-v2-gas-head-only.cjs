@@ -159,6 +159,7 @@ function invocation(env,mode){
   env.GITHUB_EVENT_NAME==='workflow_dispatch' && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
   env.GITHUB_SHA===env.REVIEWED_SHA,'manual, main, exact SHA and V2 repository required');
  if(mode!=='audit'){
+  require_(env.GITHUB_RUN_ATTEMPT==='1','mutation reruns forbidden; use new read-only audit and independent dispatch');
   require_(env.SYNC_MODE==='apply' && env.CONFIRMATION===(releaseProfile(env)==='private_e1_management'?PRIVATE_CONFIRM:CONFIRM),
    'explicit V2 apply confirmation required');
   require_(/^[a-f0-9]{64}$/.test(env.EXPECTED_REMOTE_SHA256||''),

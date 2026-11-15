@@ -28,6 +28,7 @@ function invocation(env,mode){
  assert(env.PRIVATE_MODE===mode,'manual mode mismatch');
  assert(env.REVIEWED_TARGET_SHA256===TARGET,'exact reviewed private E1 candidate SHA required');
  if(mode!=='audit'){
+  assert(env.GITHUB_RUN_ATTEMPT==='1','mutation reruns forbidden; use new read-only audit and independent dispatch');
   assert(env.CONFIRMATION===(mode==='version'?VERSION_CONFIRM:CONFIRM),'independent private '+mode+' approval missing');
   assert(/^[a-f0-9]{64}$/.test(env.EXPECTED_INVENTORY_SHA256||''),
    'verified inventory fingerprint from separate read-only audit required');

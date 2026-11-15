@@ -6,7 +6,7 @@ const d=require('../scripts/study1-v2-private-deploy.cjs');
 const baseFiles=()=>core.privateOwnerManagementCandidate(core.localSources());
 const gas=()=>({scriptId:d.SID,files:baseFiles()});
 const runEnv=()=>({GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',
- GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_SHA:'a'.repeat(40),
+ GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'.repeat(40),
  REVIEWED_SHA:'a'.repeat(40),PRIVATE_MODE:'deploy',
  CONFIRMATION:d.CONFIRM,PRIVATE_VERSION:'1',REVIEWED_TARGET_SHA256:d.TARGET,EXPECTED_INVENTORY_SHA256:d.fingerprint([],[],d.TARGET,[]),
  GITHUB_RUN_ID:'999'});
@@ -45,7 +45,7 @@ test('V2 source is exactly 27 reviewed GAS files with closed private manifest',(
 test('strict manual main and independent deploy confirmation',()=>{
  const e=runEnv();assert.doesNotThrow(()=>d.invocation(e,'deploy'));
  assert.doesNotThrow(()=>d.invocation({...e,PRIVATE_MODE:'audit'},'audit'));
- for(const c of [{GITHUB_REF:'refs/heads/test'},{GITHUB_EVENT_NAME:'push'},
+ for(const c of [{GITHUB_REF:'refs/heads/test'},{GITHUB_EVENT_NAME:'push'},{GITHUB_RUN_ATTEMPT:'2'},
   {GITHUB_REPOSITORY:'solactw-star/study1-recruitment-gas'},
   {REVIEWED_SHA:'b'.repeat(40)},{CONFIRMATION:''},
   {EXPECTED_INVENTORY_SHA256:'x'}, {PRIVATE_MODE:'audit'}])

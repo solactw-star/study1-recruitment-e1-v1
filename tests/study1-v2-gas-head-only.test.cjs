@@ -13,14 +13,14 @@ function holdSlot(){return rejectIntake_();}
 function submitConsent(){return rejectIntake_();}
 function listSlots(){return [];}`;
 const fixtures=()=>[{name:'appsscript',type:'JSON',source:manifest()},{name:'Website',type:'SERVER_JS',source:website()},{name:'Index',type:'HTML',source:'<html>closed</html>'}];
-const env=(mode='apply')=>({GITHUB_REPOSITORY:m.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_SHA:'a'.repeat(40),REVIEWED_SHA:'a'.repeat(40),SYNC_MODE:mode,EXPECTED_REMOTE_SHA256:'b'.repeat(64),CONFIRMATION:m.CONFIRM,GITHUB_RUN_ID:'12345',RUNNER_TEMP:fs.mkdtempSync(path.join(os.tmpdir(),'study1v2-'))});
+const env=(mode='apply')=>({GITHUB_REPOSITORY:m.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'.repeat(40),REVIEWED_SHA:'a'.repeat(40),SYNC_MODE:mode,EXPECTED_REMOTE_SHA256:'b'.repeat(64),CONFIRMATION:m.CONFIRM,GITHUB_RUN_ID:'12345',RUNNER_TEMP:fs.mkdtempSync(path.join(os.tmpdir(),'study1v2-'))});
 const creds=()=>({refresh_token:'mock-v2-refresh-token-that-remains-private',client_id:'my-client-id',client_secret:'my-secret'});
 const remote=()=>({scriptId:m.SID,files:fixtures()});
 
 test('manual-only V2 repository/ref/SHA and explicit apply approval are mandatory',()=>{
  const good=env();assert.doesNotThrow(()=>m.invocation(good,'prepare'));assert.doesNotThrow(()=>m.invocation({...good,SYNC_MODE:'audit'},'audit'));
  for(const bad of [{GITHUB_REPOSITORY:'solactw-star/study1-recruitment-gas'},{GITHUB_REF:'refs/heads/feature'},
-  {GITHUB_EVENT_NAME:'push'},{REVIEWED_SHA:'f'.repeat(40)},{CONFIRMATION:'NO'},
+  {GITHUB_EVENT_NAME:'push'},{GITHUB_RUN_ATTEMPT:'2'},{REVIEWED_SHA:'f'.repeat(40)},{CONFIRMATION:'NO'},
   {SYNC_MODE:'audit'},{EXPECTED_REMOTE_SHA256:''}])
   assert.throws(()=>m.invocation({...good,...bad},'prepare'),/V2_HEAD_ONLY_BLOCKED/);
  assert.throws(()=>m.invocation(good,'not-a-phase'),/V2_HEAD_ONLY_BLOCKED/);
