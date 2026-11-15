@@ -33,6 +33,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 concurrency:
   group: study1-b11-original-copy
   cancel-in-progress: false

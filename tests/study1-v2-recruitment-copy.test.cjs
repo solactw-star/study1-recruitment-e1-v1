@@ -4,7 +4,7 @@ const m=require('../scripts/study1-v2-recruitment-copy.cjs');
 const html=fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8'),p=m.parseIndex(html);
 const A='a'.repeat(40),B='b'.repeat(40),C='c'.repeat(40);
 const draft=(overrides={})=>({kind:'RECRUITMENT_COPY_REVIEW_DRAFT',source:m.FILE,baseRevision:'d'.repeat(64),baseSha256:m.hash(html),
- title:'合成標題 & 說明',intro:p.intro,open:false,approved:false,published:false,...overrides});
+ title:p.title==='合成標題 & 說明'?'其他合成標題 & 說明':'合成標題 & 說明',intro:p.intro,open:false,approved:false,published:false,...overrides});
 function fixture(){
  let main=A,branch=null,pr=null,review=[],files=[{filename:m.FILE,status:'modified'}],source=new Map([[A,html]]),writes=[],parent=A,failPr=false,afterMergeFail=false;
  const api=(route,method='GET',body)=>{
@@ -20,22 +20,23 @@ function fixture(){
   if(route==='pulls/7'&&method==='GET')return pr;
   if(route==='pulls/7/files?per_page=100')return files;
   if(route==='commits/'+B)return {sha:B,parents:[{sha:parent}]};
+  if(route==='actions/runs/123')return {id:123,path:'.github/workflows/study1-v2-recruitment-copy.yml',event:'workflow_dispatch',head_branch:'main',head_sha:A,status:'completed',conclusion:'success',actor:{login:'drafter'},triggering_actor:{login:'initiator'}};
   if(route==='pulls/7/reviews?per_page=100')return review;
   if(route==='collaborators/reviewer/permission')return {permission:'write'};
   if(route==='pulls/7/merge'&&method==='PUT'){assert.equal(body.sha,B);main=C;source.set(C,source.get(B));pr={...pr,merged:true,merge_commit_sha:C};if(afterMergeFail)throw Error('response lost');return {merged:true,sha:C};}
   throw Error('unhandled '+route);
  };
  const save=()=>m.save(api,{confirmation:m.SAVE,runId:'123',draft:JSON.stringify(draft())});
- const publish=(overrides={})=>m.publish(api,{confirmation:m.PUBLISH,pr:'7',head:B,approvalRef:'PI_TEST_001',reason:'合成核定',...overrides});
+ const publish=(overrides={},verify)=>m.publish(api,{confirmation:m.PUBLISH,pr:'7',head:B,approvalRef:'PI_TEST_001',reason:'合成核定',...overrides},verify);
  const approve=(overrides={})=>review.push({id:review.length+1,user:{login:'reviewer'},author_association:'COLLABORATOR',state:'APPROVED',commit_id:B,body:'PI_APPROVAL_REF=PI_TEST_001',...overrides});
  return {api,save,publish,approve,writes,source,set files(v){files=v},set failPr(v){failPr=v},set main(v){main=v},set afterMergeFail(v){afterMergeFail=v}};
 }
 test('B11 source patch modifies only hero title and intro; escapes ampersand, preserves all eligibility and closed routes',()=>{
  const next=m.draftCandidate(html,draft());
- assert.equal(m.parseIndex(next).title,'合成標題 & 說明');
+ assert.equal(m.parseIndex(next).title,draft().title);
  assert.match(next,/合成標題 &amp; 說明/);
  assert.equal(next.split('<div class="actions">')[1],html.split('<div class="actions">')[1]);
- assert.deepEqual(m.verifyCandidate(html,next),{title:'合成標題 & 說明',intro:p.intro});
+ assert.deepEqual(m.verifyCandidate(html,next),{title:draft().title,intro:p.intro});
  assert.throws(()=>m.verifyCandidate(html,next.replace('目前尚未開放報名','已開放報名')),/outside/);
 });
 test('B11 stale SHA, forged approval, HTML, formula-like extra settings and no-op reject',()=>{
@@ -58,9 +59,10 @@ test('B11 independently reviewed exact PR merges original main only, confirms re
  assert.equal(f.source.get(C),f.source.get(B));assert.equal(f.writes.at(-1).body.sha,B);
 });
 test('B11 stale head, self approval, wrong PI evidence, revoked review, unapproved or scope change reject before merge',()=>{
- for(const variant of ['none','self','stale','wrong-ref','revoked','extra','tamper','main-changed']){
+ for(const variant of ['none','self','drafter','initiator','stale','wrong-ref','revoked','extra','tamper','main-changed']){
   const f=fixture();f.save();
   if(variant==='self')f.approve({user:{login:'bot'}});
+  else if(variant==='drafter'||variant==='initiator')f.approve({user:{login:variant}});
   else if(variant==='stale')f.approve({commit_id:A});
   else if(variant==='wrong-ref')f.approve({body:'PI_APPROVAL_REF=PI_OTHER_001'});
   else if(variant!=='none')f.approve();
@@ -78,4 +80,18 @@ test('B11 ambiguous merge response never retries; original PR/main can be inspec
  assert.equal(f.source.get(C),f.source.get(B));
  assert.throws(()=>f.publish(),/not an eligible/);
  assert.equal(f.writes.filter(w=>w.route.endsWith('/merge')).length,1);
+});
+
+test('B11 trusted candidate-core validation runs before merge and cannot authorize failed candidate',()=>{
+ const f=fixture();f.save();f.approve();const n=f.writes.length;
+ assert.throws(()=>f.publish({},(base,candidate,ref)=>{assert.equal(ref,A);assert.equal(base,html);assert.equal(candidate,f.source.get(B));throw Error('candidate CI failed');}),/candidate CI failed/);
+ assert.equal(f.writes.length,n);
+ const r=f.publish({},(base,candidate,ref)=>{assert.equal(ref,A);assert.equal(candidate,m.draftCandidate(base,draft()));});
+ assert.equal(r.status,'MAIN_COPY_PUBLISHED');
+});
+test('B11 next draft round loads changed copy rather than requiring historical title',()=>{
+ const next=m.draftCandidate(html,draft());
+ const later={...draft(),baseSha256:m.hash(next),title:'第二次文案修訂 & 版本'};
+ assert.equal(m.parseIndex(m.draftCandidate(next,later)).title,later.title);
+ assert.throws(()=>m.draftCandidate(next,draft()),/stale/);
 });

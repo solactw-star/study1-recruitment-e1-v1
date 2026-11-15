@@ -931,7 +931,8 @@ test('P0-B recruitment source is the original Index; no write or public read of 
   assert.equal(name,'Index');return {getContent:()=>fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')};
  }};
  const r=h.ctx.study1OwnerE1RecruitmentDraft();
- assert.match(r.title,/記憶與身體感覺/);assert.match(r.intro,/身體訊號覺察/);assert.equal(r.actionAuthority,'DRAFT_ONLY');assert.equal(r.open,false);assert.equal(r.baseSha256,crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../gas/Index.html'))).digest('hex'));
+ const expected=require('../scripts/study1-v2-recruitment-copy.cjs').parseIndex(fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8'));
+ assert.equal(r.title,expected.title);assert.equal(r.intro,expected.intro);assert.equal(r.actionAuthority,'DRAFT_ONLY');assert.equal(r.open,false);assert.equal(r.baseSha256,crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname,'../gas/Index.html'))).digest('hex'));
  h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
  assert.throws(()=>h.ctx.study1OwnerE1RecruitmentDraft(),/PUBLIC_READ_ONLY/);
  assert.equal(h.mutations.length,n);
@@ -978,7 +979,7 @@ test('P0-B browser workspace renders real joined roster, filters, selects slot a
 test('P0-B browser recruitment editing preview and review export never publish and reject HTML',()=>{
  const h=wsHarness();h.ctx.HtmlService={createHtmlOutputFromFile:()=>({getContent:()=>fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')})};
  const b=workspaceBrowser(h.ctx),g=b.get;
- g('e1CopyLoad').click();assert.match(g('e1CopyTitle').value,/記憶與身體感覺/);
+ g('e1CopyLoad').click();assert.equal(g('e1CopyTitle').value,require('../scripts/study1-v2-recruitment-copy.cjs').parseIndex(fs.readFileSync(path.join(__dirname,'../gas/Index.html'),'utf8')).title);
  g('e1CopyTitle').value='審核中的招募標題';g('e1CopyPreview').click();
  assert.equal(g('e1CopyTitlePreview').textContent,'審核中的招募標題');
  g('e1CopyExport').click();

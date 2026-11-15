@@ -4,6 +4,7 @@
  */
 const {createHash}=require('node:crypto');
 const {execFileSync}=require('node:child_process');
+const fs=require('node:fs');
 const REPO='solactw-star/study1-recruitment-e1-v1',FILE='gas/Index.html';
 const SAVE='I_SAVE_STUDY1_COPY_DRAFT',PUBLISH='I_PUBLISH_APPROVED_STUDY1_COPY_TO_MAIN';
 const hash=s=>createHash('sha256').update(s,'utf8').digest('hex');
@@ -73,7 +74,9 @@ function exactBranch(run){
 function save(api,input){
  require_(input.confirmation===SAVE,'explicit draft save confirmation required');
  require_(typeof input.draft==='string'&&input.draft.length<=10000,'draft missing or too long');
- const base=mainSha(api),source=original(api,base),next=draftCandidate(source.text,JSON.parse(input.draft));
+ const base=mainSha(api);
+ require_(!input.expectedMain||base===input.expectedMain,'workflow checkout no longer current main');
+ const source=original(api,base),next=draftCandidate(source.text,JSON.parse(input.draft));
  const branch=exactBranch(input.runId);
  require_(mainSha(api)===base,'main changed before saving');
  // Non-idempotent operations are attempted once. On failure, inspect refs and
@@ -94,7 +97,7 @@ function save(api,input){
  }catch(_){}
  return {status:'DRAFT_SAVED',branch,base,head,compare,pull,source:FILE,gasDeployed:false};
 }
-function approvalReview(api,pr,head,approvalRef){
+function approvalReview(api,pr,head,approvalRef,drafterNames){
  const reviews=api('pulls/'+pr.number+'/reviews?per_page=100');
  require_(Array.isArray(reviews)&&reviews.length<100,'review history unavailable or requires manual review');
  const latest=new Map();
@@ -106,7 +109,7 @@ function approvalReview(api,pr,head,approvalRef){
  }
  require_(![...latest.values()].some(r=>r.state==='CHANGES_REQUESTED'),'unresolved change request');
  const qualifying=[...latest.values()].filter(r=>r.state==='APPROVED'&&r.commit_id===head&&
-  r.user.login.toLowerCase()!==pr.user.login.toLowerCase()&&
+  r.user.login.toLowerCase()!==pr.user.login.toLowerCase()&&!drafterNames.includes(r.user.login.toLowerCase())&&
   ['OWNER','MEMBER','COLLABORATOR'].includes(r.author_association)&&
   String(r.body||'').split(/\r?\n/).some(x=>x.trim()==='PI_APPROVAL_REF='+approvalRef));
  for(const r of qualifying){
@@ -115,7 +118,7 @@ function approvalReview(api,pr,head,approvalRef){
  }
  fail('independent current-head authorized approval with PI reference required');
 }
-function publish(api,input){
+function publish(api,input,verify=()=>{}){
  require_(input.confirmation===PUBLISH,'explicit source publication confirmation required');
  require_(typeof input.pr==='string'&&/^[1-9]\d{0,8}$/.test(input.pr)&&sha(input.head)&&
   typeof input.approvalRef==='string'&&/^[A-Za-z0-9_.:/-]{8,120}$/.test(input.approvalRef)&&
@@ -132,8 +135,18 @@ function publish(api,input){
  require_(commit?.sha===head&&commit.parents?.length===1&&sha(commit.parents[0].sha),'draft commit must be a single-parent version');
  require_(original(api,commit.parents[0].sha).text===source.text,'original published copy changed since draft; save new draft');
  verifyCandidate(source.text,candidate.text);
- const reviewer=approvalReview(api,pr,head,input.approvalRef);
- require_(mainSha(api)===base&&api('pulls/'+input.pr)?.head?.sha===head,'main or reviewed draft changed');
+ const runId=pr.head.ref.split('/')[1],run=api('actions/runs/'+runId);
+ require_(run&&String(run.id)===runId&&run.path==='.github/workflows/study1-v2-recruitment-copy.yml'&&
+  run.event==='workflow_dispatch'&&run.head_branch==='main'&&run.head_sha===commit.parents[0].sha&&
+  run.status==='completed'&&run.conclusion==='success'&&run.actor?.login&&run.triggering_actor?.login,
+  'draft origin workflow not verified');
+ const authors=[run.actor.login.toLowerCase(),run.triggering_actor.login.toLowerCase()];
+ approvalReview(api,pr,head,input.approvalRef,authors);
+ verify(source.text,candidate.text,base);
+ const reviewer=approvalReview(api,pr,head,input.approvalRef,authors);
+ const latest=api('pulls/'+input.pr);
+ require_(mainSha(api)===base&&latest?.head?.sha===head&&latest.state==='open'&&latest.draft===false&&!latest.merged,
+  'main or reviewed draft changed');
  // GitHub exact head precondition; normal repo branch protection applies.
  // One attempt only. Network/uncertain merge must be independently read back.
  const merged=api('pulls/'+input.pr+'/merge','PUT',{sha:head,merge_method:'squash',
@@ -145,12 +158,32 @@ function publish(api,input){
  return {status:'MAIN_COPY_PUBLISHED',pr:pr.number,reviewedHead:head,main:actual,
   mergeCommit:merged.sha,reviewer,approvalRef:input.approvalRef,gasDeployed:false};
 }
+/** Candidate-only verification uses trusted checked-out main's test list and
+ * swaps only the already canonicalized Index inside the ephemeral CI checkout.
+ * No branch-supplied script, no credential in child process, no external write.
+ */
+function verifyCheckoutCandidate(base,candidate,ref){
+ require_(process.env.GITHUB_SHA===ref&&execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim()===ref,
+  'workflow checkout no longer current main');
+ const original=fs.readFileSync(FILE,'utf8');
+ require_(original===base,'checked-out Index differs from source');
+ const workflow=fs.readFileSync('.github/workflows/study1-v2-public-readonly-ci.yml','utf8');
+ const lines=workflow.split(/\r?\n/).map(x=>x.trim()).filter(x=>x.startsWith('node --test '));
+ require_(lines.length===1,'core test list drift');
+ const tests=lines[0].slice('node --test '.length).split(/\s+/);
+ require_(tests.length>=20&&tests.every(x=>/^tests\/[A-Za-z0-9_-]+\.test\.cjs$/.test(x)),'core test list invalid');
+ const env={...process.env};for(const k of Object.keys(env))if(/^(GH_TOKEN|GITHUB_TOKEN|COPY_|V2_GAS_)/.test(k))delete env[k];
+ try{
+  fs.writeFileSync(FILE,candidate,'utf8');
+  execFileSync(process.execPath,['--test',...tests],{stdio:'inherit',env,timeout:180000});
+ }finally{fs.writeFileSync(FILE,original,'utf8');}
+}
 module.exports={REPO,FILE,SAVE,PUBLISH,hash,parseIndex,patchIndex,draftCandidate,verifyCandidate,save,publish};
 if(require.main===module){
  try{
   require_(process.env.GITHUB_REPOSITORY===REPO&&process.env.GITHUB_REF==='refs/heads/main'&&process.env.GITHUB_EVENT_NAME==='workflow_dispatch','manual original main only');
-  const result=process.env.COPY_MODE==='save'?save(api,{runId:process.env.GITHUB_RUN_ID,draft:process.env.COPY_DRAFT,confirmation:process.env.COPY_CONFIRM}):
-    process.env.COPY_MODE==='publish'?publish(api,{pr:process.env.COPY_PR,head:process.env.COPY_HEAD,approvalRef:process.env.COPY_APPROVAL,reason:process.env.COPY_REASON,confirmation:process.env.COPY_CONFIRM}):
+  const result=process.env.COPY_MODE==='save'?save(api,{runId:process.env.GITHUB_RUN_ID,draft:process.env.COPY_DRAFT,confirmation:process.env.COPY_CONFIRM,expectedMain:process.env.GITHUB_SHA}):
+    process.env.COPY_MODE==='publish'?publish(api,{pr:process.env.COPY_PR,head:process.env.COPY_HEAD,approvalRef:process.env.COPY_APPROVAL,reason:process.env.COPY_REASON,confirmation:process.env.COPY_CONFIRM},verifyCheckoutCandidate):
     fail('invalid mode');
   console.log(JSON.stringify(result));
  }catch(e){console.error(String(e.message).startsWith('B11_COPY_BLOCKED:')?e.message:'B11_COPY_UNKNOWN: inspect original branch/PR/main before another write');process.exitCode=1;}
