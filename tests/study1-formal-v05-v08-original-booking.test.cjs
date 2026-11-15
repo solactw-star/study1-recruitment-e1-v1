@@ -1093,3 +1093,88 @@ test('P0-B browser ambiguous slot-save response locks resubmission even after or
  g('e1WsCommit').click();assert.equal(b.calls.filter(x=>x.method==='study1OwnerE1SlotChangeCommit').length,1);
  assert.equal(h.tables.AuditLogs.rows.length,2);
 });
+
+function profileHarness(){
+ const h=wsHarness(),a=h.person('A'),z=h.person('B');
+ h.holdSlot(h.proof(a),h.S1);h.holdSlot(h.proof(z),h.S2,'REQ_HOLD_B_1234567890');
+ return {h,a,z};
+}
+function profileRequest(h,id){return {applicantId:id,revision:h.ctx.study1OwnerE1Workspace(wsFilter).revision};}
+function addCaseConsent(h,a){
+ const row=h.tables.Reservations.rows.find(r=>r[1]===a.applicantId);
+ const binding={schemaVersion:1,applicantId:a.applicantId,reservationId:row[0],slotId:row[2],challengeId:a.challengeId,
+  screeningId:a.screeningId,experiment:'E1',documentSha:'a'.repeat(64),documentVersion:'E1-V1',
+  identityEvidenceSha:'b'.repeat(64),eligibilityEvidenceSha:'c'.repeat(64),priorE1EvidenceSha:null,
+  verifiedAtUtc:ts(h.clock.now,-120000),otpUsedAtUtc:ts(h.clock.now,-120000),holdUntilUtc:row[4],digest:''};
+ binding.digest=h.ctx.study1BindingDigest_(binding);
+ const c={id:'00000000-1111-4222-8333-000000123456',channel:'FORMAL_E1',experiment:'E1',researcherPresigned:true,
+  binding,state:'CONFIRMED',documentSha:binding.documentSha,documentVersion:binding.documentVersion,tokenHash:'SENSITIVE_TOKEN_HASH',
+  signedPdf:{id:'PRIVATE_FILE_1234567890',sha:'d'.repeat(64)},signature:{sha:'e'.repeat(64)},confirmation:{sha:'f'.repeat(64)}};
+ h.ctx.study1EConsentRegistry_=()=>({revision:1,records:[c]});
+ h.ctx.study1OwnerE1SignedPdfVerified_=entry=>({recordId:entry.id,experiment:'E1',researcherPreSigned:true,sourceSha256:entry.documentSha,
+  signedPdfSha256:entry.signedPdf.sha,signedAtUtc:ts(h.clock.now,-1000),confirmedAtUtc:ts(h.clock.now,-500),bytes:200,mime:'application/pdf',base64:'SYNTHETIC_PDF_BYTES'});
+ return c;
+}
+test('P0-B B04 same original B03 applicant, eight-source profile, reservation history and scope-limited contact',()=>{
+ const {h,a,z}=profileHarness(),q=profileRequest(h,a.applicantId),n=h.mutations.length;
+ h.tables.AuditLogs.rows.push(['AUD_TEST_A',ts(h.clock.now,-1000),'OWNER','owner@example.org','REVIEWED','APPLICANT',a.applicantId,'SECRET_RESULT','REQ_A']);
+ h.tables.AuditLogs.rows.push(['AUD_TEST_B',ts(h.clock.now,-1000),'OWNER','owner@example.org','REVIEWED','APPLICANT',z.applicantId,'SECRET_RESULT_B','REQ_B']);
+ const p=h.ctx.study1OwnerE1Profile(q);
+ assert.equal(p.applicantId,a.applicantId);assert.equal(p.basic.email,h.tables.Applicants.rows[0][2]);
+ assert.equal(p.eligibility.screeningId,a.screeningId);assert.equal(p.reservations.length,1);
+ assert.equal(p.summary.bookingStatus,'HELD');assert.equal(p.nextAppointment.slotId,h.S1);
+ assert.equal(p.execution.status,'SOURCE_NOT_CONNECTED');assert.equal(p.administration.status,'SOURCE_NOT_CONNECTED');
+ assert.equal(p.history.length,1);assert.ok(p.timeline.some(e=>e.sourceId==='AUD_TEST_A'));
+ assert.ok(!JSON.stringify(p).includes(z.applicantId));assert.doesNotMatch(JSON.stringify(p),/SECRET_RESULT|owner@example.org|idempotency_key|otp_hmac|tokenHash/);
+ assert.equal(h.mutations.length,n);
+});
+test('P0-B B04 verified signed PDF and canonical notification stay separate from original reservation confirmation',()=>{
+ const {h,a,z}=profileHarness(),c=addCaseConsent(h,a),id=c.binding.reservationId;
+ const job='NTF_'+h.ctx.study1BindingHmac_(['E1_BOOKING_CONFIRMATION_NOTICE_V1',c.id,a.applicantId,id]).slice(0,28);
+ h.tables.Notifications.rows.push([job,a.applicantId,id,'E1_RESERVATION_CONFIRMED','PROVIDER_ACCEPTED',1,ts(h.clock.now,-500),ts(h.clock.now,-100),'']);
+ const q=profileRequest(h,a.applicantId),p=h.ctx.study1OwnerE1Profile(q);
+ assert.equal(p.consent.pdfStatus,'PRIVATE_SHA_VERIFIED');assert.equal(p.summary.bookingStatus,'HELD');
+ assert.equal(p.notices[0].status,'PROVIDER_ACCEPTED_NOT_DELIVERED');
+ assert.ok(p.timeline.some(x=>x.source==='SIGNATURE'));assert.ok(p.timeline.some(x=>x.source==='Notifications'));
+ assert.doesNotMatch(JSON.stringify(p),/SYNTHETIC_PDF_BYTES|SENSITIVE_TOKEN_HASH|PRIVATE_FILE_/);
+ const pdf=h.ctx.study1OwnerE1ProfilePdf({...q,consentId:c.id});assert.equal(pdf.applicantId,a.applicantId);
+ assert.throws(()=>h.ctx.study1OwnerE1ProfilePdf({...profileRequest(h,z.applicantId),consentId:c.id}),/PDF_NOT_VERIFIED/);
+ h.ctx.study1OwnerE1SignedPdfVerified_=()=>{throw Error('PDF_SHA_MISMATCH')};
+ assert.equal(h.ctx.study1OwnerE1Profile(q).consent.pdfStatus,'UNKNOWN_REQUIRES_REVIEW');
+ assert.throws(()=>h.ctx.study1OwnerE1ProfilePdf({...q,consentId:c.id}),/PDF_NOT_VERIFIED/);
+});
+test('P0-B B04 refuses stale list, wrong consent ownership, non-E1, data gate and public access',()=>{
+ const {h,a,z}=profileHarness(),q=profileRequest(h,a.applicantId);
+ h.tables.Applicants.rows[0][1]='更新';assert.throws(()=>h.ctx.study1OwnerE1Profile(q),/STALE_LIST/);
+ const c=addCaseConsent(h,a);c.binding.applicantId=z.applicantId;c.binding.digest=h.ctx.study1BindingDigest_(c.binding);
+ assert.throws(()=>h.ctx.study1OwnerE1Profile(profileRequest(h,a.applicantId)),/CONSENT_BINDING_CONFLICT/);
+ h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');
+ assert.throws(()=>h.ctx.study1OwnerE1Profile(q),/DATA_NOT_APPROVED/);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY')};
+ assert.throws(()=>h.ctx.study1OwnerE1Profile(q),/PUBLIC_READ_ONLY/);
+ assert.throws(()=>h.ctx.study1OwnerE1ProfilePdf({...q,consentId:c.id}),/PUBLIC_READ_ONLY/);
+});
+test('P0-B B04 actual browser list row opens profile, tabs and timeline, returns without losing filters',()=>{
+ const {h,a}=profileHarness(),b=workspaceBrowser(h.ctx),g=b.get;
+ g('e1WsQuery').value=a.applicantId;g('e1WsLoad').click();
+ assert.equal(g('e1WsRows').children.length,1);
+ g('e1WsRows').children[0].children[9].children[0].click();
+ assert.equal(g('e1Profile').hidden,false);
+ assert.ok(g('e1ProfileSummary').children.some(x=>x.textContent.includes(a.applicantId)));
+ g('e1ProfileTab').value='eligibility';g('e1ProfileTab').handlers.change();
+ assert.ok(g('e1ProfileContent').children.some(x=>x.textContent.includes('E1_TEST_V1')));
+ g('e1ProfileTimeline').children.find(x=>x.children[0].textContent.includes('原預約紀錄建立')).children[0].click();
+ assert.equal(g('e1ProfileTab').value,'booking');
+ g('e1ProfileBack').click();assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileSummary').children.length,0);
+ assert.equal(g('e1WsQuery').value,a.applicantId);assert.equal(g('e1WsRows').children.length,1);
+});
+test('P0-B B04 wrong case response and failed refresh clear selected private data',()=>{
+ const {h}=profileHarness(),original=h.ctx.study1OwnerE1Profile,b=workspaceBrowser(h.ctx),g=b.get;
+ h.ctx.study1OwnerE1Profile=q=>({...original(q),applicantId:'APP_WRONG_12345678'});
+ g('e1WsLoad').click();g('e1WsRows').children[0].children[9].children[0].click();
+ assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileSummary').children.length,0);
+ h.ctx.study1OwnerE1Profile=original;
+ g('e1WsRows').children[0].children[9].children[0].click();assert.equal(g('e1Profile').hidden,false);
+ h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');g('e1WsLoad').click();
+ assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileContent').children.length,0);assert.equal(g('e1WsRows').children.length,0);
+});

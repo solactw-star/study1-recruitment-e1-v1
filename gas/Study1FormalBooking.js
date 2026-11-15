@@ -1488,3 +1488,168 @@ function study1OwnerE1RecruitmentDraft(){if(typeof study1V2PublicRpcDeny_==='fun
   title:plain(parts[1]),intro:plain(parts[2]),open:false,
   actionAuthority:'DRAFT_ONLY'};
 }
+
+
+/** B04: case-scoped projection from the same B03 original sources; no new
+ * database, no invented events, no participant-facing authority. Only the
+ * selected applicant's contact fields are returned to the approved OWNER. */
+function study1OwnerE1ProfileInput_(input,pdf){
+ const keys=pdf?'applicantId,consentId,revision':'applicantId,revision';
+ if(!input||Object.keys(input).sort().join(',')!==keys||
+    !/^[a-f0-9]{64}$/.test(input.revision||''))throw Error('E1_PROFILE_INPUT_INVALID');
+ study1BindingId_(input.applicantId);
+ if(pdf)study1BindingId_(input.consentId);
+}
+function study1OwnerE1ProfileSource_(x,id,lock){
+ const summaries=x.rows.filter(row=>row.applicantId===id);
+ if(summaries.length!==1)throw Error('E1_PROFILE_OUTSIDE_SCOPE');
+ const summary=summaries[0],f=x.first;
+ const app=study1BindingUniqueRow_(f.apps,STUDY1_BINDING_SCHEMA_.applicants,id);
+ const screens=f.screenings.rows.filter(row=>row[1]===id);
+ if(screens.length!==1)throw Error('E1_PROFILE_SCREENING_CONFLICT');
+ const screen=screens[0];
+ const reservations=f.booking.reservations.rows.filter(row=>row[1]===id);
+ const e1=new Map(x.calendar.map(slot=>[slot.slotId,slot]));
+ if(reservations.some(row=>!e1.has(row[2])))throw Error('E1_PROFILE_SLOT_SCOPE_CONFLICT');
+ const ids=new Set(reservations.map(row=>row[0]));
+ const related=f.consent.records.filter(c=>c&&c.binding&&
+   (c.binding.applicantId===id||ids.has(c.binding.reservationId)));
+ if(related.length>1)throw Error('E1_PROFILE_CONSENT_CONFLICT');
+ const c=related[0]||null;
+ if(c){
+  const v=c.binding,rs=reservations.find(row=>row[0]===v.reservationId);
+  if(f.consent.records.filter(e=>e&&e.id===c.id).length!==1||
+     c.channel!=='FORMAL_E1'||c.experiment!=='E1'||c.researcherPresigned!==true||
+     !['ISSUED','SIGNED','CONFIRMED','WITHDRAWN'].includes(c.state)||
+     v.applicantId!==id||v.screeningId!==screen[0]||v.experiment!=='E1'||
+     !rs||rs[2]!==v.slotId||v.documentSha!==c.documentSha||v.documentVersion!==c.documentVersion||
+     study1BindingDigest_(v)!==v.digest)
+   throw Error('E1_PROFILE_CONSENT_BINDING_CONFLICT');
+ }
+ const notices=f.notices.rows.filter(row=>row[1]===id||ids.has(row[2]));
+ if(notices.some(row=>row[1]!==id||!ids.has(row[2])))throw Error('E1_PROFILE_NOTICE_SCOPE_CONFLICT');
+ const noticeProjection=study1OwnerE1NoticeProject_(f.consent,f.notices.rows,lock);
+ const canonicalNotice=c?noticeProjection.records.find(row=>row.id===c.id):null;
+ const allowedNotice=canonicalNotice&&['PROVIDER_ACCEPTED_NOT_DELIVERED','UNKNOWN_REQUIRES_STAFF_REVIEW'].includes(canonicalNotice.noticeStatus);
+ const noteRows=notices.map(row=>{
+  const canonical=allowedNotice&&c.binding.reservationId===row[2]&&row[3]==='E1_RESERVATION_CONFIRMED'&&
+   row[0]==='NTF_'+study1BindingHmac_(['E1_BOOKING_CONFIRMATION_NOTICE_V1',c.id,id,row[2]]).slice(0,28);
+  return {jobId:row[0],reservationId:row[2],type:row[3],
+   status:canonical?canonicalNotice.noticeStatus:'SOURCE_MISMATCH',
+   queuedAtUtc:canonical?row[6]:null,acceptedAtUtc:canonical&&row[4]==='PROVIDER_ACCEPTED'?row[7]:null};
+ });
+ const events=[];
+ const event=(at,kind,source,sourceId,tab)=>{
+  if(at===''||at==null)return;
+  study1BindingUtc_(at);
+  events.push({atUtc:at,kind,source,sourceId,tab});
+ };
+ event(app[4],'申請建立','Applicants',id,'basic');
+ event(app[5],'申請資料最近更新（非完整異動歷程）','Applicants',id,'basic');
+ event(screen[4],'資格自陳結果：'+screen[3],'Screenings',screen[0],'eligibility');
+ const rsRows=reservations.map(row=>{
+  const slot=e1.get(row[2]);
+  event(row[6],'原預約紀錄建立','Reservations',row[0],'booking');
+  event(row[7],'原預約確認時間','Reservations',row[0],'booking');
+  event(row[8],'原預約取消時間','Reservations',row[0],'booking');
+  event(row[9],'原預約最近更新（非完整異動歷程）','Reservations',row[0],'booking');
+  return {reservationId:row[0],slotId:row[2],status:study1FormalEffectiveStatus_(row,x.now),
+   recordedStatus:row[3],holdUntilUtc:row[4]||null,createdAtUtc:row[6],
+   confirmedAtUtc:row[7]||null,cancelledAtUtc:row[8]||null,updatedAtUtc:row[9]||null,
+   startAtUtc:slot.startAtUtc,endAtUtc:slot.endAtUtc,locationCode:slot.locationCode,
+   slotStatus:slot.status,attendance:'SOURCE_NOT_CONNECTED'};
+ });
+ const next=rsRows.filter(row=>['HELD','CONFIRMED'].includes(row.status)&&Date.parse(row.startAtUtc)>Date.parse(x.now))
+  .sort((a,z)=>a.startAtUtc.localeCompare(z.startAtUtc))[0]||null;
+ for(const n of noteRows){
+  event(n.queuedAtUtc,'通知工作建立','Notifications',n.jobId,'notices');
+  event(n.acceptedAtUtc,'郵件提供者接受（非送達證明）','Notifications',n.jobId,'notices');
+ }
+ let consent=null,pdf=null;
+ if(c){
+  consent={consentId:c.id,reservationId:c.binding.reservationId,state:c.state,
+   version:c.documentVersion,sourceSha256:c.documentSha,researcherPresigned:true,
+   pdfStatus:'NOT_READY',signedPdfSha256:null,signedAtUtc:null,withdrawalAtUtc:null};
+  if(['CONFIRMED','WITHDRAWN'].includes(c.state)){
+   try{
+    const verified=study1OwnerE1SignedPdfVerified_(c);
+    if(verified.recordId!==c.id||verified.sourceSha256!==c.documentSha||verified.signedPdfSha256!==c.signedPdf.sha)
+     throw Error('E1_PROFILE_PDF_MISMATCH');
+    study1BindingUtc_(verified.signedAtUtc);
+    consent.pdfStatus='PRIVATE_SHA_VERIFIED';consent.signedPdfSha256=verified.signedPdfSha256;
+    consent.signedAtUtc=verified.signedAtUtc;pdf=verified;
+    event(verified.signedAtUtc,'本人簽署完整 PDF','SIGNATURE',c.id,'consent');
+    if(verified.confirmedAtUtc)event(verified.confirmedAtUtc,'同意確認存證（非預約確認）','CONFIRMATION',c.id,'consent');
+   }catch(_){consent.pdfStatus='UNKNOWN_REQUIRES_REVIEW';consent.signedPdfSha256=null;consent.signedAtUtc=null;pdf=null;}
+   if(c.state==='WITHDRAWN'){
+    try{
+     const w=study1EConsentEvent_(c.withdrawal,c,'WITHDRAWAL');
+     if(w.data.signatureHash!==c.signature.sha||w.data.confirmationHash!==c.confirmation.sha)
+      throw Error('E1_PROFILE_WITHDRAWAL_MISMATCH');
+     study1BindingUtc_(w.recordedAtUtc);
+     consent.withdrawalAtUtc=w.recordedAtUtc;
+     event(w.recordedAtUtc,'撤回存證（資料處置另核）','WITHDRAWAL',c.id,'consent');
+    }catch(_){consent.withdrawalEvidence='UNKNOWN_REQUIRES_REVIEW';}
+   }
+  }
+ }
+ // Exact target types/IDs only. Original AuditLogs is not immutable and
+ // result/actor fields may contain sensitive text; do not return raw result.
+ const opId=study1BindingSheetId_('slots'),book=SpreadsheetApp.openById(opId);
+ if(!book||book.getId()!==opId)throw Error('E1_PROFILE_AUDIT_SOURCE_MISMATCH');
+ const audit=study1OwnerE1SlotAuditRead_(book),auditAgain=study1OwnerE1SlotAuditRead_(book);
+ if(!bookingReadOnlySameTab_(audit,auditAgain))throw Error('E1_PROFILE_AUDIT_CHANGED');
+ const targets=new Map([['APPLICANT',new Set([id])],['RESERVATION',ids],
+   ['CONSENT',new Set(c?[c.id]:[])],['NOTIFICATION',new Set(noteRows.filter(n=>n.status!=='SOURCE_MISMATCH').map(n=>n.jobId))]]);
+ const history=[],historyIds=new Set();
+ for(const row of audit.rows){
+  if(!targets.get(row[5])?.has(row[6]))continue;
+  if(typeof row[0]!=='string'||!row[0]||historyIds.has(row[0])||
+     typeof row[4]!=='string'||!/^[A-Z0-9_]{1,100}$/.test(row[4]))throw Error('E1_PROFILE_AUDIT_INVALID');
+  historyIds.add(row[0]);study1BindingUtc_(row[1]);
+  history.push({eventId:row[0],atUtc:row[1],action:row[4],targetType:row[5],targetId:row[6],
+   actorType:/^(OWNER|PI|RA|SYSTEM|PARTICIPANT)$/.test(row[2])?row[2]:'UNKNOWN'});
+  event(row[1],'原稽核：'+row[4],'AuditLogs',row[0],'history');
+ }
+ // Compare exact original B03 source revision again after evidence and audit
+ // reads. No claim of ACID consistency against outside Sheet writers.
+ const again=study1OwnerE1WorkspaceRead_(lock);
+ if(again.revision!==x.revision||!bookingReadOnlySameTab_(audit,study1OwnerE1SlotAuditRead_(book))||
+    lock.hasLock()!==true)throw Error('E1_PROFILE_SOURCE_CHANGED');
+ study1OwnerE1WorkspaceGate_();
+ const missing='SOURCE_NOT_CONNECTED';
+ return {pdf,view:{mode:'OWNER_E1_PROFILE',experiment:'E1',applicantId:id,revision:x.revision,asOfUtc:x.now,
+   actionAuthority:'READ_ONLY',summary:{...summary,researchStage:missing,nextReservationId:next?next.reservationId:null},
+   basic:{name:app[1],email:app[2],phone:app[3],createdAtUtc:app[4],updatedAtUtc:app[5],
+    applicationStatus:app[6],emailEvidence:'APPLICANTS_RECORDED_STATUS_ONLY'},
+   eligibility:{screeningId:screen[0],rulesVersion:screen[2],result:screen[3],screenedAtUtc:screen[4],source:screen[5]},
+   reservations:rsRows,consent,notices:noteRows,nextAppointment:next,
+   execution:{status:missing},administration:{status:missing},
+   history:history.sort((a,z)=>z.atUtc.localeCompare(a.atUtc)||a.eventId.localeCompare(z.eventId)),
+   timeline:events.sort((a,z)=>z.atUtc.localeCompare(a.atUtc)||a.sourceId.localeCompare(z.sourceId)),
+   timelineCoverage:'ORIGINAL_RECORDED_TIMESTAMPS_AND_MATCHED_AUDIT_ONLY',externalWriterGuarantee:false}};
+}
+function study1OwnerE1Profile(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();study1OwnerE1ProfileInput_(input,false);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_PROFILE_BUSY');
+ try{
+  const x=study1OwnerE1WorkspaceRead_(lock);
+  if(x.revision!==input.revision)throw Error('E1_PROFILE_STALE_LIST');
+  return study1OwnerE1ProfileSource_(x,input.applicantId,lock).view;
+ }finally{lock.releaseLock();}
+}
+function study1OwnerE1ProfilePdf(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();study1OwnerE1ProfileInput_(input,true);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_PROFILE_BUSY');
+ try{
+  const x=study1OwnerE1WorkspaceRead_(lock);
+  if(x.revision!==input.revision)throw Error('E1_PROFILE_STALE_LIST');
+  const result=study1OwnerE1ProfileSource_(x,input.applicantId,lock);
+  if(!result.pdf||result.view.consent?.consentId!==input.consentId)throw Error('E1_PROFILE_PDF_NOT_VERIFIED');
+  return {...result.pdf,applicantId:input.applicantId,revision:x.revision};
+ }finally{lock.releaseLock();}
+}

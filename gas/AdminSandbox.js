@@ -1002,6 +1002,12 @@ function study1EConsentOwnerSignedPdfDownload(consentId){if(typeof study1V2Publi
     !['CONFIRMED','WITHDRAWN'].includes(x.state)||
     !x.signedPdf||!x.signature||!x.confirmation)
   throw Error('OWNER_SIGNED_PDF_NOT_READY');
+ return study1OwnerE1SignedPdfVerified_(x);
+}
+function study1OwnerE1SignedPdfVerified_(x){
+ if(!x||x.channel!=='FORMAL_E1'||x.experiment!=='E1'||x.researcherPresigned!==true||
+  !['CONFIRMED','WITHDRAWN'].includes(x.state)||!x.signedPdf||!x.signature||!x.confirmation)
+  throw Error('OWNER_SIGNED_PDF_NOT_READY');
  const signature=study1EConsentEvent_(x.signature,x,'SIGNATURE');
  const confirmed=study1EConsentEvent_(x.confirmation,x,'CONFIRMATION');
  if(!x.participantSignedPdf||
@@ -1024,6 +1030,7 @@ function study1EConsentOwnerSignedPdfDownload(consentId){if(typeof study1V2Publi
  return {experiment:'E1',recordId:x.id,version:x.documentVersion,
   researcherPreSigned:true,sourceSha256:x.documentSha,
   signedPdfSha256:x.signedPdf.sha,bytes:bytes.length,
+  signedAtUtc:signature.data.serverSignedAt,confirmedAtUtc:confirmed.data.recordedAtUtc||null,
   mime:'application/pdf',base64:Utilities.base64Encode(bytes)};
 }
 
