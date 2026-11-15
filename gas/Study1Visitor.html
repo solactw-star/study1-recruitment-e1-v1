@@ -1143,7 +1143,13 @@ function formalV08Read_(){
  if(!state.emailProof||state.busy)return;
  rpc('study1FormalStatus',state.emailProof,result=>{
   if(!result||result.experiment!=='E1'||!Array.isArray(result.reservations)){
-   status('原預約狀態尚未核實，請勿重複送出異動。');return;
+   if(state.pendingHoldRequestId)formalHoldRetryControl_(true);
+   status('原預約狀態尚未核實，結果仍UNKNOWN；請勿重複送出異動。');return;
+  }
+  if(result.reservations.some(r=>!r||typeof r!=='object'||Array.isArray(r)||
+     typeof r.reservationId!=='string'||typeof r.slotId!=='string'||typeof r.status!=='string')){
+   if(state.pendingHoldRequestId)formalHoldRetryControl_(true);
+   status('原Reservations回應格式不一致，結果仍UNKNOWN；請勿重送。');return;
   }
   const active=result.reservations.filter(r=>
    r.status==='WAITLISTED'||(r.status==='HELD'&&

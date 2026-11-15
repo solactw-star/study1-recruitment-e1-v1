@@ -75,7 +75,9 @@ function simulate(available,withConsent=false,researcherPresigned=false,holdMode
     return {held:true,reservationId:r.reservationId};
   },
   study1FormalStatus:()=>{
-   if(options.firstBookingReadFails&&++bookingReads===1)throw Error('STATUS_TEMPORARILY_UNAVAILABLE');
+   bookingReads++;
+   if(options.firstBookingReadFails&&bookingReads===1)throw Error('STATUS_TEMPORARILY_UNAVAILABLE');
+   if(options.firstBookingReadInvalid&&bookingReads===1)return {experiment:'E1',reservations:[null]};
    if(options.bookingReadFailureAfterSigned&&staffConfirmed)
     throw Error('SYNTHETIC_ORIGINAL_RESERVATIONS_NETWORK_UNKNOWN');
    return {experiment:'E1',reservations:reservations.map(x=>({...x}))};
@@ -490,4 +492,15 @@ test('E1 unresolved original HOLD never adopts a different active reservation or
  assert.equal(h.node('hold').disabled,true);
  assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
  assert.match(h.node('status').textContent,/UNKNOWN/);
+});
+
+test('E1 malformed first Reservations read remains UNKNOWN and can recover through the same original quote',()=>{
+ const h=simulate(undefined,false,false,'none','none',{firstBookingReadInvalid:true});
+ h.enter();h.click('hold');
+ assert.equal(h.node('formalHoldRetry').hidden,false);
+ assert.equal(h.node('hold').disabled,true);
+ assert.match(h.node('status').textContent,/UNKNOWN/);
+ assert.equal(h.click('formalHoldRetry'),true);
+ assert.equal(h.node('step-confirm').hidden,false);
+ assert.equal(h.calls.filter(x=>x.name==='study1FormalHoldSlot').length,1);
 });
