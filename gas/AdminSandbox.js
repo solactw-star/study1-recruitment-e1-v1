@@ -912,7 +912,7 @@ function study1EConsentEntry_(token,r){
  if(!item||item.expires<Date.now())throw Error('知情同意憑證無效或已過期');
  return item;
 }
-function study1EConsentChange_(id,fn){
+function study1EConsentChange_(id,fn,afterCommit){
  const lock=LockService.getScriptLock();
  if(!lock.tryLock(10000))throw Error('電子同意作業忙碌，請重試');
  try{
@@ -925,6 +925,7 @@ function study1EConsentChange_(id,fn){
    const next={...r,revision:r.revision+1,
     records:r.records.map((x,j)=>j===index?after:x)};
    study1EConsentWrite_(r,next);
+   if(typeof afterCommit==='function')afterCommit(before,after,lock);
    return after;
   }catch(error){
    // If the registry CAS was refused before the new file was referenced,
@@ -1156,7 +1157,7 @@ async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='
  const original=study1ConsentDocumentBytes_(doc);
  const stamped=await study1PdfComposeSigned_(original,pngBytes,layout,
   {experiment:'E1',sha256:prior.documentSha,version:prior.documentVersion},new Date());
- let savedPdf=null,contactEmail=null;
+ let savedPdf=null,contactEmail=null,txnPrepared=null;
  try{
   const changed=study1EConsentChange_(prior.id,(x,_,heldLock)=>{
    if(!study1EConsentEnabled_()||
@@ -1189,6 +1190,11 @@ async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='
       applicant[1].trim()!==input.name.trim())
     throw Error('FORMAL_CONSENT_NAME_NOT_SAME_APPLICATION');
    contactEmail=study1BindingEmail_(applicant[2]);
+   if(p.getProperty('STUDY1_E1_TXN_EVIDENCE_APPROVED')==='true'){
+    txnPrepared=study1FormalTxnPrepare_(x.binding.applicantId,'CONSENT_SIGN',
+     'SIGN_'+study1BindingHmac_(['E1_CONSENT_SIGN_TXN',x.id]).slice(0,40),
+     [study1FormalTxnSubject_('CONSENT',x.id,x,undefined)],heldLock);
+   }
    savedPdf=study1EConsentSignedPdfStore_(stamped,x);
    const signature=study1EConsentFile_('SIGNATURE',x,{
     name:input.name.trim(),signaturePngBase64:input.signature,
@@ -1205,6 +1211,9 @@ async function study1EConsentSignPdf(input){if(typeof study1V2PublicRpcDeny_==='
    return {...x,state:'CONFIRMED',signature,confirmation,
     signedPdf:savedPdf,participantSignedPdf:savedPdf,
     expires:study1FormalConsentCopyExpiry_()};
+  },(before,after,lock)=>{
+   if(txnPrepared)study1FormalTxnCommit_(after.binding.applicantId,txnPrepared,
+    [study1FormalTxnSubject_('CONSENT',after.id,before,after)],lock);
   });
   if(changed.state!=='CONFIRMED'||!changed.signedPdf||
      changed.signedPdf.sha!==stamped.signedSha256)

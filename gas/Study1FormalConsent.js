@@ -216,8 +216,15 @@ function study1FormalConsentBegin(input){if(typeof study1V2PublicRpcDeny_==='fun
    throw Error('FORMAL_CONSENT_TOKEN_COLLISION');
   study1FormalConsentGate_();
   if(ctx.lock.hasLock()!==true)throw Error('FORMAL_CONSENT_LOCK_LOST');
+  let prepared=null,evidence=null;
+  if(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_TXN_EVIDENCE_APPROVED')==='true'){
+   if(!stable)throw Error('E1_TXN_CONSENT_ISSUE_REQUEST_ID_REQUIRED');
+   evidence=[study1FormalTxnSubject_('CONSENT',entry.id,null,entry)];
+   prepared=study1FormalTxnPrepare_(binding.applicantId,'CONSENT_ISSUE',input.requestId,evidence,ctx.lock);
+  }
   study1EConsentWrite_(registry,{...registry,revision:registry.revision+1,
    records:registry.records.concat([entry])});
+  if(prepared)study1FormalTxnCommit_(binding.applicantId,prepared,evidence,ctx.lock);
   return {state:'ISSUED',experiment:'E1',reservationId:r[0],
    documentVersion:document.version,documentSha256:document.sha256,
    token,expiresAtUtc:new Date(expires).toISOString(),

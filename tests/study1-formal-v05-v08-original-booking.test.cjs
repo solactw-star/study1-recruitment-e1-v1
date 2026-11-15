@@ -38,6 +38,19 @@ function harness(){
   Verification:{headers:['challenge_id','applicant_id','purpose','otp_hmac',
    'expires_at_utc','attempts','used_at_utc','email','created_at_utc'],rows:[]}
  };
+ const evidenceFiles=[];
+ const cursor=items=>{let i=0;return {hasNext:()=>i<items.length,next:()=>items[i++]};};
+ const folder={
+  searchFiles:q=>{const prefix=q.match(/title contains '([^']+)'/)[1];return cursor(evidenceFiles.filter(f=>f.name.includes(prefix)));},
+  getFilesByName:name=>cursor(evidenceFiles.filter(f=>f.name===name)),
+  createFile:blob=>{
+   assert.equal(held,true);const f={name:blob.name,raw:blob.raw,access:'PRIVATE',
+    getName(){return this.name},getId(){return 'FAKE_FILE_'+this.name},getSharingAccess(){return this.access},
+    getMimeType(){return 'application/json'},getSize(){return Buffer.byteLength(this.raw)},
+    getParents(){return cursor([{getId:()=> 'ORIGINAL_CONSENT_FOLDER'}])},
+    getBlob(){return {getDataAsString:()=>this.raw}},setSharing(){this.access='PRIVATE'}};
+   evidenceFiles.push(f);return f;
+  }};
  let personRecords=new Map();
  function person(label){
   const appId='APP_TEST_'+label+'12345678',
@@ -129,9 +142,10 @@ function harness(){
   static now(){return clock.now}
  }
  const ctx=vm.createContext({
-  Date:FixedDate,JSON,Array,Object,Math,Number,String,Boolean,Set,Error,
+  Date:FixedDate,JSON,Array,Object,Math,Number,String,Boolean,Set,Map,Error,
+  DriveApp:{Access:{PRIVATE:'PRIVATE'},Permission:{VIEW:'VIEW'}},STUDY1_CONSENT_DOC_FOLDER_:'ORIGINAL_CONSENT_FOLDER',
   PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null})},
-  Utilities:{Charset:{UTF_8:'UTF-8'},
+  Utilities:{Charset:{UTF_8:'UTF-8'},newBlob:(raw,mime,name)=>({raw,mime,name}),
    getUuid:()=> '00000000-1111-4222-8333-'+String(++seq).padStart(12,'0'),
    computeHmacSha256Signature:(text,key)=>
     [...crypto.createHmac('sha256',key).update(text).digest()]},
@@ -141,6 +155,7 @@ function harness(){
  });
  vm.runInContext(scripts,ctx,{timeout:4500});
  ctx.study1EConsentRegistry_=()=>({revision:0,records:[]});
+ ctx.study1EConsentFolder_=()=>folder;
  ctx.study1ParticipantGate_=()=>{if(props.get('OPEN')==='false')
   throw Error('PARTICIPANT_INTAKE_NOT_READY');return true;};
  ctx.study1ParticipantRecPolicy_=()=>({screeningVersion:'E1_TEST_V1',documentSha256:'a'.repeat(64)});
@@ -181,7 +196,7 @@ function harness(){
   return ctx.study1FormalHoldSlot({emailProof:p,quote:q.quote});
  }
  return {ctx,tables,props,person,proof,holdSlot,S1,S2,S3,clock,
-  mutations,locks,get held(){return held},
+  mutations,locks,evidenceFiles,folder,get held(){return held},
   set intercept(x){intercept=x},
   set failAppend(x){failAppend=x}};
 }
@@ -751,4 +766,69 @@ test('OWNER lost-browser lookup cannot cross experiment or expose a signed beare
  assert.ok(!JSON.stringify(r).includes('PRIVATE_HASH'));
  h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
  assert.throws(()=>h.ctx.study1OwnerE1RecoveryAudit(person.applicantId),/PUBLIC_READ_ONLY/);
+});
+
+test('durable HOLD and V08 exact transaction evidence remains discoverable without original browser nonce',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a),held=h.holdSlot(p,h.S1);
+ const moved=h.ctx.study1FormalMove({emailProof:p,reservationId:held.reservationId,newSlotId:h.S2,requestId:'REQ_MOVE_DURABLE_12345678'});
+ h.ctx.study1FormalCancel({emailProof:p,reservationId:moved.reservationId,requestId:'REQ_CANCEL_DURABLE_12345678'});
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ const r=h.ctx.study1OwnerE1RecoveryAudit(a.applicantId);
+ assert.equal(r.transactionEvidence.events.length,3);
+ assert.deepEqual(Array.from(r.transactionEvidence.events,x=>x.action),['HOLD','MOVE','CANCEL']);
+ assert.ok(r.transactionEvidence.events.every(x=>x.status==='COMMITTED_EVIDENCE'));
+ assert.equal(h.evidenceFiles.length,6);
+ assert.doesNotMatch(h.evidenceFiles.map(x=>x.raw).join(''),/synthetic\.|emailProof|REQ_MOVE_DURABLE|tokenHash/);
+});
+test('durable partial MOVE is visible across sessions; new HOLD blocked and original state never auto-repaired',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a),held=h.holdSlot(p,h.S1);
+ h.failAppend=true;
+ assert.throws(()=>h.ctx.study1FormalMove({emailProof:p,reservationId:held.reservationId,newSlotId:h.S2,requestId:'REQ_MOVE_PARTIAL_12345678'}),/PARTIAL/);
+ const n=h.mutations.length,files=h.evidenceFiles.length;
+ assert.throws(()=>h.holdSlot(h.proof(a),h.S2,'REQ_FRESH_AFTER_PARTIAL_12345678'),/E1_TXN_UNRESOLVED/);
+ assert.equal(h.mutations.length,n);assert.equal(h.evidenceFiles.length,files);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ const r=h.ctx.study1OwnerE1RecoveryAudit(a.applicantId);
+ const move=r.transactionEvidence.events.find(x=>x.action==='MOVE');
+ assert.equal(move.status,'UNKNOWN');assert.equal(move.currentObservation,'PARTIAL_OR_CHANGED');
+ assert.equal(h.tables.Reservations.rows.length,1);assert.equal(h.tables.Reservations.rows[0][3],'CANCELLED');
+});
+test('durable waitlist JOIN and CLAIM preserve original key and use shared private evidence',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),z=h.person('B'),p=h.proof(a),q=h.proof(z),held=h.holdSlot(p,h.S1);
+ const joined=h.ctx.study1FormalWaitlistJoin({emailProof:q,slotId:h.S1,requestId:'REQ_DURABLE_JOIN_12345678'});
+ const key=h.tables.Reservations.rows[1][5];
+ h.ctx.study1FormalCancel({emailProof:p,reservationId:held.reservationId,requestId:'REQ_DURABLE_CANCEL_12345678'});
+ h.ctx.study1FormalWaitlistClaim({emailProof:q,reservationId:joined.reservationId,requestId:'REQ_DURABLE_CLAIM_12345678'});
+ assert.equal(h.tables.Reservations.rows[1][5],key);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ const r=h.ctx.study1OwnerE1RecoveryAudit(z.applicantId);
+ assert.deepEqual(Array.from(r.transactionEvidence.events,x=>x.action),['JOIN','CLAIM']);
+ assert.ok(r.transactionEvidence.events.every(x=>x.status==='COMMITTED_EVIDENCE'));
+ h.evidenceFiles.find(f=>f.name.includes('_PREPARED')).raw+=' '; // whitespace alone does not alter canonical HMAC; tamper actual content
+ const f=h.evidenceFiles.find(f=>f.raw.includes('"action":"CLAIM"'));f.raw=f.raw.replace('"CLAIM"','"CANCEL"');
+ assert.throws(()=>h.ctx.study1OwnerE1RecoveryAudit(z.applicantId),/E1_TXN_FILE_EVIDENCE_INVALID/);
+});
+test('candidate consent issue and sign evidence ties original registry digest, not a new consent source',()=>{
+ const h=harness();h.props.set('STUDY1_E1_TXN_EVIDENCE_APPROVED','true');
+ const a=h.person('A'),p=h.proof(a),held=h.holdSlot(p,h.S1);
+ const lock=h.locks.getScriptLock();assert.equal(lock.tryLock(),true);
+ const entry={id:'CONSENT_DURABLE_12345678',state:'ISSUED',experiment:'E1',channel:'FORMAL_E1',binding:{applicantId:a.applicantId,reservationId:held.reservationId}};
+ let registry={revision:0,records:[]};h.ctx.study1EConsentRegistry_=()=>registry;
+ const issues=[h.ctx.study1FormalTxnSubject_('CONSENT',entry.id,null,entry)];
+ const intent=h.ctx.study1FormalTxnPrepare_(a.applicantId,'CONSENT_ISSUE','REQ_DURABLE_ISSUE_12345678',issues,lock);
+ registry={revision:1,records:[entry]};
+ h.ctx.study1FormalTxnCommit_(a.applicantId,intent,issues,lock);
+ const sign=h.ctx.study1FormalTxnPrepare_(a.applicantId,'CONSENT_SIGN','REQ_DURABLE_SIGN_12345678',[h.ctx.study1FormalTxnSubject_('CONSENT',entry.id,entry,undefined)],lock);
+ const next={...entry,state:'CONFIRMED',signedPdf:{sha:'b'.repeat(64)}};
+ registry={revision:2,records:[next]};
+ h.ctx.study1FormalTxnCommit_(a.applicantId,sign,[h.ctx.study1FormalTxnSubject_('CONSENT',entry.id,entry,next)],lock);
+ lock.releaseLock();
+ const l=h.locks.getScriptLock();l.tryLock();
+ const result=h.ctx.study1FormalTxnObserve_(a.applicantId,l,h.ctx.study1FormalSnapshot_(),registry);
+ l.releaseLock();
+ assert.ok(result.events.every(x=>x.status==='COMMITTED_EVIDENCE'));
+ assert.equal(result.events.find(x=>x.action==='CONSENT_SIGN').currentObservation,'AFTER_OBSERVED');
 });

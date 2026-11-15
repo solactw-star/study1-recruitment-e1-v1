@@ -488,6 +488,10 @@ function bookingHoldOnceLocked_(request,adapters) {
           })[0][3])) {
       throw new Error('預約寫入後核對失敗，拒絕宣稱成功。');
     }
+    if(typeof adapters.confirmHoldReadback==='function'){
+      adapters.confirmHoldReadback(match,lock);
+      bookingHoldAssertLockStillHeld_(lock);
+    }
     return {held:true,reason:'CREATED'};
   } finally {
     lock.releaseLock();

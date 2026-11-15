@@ -239,6 +239,8 @@ function study1FormalSame_(a,b){
  });
 }
 function study1FormalWriteExisting_(ctx,before,after){
+ if(study1FormalTxnEnabled_()&&!study1FormalSame_(study1FormalSnapshot_(),ctx.snapshot))
+  throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
  const tab=book.getSheetByName('Reservations');
  const ix=ctx.snapshot.reservations.rows.findIndex(r=>r[0]===before[0]);
@@ -256,6 +258,15 @@ function study1FormalWriteExisting_(ctx,before,after){
  return true;
 }
 function study1FormalAppend_(ctx,newRow){
+ if(study1FormalTxnEnabled_()){
+  const current=study1FormalSnapshot_();
+  bookingHoldAssertSlotsStable_(ctx.snapshot.slots.rows,current.slots.rows);
+  const old=ctx.snapshot.reservations.rows;
+  if(current.reservations.rows.length!==old.length)throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
+  const expected=ctx.txnMoveAfter||null;
+  if(current.reservations.rows.some((r,i)=>!study1FormalSame_(r,expected&&old[i][0]===expected[0]?expected:old[i])))
+   throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
+ }
  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));
  const tab=book.getSheetByName('Reservations');
  if(!tab||tab.getLastColumn()!==BOOKING_RESERVATION_HEADERS_.length||
@@ -451,8 +462,11 @@ function study1FormalWaitlistJoin(input){if(typeof study1V2PublicRpcDeny_==='fun
    throw Error('V08_RESERVATION_ID_COLLISION');
   const row=[reservationId,ctx.identity.applicantId,slot[0],'WAITLISTED',
    '',key,ctx.nowUtc,'','',ctx.nowUtc];
+  const evidence=study1FormalTxnEnabled_()?[study1FormalTxnSubject_('RESERVATION',reservationId,null,row)]:null;
+  const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'JOIN',input.requestId,evidence,ctx.lock);
   study1FormalAppend_(ctx,row);
   study1FormalAfterMutation_(ctx.snapshot,[[reservationId,row]]);
+  study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
   return {joined:true,status:'WAITLISTED',reservationId,
    position:queue.length+1,reason:'CREATED'};
  });
@@ -484,8 +498,11 @@ function study1FormalWaitlistClaim(input){if(typeof study1V2PublicRpcDeny_==='fu
   if(until<=now+60000)return {held:false,reason:'TOO_CLOSE_TO_START'};
   const after=r.slice();after[3]='HELD';
   after[4]=new Date(until).toISOString();after[9]=ctx.nowUtc;
+  const evidence=study1FormalTxnEnabled_()?[study1FormalTxnSubject_('RESERVATION',r[0],r,after)]:null;
+  const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'CLAIM',input.requestId,evidence,ctx.lock);
   study1FormalWriteExisting_(ctx,r,after);
   study1FormalAfterMutation_(ctx.snapshot,[[r[0],after]]);
+  study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
   return {held:true,reason:'CLAIMED',reservationId:r[0],
    slotId:r[2],holdUntilUtc:after[4]};
  });
@@ -506,8 +523,11 @@ function study1FormalCancel(input){if(typeof study1V2PublicRpcDeny_==='function'
   // Confirmed attendance and study participation are deliberately excluded.
   const after=r.slice();after[3]='CANCELLED';after[8]=ctx.nowUtc;
   after[9]=ctx.nowUtc;
+  const evidence=study1FormalTxnEnabled_()?[study1FormalTxnSubject_('RESERVATION',r[0],r,after)]:null;
+  const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'CANCEL',input.requestId,evidence,ctx.lock);
   study1FormalWriteExisting_(ctx,r,after);
   study1FormalAfterMutation_(ctx.snapshot,[[r[0],after]]);
+  study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
   return {cancelled:true,reason:'CANCELLED',reservationId:r[0],
    status:'CANCELLED'};
  });
@@ -556,10 +576,15 @@ function study1FormalMove(input){if(typeof study1V2PublicRpcDeny_==='function')s
    throw Error('V08_RESERVATION_ID_COLLISION');
   // Two Sheet mutations are not ACID. If append fails after cancellation,
   // report PARTIAL/UNKNOWN and require manual reconciliation, never re-run.
+  const evidence=study1FormalTxnEnabled_()?[study1FormalTxnSubject_('RESERVATION',previous[0],previous,oldCancelled),
+   study1FormalTxnSubject_('RESERVATION',newId,null,newRow)]:null;
+  const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'MOVE',input.requestId,evidence,ctx.lock);
   study1FormalWriteExisting_(ctx,previous,oldCancelled);
+  ctx.txnMoveAfter=oldCancelled;
   try{study1FormalAppend_(ctx,newRow);}
   catch(_){throw Error('V08_MUTATION_PARTIAL_REQUIRES_REVIEW');}
   study1FormalAfterMutation_(ctx.snapshot,[[previous[0],oldCancelled],[newId,newRow]]);
+  study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
   return {moved:true,reason:'MOVED',
    reservationId:newId,slotId:target[0],holdUntilUtc:newRow[4]};
  });
@@ -704,8 +729,12 @@ function study1FormalFinalizeSignedE1Booking_(consentId,capabilityToken,ownerAct
   }
   const changed=original.slice();
   changed[3]='CONFIRMED';changed[7]=nowUtc;changed[9]=nowUtc;
+  const evidence=study1FormalTxnEnabled_()?[study1FormalTxnSubject_('RESERVATION',original[0],original,changed)]:null;
+  const prepared=study1FormalTxnPrepare_(bound.applicantId,'BOOKING_CONFIRM',
+   'CONFIRM_'+study1BindingHmac_(['E1_BOOKING_CONFIRM_TXN',entry.id]).slice(0,40),evidence,lock);
   study1FormalWriteExisting_(ctx,original,changed);
   study1FormalAfterMutation_(snapshot,[[original[0],changed]]);
+  study1FormalTxnCommit_(bound.applicantId,prepared,evidence,lock);
   return {bookingConfirmed:true,reason:'CONFIRMED_AFTER_DUAL_PDF',
    reservationId:original[0],bookingStatus:'CONFIRMED',readOnlyReplay:false};
  }finally{lock.releaseLock();}
@@ -935,5 +964,157 @@ function study1FormalRecoveryObservationLocked_(applicantId,lock){
     status:study1FormalEffectiveStatus_(r,asOfUtc),holdUntilUtc:r[4],
     createdAtUtc:r[6],cancelledAtUtc:r[8],updatedAtUtc:r[9]})),
    consents:consent.map(x=>({consentId:x.id,reservationId:x.binding.reservationId,state:x.state})),
+   transactionEvidence:study1FormalTxnObserve_(applicantId,lock,a.s,a.c),
    disposition:'OWNER_REVIEW_REQUIRED'};
+}
+
+/** Candidate durable transaction evidence: private original consent evidence
+ * folder, never an alternative booking/consent source. No file write until
+ * independently approved; retain original ten-column Reservations and registry.
+ * Drive is not WORM: HMAC detects modified bytes, not deletion/rollback.
+ */
+function study1FormalTxnEnabled_(){
+ return PropertiesService.getScriptProperties().getProperty('STUDY1_E1_TXN_EVIDENCE_APPROVED')==='true';
+}
+function study1FormalTxnLock_(lock){
+ if(!lock||lock.hasLock()!==true)throw Error('E1_TXN_LOCK_REQUIRED');
+}
+function study1FormalTxnDigest_(value){
+ return study1BindingHmac_(['E1_TRANSACTION_SUBJECT_V1',JSON.stringify(value)]);
+}
+function study1FormalTxnPrefix_(applicantId){
+ study1BindingId_(applicantId);
+ return 'Study1_E1_Txn_'+study1BindingHmac_(['E1_TXN_APP_V1',applicantId]).slice(0,40)+'_';
+}
+function study1FormalTxnName_(prefix,event){
+ return prefix+event.key+'_'+event.stage+'.json';
+}
+function study1FormalTxnMac_(event){
+ const data={...event};delete data.mac;
+ return study1BindingHmac_(['E1_TXN_EVIDENCE_V1',JSON.stringify(data)]);
+}
+function study1FormalTxnReadFile_(file,prefix){
+ if(!file||file.getSharingAccess()!==DriveApp.Access.PRIVATE||
+    file.getMimeType()!=='application/json'||file.getSize()<100||file.getSize()>20000)
+  throw Error('E1_TXN_FILE_PRIVATE_OR_SIZE_INVALID');
+ const parents=file.getParents();let inside=false;
+ while(parents.hasNext())if(parents.next().getId()===STUDY1_CONSENT_DOC_FOLDER_)inside=true;
+ if(!inside)throw Error('E1_TXN_FILE_PARENT_INVALID');
+ const raw=file.getBlob().getDataAsString();let e;
+ try{e=JSON.parse(raw);}catch(_){throw Error('E1_TXN_FILE_JSON_INVALID');}
+ const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+ if(!e||Array.isArray(e)||e.schema!==1||!hex(e.key)||!hex(e.mac)||
+    e.mac!==study1FormalTxnMac_(e)||e.prefix!==prefix||
+    !['HOLD','MOVE','CANCEL','JOIN','CLAIM','CONSENT_ISSUE','CONSENT_SIGN','BOOKING_CONFIRM'].includes(e.action)||
+    !['PREPARED','COMMITTED'].includes(e.stage)||file.getName()!==study1FormalTxnName_(prefix,e)||
+    Object.keys(e).sort().join(',')!=='action,atUtc,key,mac,prepareMac,prefix,schema,stage,subjects'||
+    !Array.isArray(e.subjects)||e.subjects.length<1||e.subjects.length>2||
+    new Set(e.subjects.map(x=>x.kind+':'+x.id)).size!==e.subjects.length||
+    e.subjects.some(x=>!x||Object.keys(x).sort().join(',')!=='after,before,id,kind'||
+     !['RESERVATION','CONSENT'].includes(x.kind)||typeof x.id!=='string'||
+     !/^[A-Za-z0-9_-]{8,80}$/.test(x.id)||!hex(x.before)||(x.after!==null&&!hex(x.after)))||
+    (e.stage==='PREPARED'?e.prepareMac!==null:!hex(e.prepareMac)||e.subjects.some(x=>x.after===null)))
+  throw Error('E1_TXN_FILE_EVIDENCE_INVALID');
+ study1BindingUtc_(e.atUtc);
+ return e;
+}
+function study1FormalTxnScan_(applicantId,lock){
+ study1FormalTxnLock_(lock);
+ const prefix=study1FormalTxnPrefix_(applicantId),folder=study1EConsentFolder_();
+ const iterator=folder.searchFiles("title contains '"+prefix+"' and trashed = false");
+ const map=new Map();let count=0;
+ while(iterator.hasNext()){
+  if(++count>400)throw Error('E1_TXN_EVIDENCE_LIMIT_REVIEW_REQUIRED');
+  const f=iterator.next();
+  if(!f.getName().startsWith(prefix))throw Error('E1_TXN_SEARCH_MISMATCH');
+  const e=study1FormalTxnReadFile_(f,prefix);
+  const pair=map.get(e.key)||{};
+  if(pair[e.stage])throw Error('E1_TXN_DUPLICATE_EVIDENCE');
+  pair[e.stage]=e;map.set(e.key,pair);
+ }
+ for(const pair of map.values()){
+  const p=pair.PREPARED,c=pair.COMMITTED;
+  if(!p||c&&(c.prepareMac!==p.mac||c.action!==p.action||c.atUtc<p.atUtc||
+     c.subjects.length!==p.subjects.length||
+     c.subjects.some((x,i)=>x.id!==p.subjects[i].id||x.kind!==p.subjects[i].kind||
+      x.before!==p.subjects[i].before||(p.subjects[i].after!==null&&x.after!==p.subjects[i].after))))
+   throw Error('E1_TXN_CHAIN_INVALID');
+ }
+ study1FormalTxnLock_(lock);return {prefix,folder,map};
+}
+function study1FormalTxnStore_(folder,event,lock){
+ study1FormalTxnLock_(lock);
+ if(!study1FormalTxnEnabled_())throw Error('E1_TXN_EVIDENCE_NOT_APPROVED');
+ const name=study1FormalTxnName_(event.prefix,event);
+ if(folder.getFilesByName(name).hasNext())throw Error('E1_TXN_EVIDENCE_ALREADY_EXISTS');
+ event.mac=study1FormalTxnMac_(event);
+ const raw=JSON.stringify(event);
+ const f=folder.createFile(Utilities.newBlob(raw,'application/json',name));
+ // Never trash an uncertain write. A later read must adjudicate it.
+ f.setSharing(DriveApp.Access.PRIVATE,DriveApp.Permission.VIEW);
+ if(JSON.stringify(study1FormalTxnReadFile_(f,event.prefix))!==raw)
+  throw Error('E1_TXN_EVIDENCE_WRITEBACK_UNKNOWN');
+ const it=folder.getFilesByName(name);
+ if(!it.hasNext()||it.next().getId()!==f.getId()||it.hasNext())
+  throw Error('E1_TXN_EVIDENCE_NOT_UNIQUE');
+ study1FormalTxnLock_(lock);
+ return event;
+}
+function study1FormalTxnSubject_(kind,id,before,after){
+ return {kind,id,before:study1FormalTxnDigest_(before),
+  after:after===undefined?null:study1FormalTxnDigest_(after)};
+}
+function study1FormalTxnPrepare_(applicantId,action,requestId,subjects,lock){
+ if(!study1FormalTxnEnabled_())return null;
+ study1FormalTxnLock_(lock);study1FormalKey_(requestId);
+ const scan=study1FormalTxnScan_(applicantId,lock);
+ const key=study1BindingHmac_(['E1_TXN_REQUEST_V1',applicantId,requestId]);
+ if(scan.map.has(key)||[...scan.map.values()].some(p=>!p.COMMITTED))
+  throw Error('E1_TXN_UNRESOLVED_OR_REPLAY_REQUIRES_OWNER');
+ const event={schema:1,prefix:scan.prefix,key,action,stage:'PREPARED',
+  atUtc:new Date().toISOString(),prepareMac:null,subjects};
+ return study1FormalTxnStore_(scan.folder,event,lock);
+}
+function study1FormalTxnCurrentSubjects_(subjects,applicantId,snapshot,registry){
+ return subjects.map(x=>{
+  const rows=x.kind==='RESERVATION'?snapshot.reservations.rows:registry.records;
+  const matches=rows.filter(r=>x.kind==='RESERVATION'?r[0]===x.id:r.id===x.id);
+  if(matches.length>1||matches.some(r=>x.kind==='RESERVATION'?r[1]!==applicantId:
+    !r.binding||r.binding.applicantId!==applicantId||r.channel!=='FORMAL_E1'||r.experiment!=='E1'))
+   throw Error('E1_TXN_SUBJECT_BINDING_INVALID');
+  return study1FormalTxnDigest_(matches.length?matches[0]:null);
+ });
+}
+function study1FormalTxnCommit_(applicantId,prepared,subjects,lock){
+ if(!prepared)return;
+ study1FormalTxnLock_(lock);
+ const scan=study1FormalTxnScan_(applicantId,lock),pair=scan.map.get(prepared.key);
+ if(!pair||pair.COMMITTED||JSON.stringify(pair.PREPARED)!==JSON.stringify(prepared)||
+    prepared.subjects.length!==subjects.length||
+    subjects.some((x,i)=>x.kind!==prepared.subjects[i].kind||x.id!==prepared.subjects[i].id||
+     x.before!==prepared.subjects[i].before||x.after===null||
+     (prepared.subjects[i].after!==null&&x.after!==prepared.subjects[i].after)))
+  throw Error('E1_TXN_PREPARED_EVIDENCE_CHANGED');
+ const snapshot=study1FormalSnapshot_(),registry=study1EConsentRegistry_();
+ study1FormalValidateSnapshot_(snapshot,new Date().toISOString());
+ const current=study1FormalTxnCurrentSubjects_(subjects,applicantId,snapshot,registry);
+ if(current.some((x,i)=>x!==subjects[i].after))
+  throw Error('E1_TXN_ORIGINAL_READBACK_UNKNOWN');
+ study1FormalTxnStore_(scan.folder,{schema:1,prefix:scan.prefix,key:prepared.key,
+  action:prepared.action,stage:'COMMITTED',atUtc:new Date().toISOString(),
+  prepareMac:prepared.mac,subjects},lock);
+}
+function study1FormalTxnObserve_(applicantId,lock,snapshot,registry){
+ if(!study1FormalTxnEnabled_())return {mode:'NOT_APPROVED',events:[]};
+ const scan=study1FormalTxnScan_(applicantId,lock),events=[];
+ for(const pair of scan.map.values()){
+  const p=pair.PREPARED,c=pair.COMMITTED;
+  const current=study1FormalTxnCurrentSubjects_(c?c.subjects:p.subjects,applicantId,snapshot,registry);
+  const observation=current.every((x,i)=>x===p.subjects[i].before)?'BEFORE_OBSERVED':
+    current.every((x,i)=>x===(c?c.subjects[i].after:p.subjects[i].after))?'AFTER_OBSERVED':'PARTIAL_OR_CHANGED';
+  events.push({eventKey:p.key.slice(0,24),action:p.action,preparedAtUtc:p.atUtc,
+   committedAtUtc:c?c.atUtc:null,status:c?'COMMITTED_EVIDENCE':'UNKNOWN',
+   currentObservation:observation,subjects:p.subjects.map(x=>({kind:x.kind,id:x.id}))});
+ }
+ return {mode:'APPROVED_EVIDENCE_ONLY',events};
 }

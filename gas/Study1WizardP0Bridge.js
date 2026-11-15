@@ -225,7 +225,7 @@ function study1WizardHoldBound_(untrusted,consentFence){
  ]);
  // No booking Sheet open until the same locked applicant/OTP proof exists.
  let operations=null,slots=null,reservations=null;
- let last=null,proof=null,slotSha=null,bookingLock=null;
+ let last=null,proof=null,slotSha=null,bookingLock=null,txnPrepared=null,txnSubjects=null;
  const recheck=()=>{
   study1WizardP0Gate_();study1WizardDocument_(r);
   const att=study1WizardAuthorityCheck_(r,study1WizardApplicantAuthority_(r,bookingLock));
@@ -289,10 +289,22 @@ function study1WizardHoldBound_(untrusted,consentFence){
     throw Error('預約ID碰撞，禁止覆寫');
    if(reservations.getLastRow()!==nowRes.rows.length+1)
     throw Error('預約表資料列在寫入前改變');
-   reservations.appendRow([reservationId,r.applicantId,r.slotId,'HELD',
-     params.holdUntilUtc,issuedKey,params.nowUtc,'','',params.nowUtc]);
+   const nextRow=[reservationId,r.applicantId,r.slotId,'HELD',
+     params.holdUntilUtc,issuedKey,params.nowUtc,'','',params.nowUtc];
+   if(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_TXN_EVIDENCE_APPROVED')==='true'){
+    txnSubjects=[study1FormalTxnSubject_('RESERVATION',reservationId,null,nextRow)];
+    txnPrepared=study1FormalTxnPrepare_(r.applicantId,'HOLD',r.requestId,txnSubjects,bookingLock);
+    // Evidence staging must not permit an out-of-band writer to slip in.
+    if(JSON.stringify(study1WizardReadBook_(slots,BOOKING_SLOT_HEADERS_))!==JSON.stringify(last.slots)||
+       JSON.stringify(study1WizardReadBook_(reservations,BOOKING_RESERVATION_HEADERS_))!==JSON.stringify(last.reservations))
+     throw Error('E1_TXN_PREPARED_SOURCE_CHANGED');
+   }
+   reservations.appendRow(nextRow);
    SpreadsheetApp.flush();
    return true; // BookingHoldOnceLocked_ performs full independent readback
+  },
+  confirmHoldReadback:(_row,lock)=>{
+   if(txnPrepared)study1FormalTxnCommit_(r.applicantId,txnPrepared,txnSubjects,lock);
   }
  };
  const result=bookingHoldOnceLocked_({
