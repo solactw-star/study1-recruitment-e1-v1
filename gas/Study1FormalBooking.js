@@ -1242,39 +1242,217 @@ function study1OwnerE1Workspace(input){if(typeof study1V2PublicRpcDeny_==='funct
    actionAuthority:'READ_AND_PREVIEW_ONLY'};
  }finally{lock.releaseLock();}
 }
-function study1OwnerE1SlotChangePreview(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
- study1AdminOwnerRequired_();
- study1OwnerE1WorkspaceGate_();
+/** Same draft validation for preview and actual approved save. */
+function study1OwnerE1SlotDraftInput_(input){
  if(!input||Object.keys(input).sort().join(',')!=='action,capacity,endAtUtc,locationCode,revision,slotId,startAtUtc'||
-    !['CREATE','UPDATE','CLOSE'].includes(input.action)||!/^[a-f0-9]{64}$/.test(input.revision||'')||
+    !['CREATE','UPDATE','CLOSE','OPEN'].includes(input.action)||!/^[a-f0-9]{64}$/.test(input.revision||'')||
     !Number.isSafeInteger(input.capacity)||input.capacity<1||
     typeof input.locationCode!=='string'||input.locationCode.length<1||input.locationCode.length>80||
-    /^[=+\-@]/.test(input.locationCode)||/[<>\x00-\x1f]/.test(input.locationCode))
+    input.locationCode!==input.locationCode.trim()||/^[=+\-@]/.test(input.locationCode)||/[<>\x00-\x1f]/.test(input.locationCode))
   throw Error('E1_SLOT_DRAFT_INVALID');
  study1BindingId_(input.slotId);
  const start=study1BindingUtc_(input.startAtUtc),end=study1BindingUtc_(input.endAtUtc);
  if(end<=start)throw Error('E1_SLOT_DRAFT_TIME_INVALID');
+ return {action:input.action,revision:input.revision,slotId:input.slotId,
+  startAtUtc:input.startAtUtc,endAtUtc:input.endAtUtc,capacity:input.capacity,locationCode:input.locationCode};
+}
+function study1OwnerE1SlotDraftProject_(input,x){
+ if(x.revision!==input.revision)throw Error('E1_SLOT_DRAFT_SOURCE_CHANGED');
+ const existing=x.calendar.find(r=>r.slotId===input.slotId);
+ const original=x.first.booking.slots.rows.find(r=>r[0]===input.slotId);
+ if(input.action==='CREATE'?(original||study1BindingUtc_(input.startAtUtc)<=Date.now()):!existing)
+  throw Error('E1_SLOT_DRAFT_SCOPE_INVALID');
+ if(existing&&(!['OPEN','CLOSED'].includes(existing.status)||input.capacity<existing.held+existing.confirmed))
+  throw Error('E1_SLOT_DRAFT_CAPACITY_OR_STATE_INVALID');
+ if(existing&&existing.historicalCount>0&&(input.startAtUtc!==existing.startAtUtc||
+   input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
+  throw Error('E1_SLOT_DRAFT_HISTORY_CONFLICT');
+ if(['CLOSE','OPEN'].includes(input.action)&&(input.capacity!==existing.capacity||
+   input.startAtUtc!==existing.startAtUtc||input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
+  throw Error('E1_SLOT_DRAFT_CLOSE_ONLY');
+ if(input.action==='OPEN'&&(existing.status!=='CLOSED'||study1BindingUtc_(input.startAtUtc)<=Date.now()))
+  throw Error('E1_SLOT_DRAFT_OPEN_INVALID');
+ const after={slotId:input.slotId,startAtUtc:input.startAtUtc,endAtUtc:input.endAtUtc,
+  locationCode:input.locationCode,capacity:input.capacity,status:input.action==='OPEN'?'OPEN':
+   input.action==='CLOSE'?'CLOSED':existing?existing.status:'CLOSED'};
+ const proposal=study1BindingHmac_(['E1_SLOT_CHANGE_PROPOSAL_V1',JSON.stringify(input),JSON.stringify(after)]);
+ return {mode:'E1_SLOT_CHANGE_PREVIEW',revision:x.revision,action:input.action,
+  before:existing||null,after,preservesReservations:true,requiresPiApproval:true,
+  actionAuthority:'NONE',written:false,proposal};
+}
+function study1OwnerE1SlotApproval_(proposal){
+ // Independently provisioned by authorized administrator against actual PI
+ // approval. This RPC never sets approval, accepts an attestation checkbox as
+ // PI authority, or exposes its HMAC key. The hash pins the exact draft and
+ // source revision, not an unbounded slot permission.
+ const p=PropertiesService.getScriptProperties();
+ if(p.getProperty('STUDY1_E1_SLOT_MANAGEMENT_APPROVED')!=='true'||
+    p.getProperty('OPEN')!=='false'||p.getProperty('CONSENT_READY')!=='false'||
+    p.getProperty('FORMAL_READY')==='true'||p.getProperty('LIVE_INTAKE_ENABLED')==='true')
+  return null;
+ const raw=p.getProperty('STUDY1_E1_SLOT_CHANGE_APPROVAL_V1');
+ if(typeof raw!=='string'||raw.length>2000)return null;
+ let a;try{a=JSON.parse(raw);}catch(_){return null;}
+ if(!a||Object.keys(a).sort().join(',')!=='approvalRef,expiresAtUtc,proposal,reason'||
+    a.proposal!==proposal.proposal||
+    typeof a.approvalRef!=='string'||!/^[A-Za-z0-9_.:/-]{8,120}$/.test(a.approvalRef)||
+    typeof a.reason!=='string'||!a.reason.trim()||a.reason.length>300||
+    /[<>\x00-\x1f]/.test(a.reason))return null;
+ let expires;try{expires=study1BindingUtc_(a.expiresAtUtc);}catch(_){return null;}
+ if(expires<=Date.now()||expires>Date.now()+24*3600000)return null;
+ return {raw,approvalRef:a.approvalRef,reason:a.reason,expiresAtUtc:a.expiresAtUtc};
+}
+function study1OwnerE1SlotCanSave_(project){
+ // A closed slot cannot service the existing HOLD/CLAIM paths. Do not silently
+ // cancel, move or strand outstanding holds or waitlist entries.
+ if(project.action==='CLOSE'&&project.before&&(project.before.held||project.before.waitlisted))
+  return false;
+ if(project.before&&project.before.status===project.after.status&&
+    project.before.capacity===project.after.capacity&&project.before.startAtUtc===project.after.startAtUtc&&
+    project.before.endAtUtc===project.after.endAtUtc&&project.before.locationCode===project.after.locationCode)
+  return false;
+ return true;
+}
+function study1OwnerE1SlotChangePreview(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();
+ const q=study1OwnerE1SlotDraftInput_(input);
  const lock=LockService.getScriptLock();
  if(!lock||lock.tryLock(10000)!==true)throw Error('E1_WORKSPACE_BUSY');
  try{
-  const x=study1OwnerE1WorkspaceRead_(lock);
-  if(x.revision!==input.revision)throw Error('E1_SLOT_DRAFT_SOURCE_CHANGED');
-  const existing=x.calendar.find(r=>r.slotId===input.slotId);
-  const original=x.first.booking.slots.rows.find(r=>r[0]===input.slotId);
-  if(input.action==='CREATE'?(original||start<=Date.now()):!existing)
-   throw Error('E1_SLOT_DRAFT_SCOPE_INVALID');
-  if(existing&&(!['OPEN','CLOSED'].includes(existing.status)||input.capacity<existing.held+existing.confirmed))
-   throw Error('E1_SLOT_DRAFT_CAPACITY_OR_STATE_INVALID');
-  if(existing&&existing.historicalCount>0&&(input.startAtUtc!==existing.startAtUtc||
-    input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
-   throw Error('E1_SLOT_DRAFT_HISTORY_CONFLICT');
-  if(input.action==='CLOSE'&&(input.capacity!==existing.capacity||input.startAtUtc!==existing.startAtUtc||
-    input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
-   throw Error('E1_SLOT_DRAFT_CLOSE_ONLY');
-  return {mode:'E1_SLOT_CHANGE_PREVIEW',revision:x.revision,action:input.action,
-   before:existing||null,after:{slotId:input.slotId,startAtUtc:input.startAtUtc,endAtUtc:input.endAtUtc,
-    locationCode:input.locationCode,capacity:input.capacity,status:input.action==='CLOSE'?'CLOSED':existing?existing.status:'CLOSED'},
-   preservesReservations:true,requiresPiApproval:true,actionAuthority:'NONE',written:false};
+  const project=study1OwnerE1SlotDraftProject_(q,study1OwnerE1WorkspaceRead_(lock));
+  const approval=study1OwnerE1SlotApproval_(project);
+  return {...project,canCommit:!!approval&&study1OwnerE1SlotCanSave_(project),
+   approvalRef:approval?approval.approvalRef:null,approvalReason:approval?approval.reason:null};
+ }finally{lock.releaseLock();}
+}
+var STUDY1_E1_SLOT_AUDIT_HEADERS_=Object.freeze(['event_id','occurred_at_utc','actor_type','actor_id','action','target_type','target_id','result','request_id']);
+function study1OwnerE1SlotAuditRead_(book){
+ return bookingReadOnlyTab_(book,'AuditLogs',STUDY1_E1_SLOT_AUDIT_HEADERS_);
+}
+function study1OwnerE1SlotAuditPending_(audit){
+ const events=new Map(),ids=new Set();
+ for(const row of audit.rows){
+  if(typeof row[0]!=='string'||!row[0]||ids.has(row[0]))throw Error('E1_SLOT_AUDIT_INVALID');
+  ids.add(row[0]);
+  if(!['E1_SLOT_CHANGE_PREPARED','E1_SLOT_CHANGE_COMMITTED'].includes(row[4]))continue;
+  const stage=row[4].endsWith('PREPARED')?'PREPARED':'COMMITTED';
+  if(row[5]!=='SLOT'||!/^[a-f0-9]{64}$/.test(row[8]||'')||
+     row[0]!=='AUD_'+study1BindingHmac_(['E1_SLOT_AUDIT_EVENT_V1',row[8],stage]).slice(0,40))
+   throw Error('E1_SLOT_AUDIT_INVALID');
+  const entry=events.get(row[8])||{};
+  if(entry[stage]||stage==='COMMITTED'&&!entry.PREPARED||stage==='COMMITTED'&&
+     (entry.PREPARED[6]!==row[6]||entry.PREPARED[3]!==row[3]))throw Error('E1_SLOT_AUDIT_INVALID');
+  entry[stage]=row;events.set(row[8],entry);
+ }
+ if([...events.values()].some(x=>!x.COMMITTED))
+  throw Error('E1_SLOT_AUDIT_UNRESOLVED_REVIEW_REQUIRED');
+ return events;
+}
+function study1OwnerE1SlotAuditAppend_(book,before,row){
+ const now=study1OwnerE1SlotAuditRead_(book);
+ if(!bookingReadOnlySameTab_(now,before))throw Error('E1_SLOT_AUDIT_CHANGED');
+ book.getSheetByName('AuditLogs').appendRow(row);
+ SpreadsheetApp.flush();
+ const expected={headers:before.headers,rows:before.rows.concat([row])};
+ const after=study1OwnerE1SlotAuditRead_(book);
+ if(!bookingReadOnlySameTab_(after,expected))throw Error('E1_SLOT_AUDIT_READBACK_FAILED');
+ return after;
+}
+/** Approved slot management: original Slots, existing signed registry and
+ * ORIGINAL AuditLogs only. Sheets/Properties are not a database transaction.
+ * Before any slot write append a traceable PREPARED audit record, then confirm
+ * original Slots + Reservations + registry, and append COMMITTED last.
+ * No automatic retry or rollback. External writers remain an operational
+ * limitation, and the intake must be closed during this initial MVP operation.
+ */
+function study1OwnerE1SlotChangeCommit(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();
+ if(!input||Object.keys(input).sort().join(',')!=='confirmed,proposal,request'||input.confirmed!==true||
+    !/^[a-f0-9]{64}$/.test(input.proposal||''))throw Error('E1_SLOT_COMMIT_INVALID');
+ const q=study1OwnerE1SlotDraftInput_(input.request);
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_WORKSPACE_BUSY');
+ let attempted=false;
+ try{
+  const before=study1OwnerE1WorkspaceRead_(lock);
+  const project=study1OwnerE1SlotDraftProject_(q,before);
+  const approval=study1OwnerE1SlotApproval_(project);
+  if(input.proposal!==project.proposal||!approval)throw Error('E1_SLOT_PI_APPROVAL_REQUIRED');
+  if(!study1OwnerE1SlotCanSave_(project))throw Error('E1_SLOT_CHANGE_NOT_SAFE_OR_NO_CHANGE');
+  const p=PropertiesService.getScriptProperties();
+  const book=SpreadsheetApp.openById(study1BindingSheetId_('slots'));
+  if(!book||book.getId()!==study1BindingSheetId_('slots'))throw Error('E1_SLOT_SOURCE_MISMATCH');
+  const audit=study1OwnerE1SlotAuditRead_(book),events=study1OwnerE1SlotAuditPending_(audit);
+  if(events.has(project.proposal))throw Error('E1_SLOT_CHANGE_ALREADY_RECORDED');
+  const original=before.first.booking.slots;
+  const at=original.rows.findIndex(r=>r[0]===q.slotId);
+  const old=at<0?null:original.rows[at];
+  const actor=String(Session.getActiveUser().getEmail()||'').trim().toLowerCase();
+  if(!actor||/^[=+\-@]/.test(actor))throw Error('E1_SLOT_OWNER_REQUIRED');
+  const now=new Date().toISOString();
+  const afterRow=[q.slotId,q.startAtUtc,q.endAtUtc,q.capacity,q.locationCode,project.after.status,old?old[6]:actor,now];
+  const rows=original.rows.map(r=>r.slice());
+  if(at<0)rows.push(afterRow);else rows[at]=afterRow;
+  const expected={slots:{headers:original.headers,rows},reservations:before.first.booking.reservations};
+  study1FormalValidateSnapshot_(expected,now);
+  const registry=JSON.parse(before.first.raw);
+  // Preserve every other original registry entry byte-for-value, including E2.
+  // Refuse to propagate preexisting unrelated stale or missing pins.
+  for(const e of registry){
+   const prior=original.rows.find(r=>r[0]===e.slotId);
+   if(!prior||e.slotRowSha256!==study1BindingHmac_(['STUDY1_E1_ORIGINAL_SLOT_ROW_V1',...prior]))
+    throw Error('E1_SLOT_REGISTRY_OTHER_PIN_STALE');
+  }
+  const newEntry={experiment:'E1',slotId:q.slotId,slotRowSha256:study1BindingHmac_(['STUDY1_E1_ORIGINAL_SLOT_ROW_V1',...afterRow])};
+  const index=registry.findIndex(e=>e.slotId===q.slotId);
+  if(at<0){if(index>=0)throw Error('E1_SLOT_REGISTRY_SOURCE_CONFLICT');registry.push(newEntry);}
+  else{if(index<0||registry[index].experiment!=='E1')throw Error('E1_SLOT_REGISTRY_SOURCE_CONFLICT');registry[index]=newEntry;}
+  const raw=JSON.stringify(registry);
+  // All fields are restricted ASCII; conservative cap below GAS property quota.
+  if(raw.length>8000||registry.length>10000)throw Error('E1_SLOT_REGISTRY_CAPACITY_REVIEW_REQUIRED');
+  const mac=study1BindingHmac_(['STUDY1_E1_SLOT_REGISTRY_V1',raw]);
+  const auditRow=stage=>['AUD_'+study1BindingHmac_(['E1_SLOT_AUDIT_EVENT_V1',project.proposal,stage]).slice(0,40),
+    new Date().toISOString(),'OWNER',actor,'E1_SLOT_CHANGE_'+stage,'SLOT',q.slotId,
+    JSON.stringify({status:stage,operation:q.action,approvalRef:approval.approvalRef,reason:approval.reason,
+      before:old,after:afterRow}),project.proposal];
+  // Check before first durable mutation. Recheck whole original sources after
+  // preparing, not just the selected row. A change leaves an unresolved audit.
+  if(study1OwnerE1WorkspaceRead_(lock).revision!==before.revision||
+     (study1OwnerE1SlotApproval_(project)||{}).raw!==approval.raw)
+   throw Error('E1_SLOT_COMMIT_SOURCE_CHANGED');
+  attempted=true;
+  const prepared=study1OwnerE1SlotAuditAppend_(book,audit,auditRow('PREPARED'));
+  if(study1OwnerE1WorkspaceRead_(lock).revision!==before.revision||
+     (study1OwnerE1SlotApproval_(project)||{}).raw!==approval.raw)
+   throw Error('E1_SLOT_COMMIT_SOURCE_CHANGED');
+  const tab=book.getSheetByName('Slots');
+  if(!bookingReadOnlySameTab_(bookingReadOnlyTab_(book,'Slots',BOOKING_SLOT_HEADERS_),original)||
+     !bookingReadOnlySameTab_(study1OwnerE1SlotAuditRead_(book),prepared)||lock.hasLock()!==true)
+   throw Error('E1_SLOT_COMMIT_SOURCE_CHANGED');
+  if(at<0)tab.appendRow(afterRow);else tab.getRange(at+2,1,1,8).setValues([afterRow]);
+  SpreadsheetApp.flush();
+  const saved=study1FormalSnapshot_();
+  const matches=s=>bookingReadOnlySameTab_(s.slots,expected.slots)&&
+    bookingReadOnlySameTab_(s.reservations,expected.reservations);
+  if(!matches(saved)||p.getProperty('STUDY1_E1_SLOT_REGISTRY_V1')!==before.first.raw||
+     p.getProperty('STUDY1_E1_SLOT_REGISTRY_HMAC')!==before.first.mac||
+     (study1OwnerE1SlotApproval_(project)||{}).raw!==approval.raw||lock.hasLock()!==true)
+   throw Error('E1_SLOT_COMMIT_READBACK_FAILED');
+  p.setProperties({STUDY1_E1_SLOT_REGISTRY_V1:raw,STUDY1_E1_SLOT_REGISTRY_HMAC:mac},false);
+  if(p.getProperty('STUDY1_E1_SLOT_REGISTRY_V1')!==raw||
+     p.getProperty('STUDY1_E1_SLOT_REGISTRY_HMAC')!==mac||
+     !matches(study1FormalSnapshot_())||lock.hasLock()!==true)
+   throw Error('E1_SLOT_COMMIT_READBACK_FAILED');
+  study1WizardSlotAuthority_({experiment:'E1',slotId:q.slotId},afterRow,lock);
+  study1OwnerE1SlotAuditAppend_(book,prepared,auditRow('COMMITTED'));
+  return {mode:'E1_SLOT_CHANGE_COMMITTED',proposal:project.proposal,action:q.action,
+   slotId:q.slotId,status:project.after.status,capacity:q.capacity,written:true,
+   reservationsPreserved:true,registryReadback:true,auditReadback:true};
+ }catch(e){
+  if(attempted)throw Error('E1_SLOT_CHANGE_UNKNOWN_REVIEW_REQUIRED');
+  throw e;
  }finally{lock.releaseLock();}
 }
 

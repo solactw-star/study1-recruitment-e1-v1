@@ -440,13 +440,16 @@ function privateOwnerManagementCandidate(files){
    s=patch(s,"  if(before.published[input.experiment]===input.id)return before;\n","");
    s=patch(s,"   if(!entry||before.current[input.experiment]!==input.id||","   if(!entry||entry.researcherPresigned!==true||before.current[input.experiment]!==input.id||");
    s=patch(s,"  const after={...before,revision:before.revision+1,\n   published:","  if(before.published[input.experiment]===input.id)return before;\n  const after={...before,revision:before.revision+1,\n   published:");
+  }else if(f.name==='Study1FormalBooking'){
+   const signature='function study1OwnerE1SlotChangeCommit(input){';
+   s=patch(s,signature+gate+'\n study1AdminOwnerRequired_();',signature+'\n study1AdminOwnerRequired_();');
   }else if(f.name==='AdminConsole'){
    const a=s.indexOf('<div hidden>'+start),b=s.indexOf(boundary);
    require_(a>=0&&b>a,'private read-only PDF UI anchor drift');
    s=patch(s,s.slice(a,b),original.slice(first,last));
    s=patch(s,'<title>Study 1｜OWNER 私人唯讀管理</title>','<title>Study 1｜OWNER 私人 E1 管理</title>');
    s=patch(s,'<h1>Study 1｜研究室 OWNER 私人唯讀管理</h1>','<h1>Study 1｜研究室 OWNER 私人 E1 管理</h1>');
-   s=patch(s,'<strong>私人唯讀驗收候選｜非正式營運</strong><p>僅已驗證研究室 OWNER 可核對既有來源；所有寫入、寄信、場次調整、簽署與真人收件 RPC 仍被拒絕。資料是否齊備及正式啟用須另行核對及授權。</p>','<strong>私人 E1 文件管理候選｜非正式營運</strong><p>僅研究室 OWNER 可在獨立授權後管理 E1 研究者預簽 PDF；不開放報名、預約異動、寄信、參與者簽署或其他寫入。正式資料操作仍需個別授權。</p>');
+   s=patch(s,'<strong>私人唯讀驗收候選｜非正式營運</strong><p>僅已驗證研究室 OWNER 可核對既有來源；所有寫入、寄信、場次調整、簽署與真人收件 RPC 仍被拒絕。資料是否齊備及正式啟用須另行核對及授權。</p>','<strong>私人 E1 文件管理候選｜非正式營運</strong><p>僅研究室 OWNER 可在獨立授權後管理 E1 研究者預簽 PDF 及已核定單筆場次；不開放報名、參與者預約異動、寄信或簽署。正式資料操作仍需個別授權，場次寫入僅限獨立核定且收件關閉。</p>');
    // Unknown write result never re-enables writes merely because a GET succeeds.
    s=patch(s,'try{unknown=false;render(x);}',"try{render(x);if(unknown)msg.textContent+=' 先前寫入結果未知；本頁仍鎖定寫入，須由 OWNER 獨立核對原紀錄後另行處置，不得重送。';}");
   }else if(f.name==='Website'){

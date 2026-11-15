@@ -13,7 +13,7 @@ function harness(){
  const t=Date.now(),secret=crypto.randomBytes(48).toString('hex');
  const S1='SLOT_E1_12345678',S2='SLOT_E1_87654321',
   S3='SLOT_E2_22222222';
- let held=false,failAppend=false,intercept=null,seq=0,mutations=[];
+ let held=false,failAppend=false,intercept=null,propertyHook=null,seq=0,mutations=[];
  const props=new Map([
   ['STUDY1_ECONSENT_BINDING_HMAC_KEY',secret],
   ['STUDY1_WIZARD_P0_SHEET_HOLD_VERIFIED','true'],
@@ -35,6 +35,7 @@ function harness(){
    'updated_at_utc','status'],rows:[]},
   Screenings:{headers:['screening_id','applicant_id','rules_version','eligibility_result',
    'screened_at_utc','verified_by'],rows:[]},
+  AuditLogs:{headers:['event_id','occurred_at_utc','actor_type','actor_id','action','target_type','target_id','result','request_id'],rows:[]},
   Notifications:{headers:['notification_id','applicant_id','reservation_id','kind','status','attempts','created_at_utc','sent_at_utc','last_error_code'],rows:[]},
   Verification:{headers:['challenge_id','applicant_id','purpose','otp_hmac',
    'expires_at_utc','attempts','used_at_utc','email','created_at_utc'],rows:[]}
@@ -78,7 +79,7 @@ function harness(){
   return id;
  }
  function book(id){
-  const allowed=id===P?['Applicants','Screenings','Verification']:['Slots','Reservations','Notifications'];
+  const allowed=id===P?['Applicants','Screenings','Verification']:['Slots','Reservations','Notifications','AuditLogs'];
   if(![P,O].includes(id))throw Error('UNKNOWN_SHEET');
   return {getId:()=>id,getSheetByName:name=>{
    if(!allowed.includes(name))return null;
@@ -145,7 +146,8 @@ function harness(){
  const ctx=vm.createContext({
   Date:FixedDate,JSON,Array,Object,Math,Number,String,Boolean,Set,Map,Error,
   DriveApp:{Access:{PRIVATE:'PRIVATE'},Permission:{VIEW:'VIEW'}},STUDY1_CONSENT_DOC_FOLDER_:'ORIGINAL_CONSENT_FOLDER',
-  PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null})},
+  PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k)||null,setProperties:values=>{if(!held)throw Error('UNLOCKED_PROPERTY');if(propertyHook)propertyHook(values);for(const [k,v] of Object.entries(values))props.set(k,v);mutations.push({method:'properties'});}})},
+  Session:{getActiveUser:()=>({getEmail:()=> 'owner@example.org'})},
   Utilities:{Charset:{UTF_8:'UTF-8'},newBlob:(raw,mime,name)=>({raw,mime,name}),
    getUuid:()=> '00000000-1111-4222-8333-'+String(++seq).padStart(12,'0'),
    computeHmacSha256Signature:(text,key)=>
@@ -200,6 +202,7 @@ function harness(){
   mutations,locks,evidenceFiles,folder,get held(){return held},
   set evidenceCreateHook(fn){evidenceCreateHook=fn;},
   set intercept(x){intercept=x},
+  set propertyHook(x){propertyHook=x},
   set failAppend(x){failAppend=x}};
 }
 test('V05 verified E1 registry returns only true E1 slots and exact seat counts',()=>{
@@ -982,4 +985,88 @@ test('P0-B browser recruitment editing preview and review export never publish a
  g('e1CopyTitle').value='<script>';g('e1CopyTitle').handlers.input();g('e1CopyExport').click();
  assert.equal(g('e1CopyDraft').value,'');assert.match(g('e1CopyStatus').textContent,/不接受 HTML/);
  assert.deepEqual(b.calls.map(x=>x.method),['study1OwnerE1RecruitmentDraft']);
+});
+
+function slotDraft(h,slotId=h.S1,action='UPDATE',overrides={}){
+ const w=h.ctx.study1OwnerE1Workspace(wsFilter),s=w.slots.find(x=>x.slotId===slotId)||w.slots[0];
+ return {action,revision:w.revision,slotId,startAtUtc:s.startAtUtc,endAtUtc:s.endAtUtc,capacity:s.capacity,locationCode:s.locationCode,...overrides};
+}
+function approveSlot(h,q){
+ const r=h.ctx.study1OwnerE1SlotChangePreview(q);
+ h.props.set('OPEN','false');h.props.set('CONSENT_READY','false');
+ h.props.set('STUDY1_E1_SLOT_MANAGEMENT_APPROVED','true');
+ h.props.set('STUDY1_E1_SLOT_CHANGE_APPROVAL_V1',JSON.stringify({proposal:r.proposal,
+  approvalRef:'PI_TEST_SLOT_001',reason:'合成核定資料',expiresAtUtc:ts(h.clock.now,3600000)}));
+ const approved=h.ctx.study1OwnerE1SlotChangePreview(q);
+ return {request:q,proposal:approved.proposal,confirmed:true};
+}
+test('P0-B authorized capacity update, create closed, open, close use original Slots and audit while preserving Reservations and E2 pins',()=>{
+ const h=wsHarness(),person=h.person('A');h.holdSlot(h.proof(person),h.S1);
+ const reservations=JSON.stringify(h.tables.Reservations),other=h.tables.Slots.rows[2].slice(),
+  e2pin=JSON.parse(h.props.get('STUDY1_E1_SLOT_REGISTRY_V1'))[2];
+ let q=slotDraft(h,h.S1,'UPDATE',{capacity:2}),request=approveSlot(h,q);
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview(q).canCommit,true);
+ assert.equal(h.ctx.study1OwnerE1SlotChangeCommit(request).written,true);
+ assert.equal(h.tables.Slots.rows[0][3],2);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(request),/SOURCE_CHANGED/);
+ const id='SLOT_NEW_98765432';q=slotDraft(h,id,'CREATE',{startAtUtc:ts(h.clock.now,86400000),endAtUtc:ts(h.clock.now,90000000),capacity:3});
+ assert.equal(h.ctx.study1OwnerE1SlotChangeCommit(approveSlot(h,q)).status,'CLOSED');
+ q=slotDraft(h,id,'OPEN');assert.equal(h.ctx.study1OwnerE1SlotChangeCommit(approveSlot(h,q)).status,'OPEN');
+ q=slotDraft(h,id,'CLOSE');assert.equal(h.ctx.study1OwnerE1SlotChangeCommit(approveSlot(h,q)).status,'CLOSED');
+ assert.equal(h.tables.AuditLogs.rows.length,8);
+ assert.deepEqual(h.tables.AuditLogs.rows.map(r=>r[4]),Array.from({length:4},()=>['E1_SLOT_CHANGE_PREPARED','E1_SLOT_CHANGE_COMMITTED']).flat());
+ const logging=JSON.parse(h.tables.AuditLogs.rows[1][7]);assert.equal(logging.before[3],1);assert.equal(logging.after[3],2);assert.equal(logging.reason,'合成核定資料');
+ assert.equal(JSON.stringify(h.tables.Reservations),reservations);assert.deepEqual(h.tables.Slots.rows[2],other);
+ assert.deepEqual(JSON.parse(h.props.get('STUDY1_E1_SLOT_REGISTRY_V1'))[2],e2pin);
+ assert.equal(h.ctx.study1OwnerE1Workspace(wsFilter).slots.find(s=>s.slotId===id).status,'CLOSED');
+});
+test('P0-B exact PI approval and closed intake are required; active holds cannot be stranded and stale/false confirmation cannot write',()=>{
+ const h=wsHarness(),a=h.person('A');h.holdSlot(h.proof(a),h.S1);
+ const q=slotDraft(h,h.S1,'UPDATE',{capacity:2}),no=h.ctx.study1OwnerE1SlotChangePreview(q);
+ const n=h.mutations.length;
+ assert.equal(no.canCommit,false);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit({request:q,proposal:no.proposal,confirmed:true}),/PI_APPROVAL_REQUIRED/);
+ const r=approveSlot(h,q);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit({...r,confirmed:false}),/COMMIT_INVALID/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit({...r,request:{...q,capacity:3}}),/PI_APPROVAL_REQUIRED/);
+ h.props.set('OPEN','true');assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(r),/PI_APPROVAL_REQUIRED/);h.props.set('OPEN','false');
+ const close=slotDraft(h,h.S1,'CLOSE'),cr=approveSlot(h,close);
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview(close).canCommit,false);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(cr),/NOT_SAFE/);
+ assert.equal(h.mutations.length,n);
+});
+test('P0-B partial index write remains UNKNOWN, audit PREPARED remains, no later blind retry or reservation mutation',()=>{
+ const h=wsHarness(),a=h.person('A');h.holdSlot(h.proof(a),h.S1);
+ const reservations=JSON.stringify(h.tables.Reservations),q=slotDraft(h,h.S1,'UPDATE',{capacity:2}),r=approveSlot(h,q);
+ h.propertyHook=()=>{throw Error('SYNTHETIC_PROPERTY_FAILURE');};
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(r),/UNKNOWN_REVIEW_REQUIRED/);
+ assert.equal(h.tables.Slots.rows[0][3],2);
+ assert.equal(h.tables.AuditLogs.rows.length,1);assert.equal(h.tables.AuditLogs.rows[0][4],'E1_SLOT_CHANGE_PREPARED');
+ assert.equal(JSON.stringify(h.tables.Reservations),reservations);
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/SLOT_REGISTRY_STALE/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(r),/SLOT_REGISTRY_STALE/);
+ assert.equal(h.tables.AuditLogs.rows.length,1);
+});
+test('P0-B after audit source drift prevents slot write and requires manual review even with fresh approval',()=>{
+ const h=wsHarness(),q=slotDraft(h,h.S1,'UPDATE',{capacity:2}),r=approveSlot(h,q);
+ const old=h.tables.Slots.rows[0].slice();
+ h.intercept=()=>h.tables.Applicants.rows.push(['APP_UNLINKED_12345678','未連結','','',ts(h.clock.now,-5000),ts(h.clock.now,-5000),'PENDING_EMAIL']);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(r),/UNKNOWN_REVIEW_REQUIRED/);
+ assert.deepEqual(h.tables.Slots.rows[0],old);
+ assert.equal(h.tables.AuditLogs.rows.length,1);
+ const fresh=slotDraft(h,h.S1,'UPDATE',{capacity:3});
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(approveSlot(h,fresh)),/AUDIT_UNRESOLVED_REVIEW_REQUIRED/);
+});
+test('P0-B browser commits approved exact slot draft once and reloads original capacity',()=>{
+ const h=wsHarness(),q=slotDraft(h,h.S1,'UPDATE',{capacity:2});
+ approveSlot(h,q);
+ const b=workspaceBrowser(h.ctx),g=b.get;
+ g('e1WsLoad').click();g('e1WsSlots').children[0].children[8].children[0].click();
+ g('e1WsDraftCap').value='2';g('e1WsPreview').click();
+ assert.equal(g('e1WsConfirm').disabled,false);assert.equal(g('e1WsCommit').disabled,true);
+ g('e1WsConfirm').checked=true;g('e1WsConfirm').handlers.change();
+ g('e1WsCommit').click();assert.match(g('e1WsCommitResult').textContent,/已儲存並回讀/);
+ assert.equal(h.tables.Slots.rows[0][3],2);
+ assert.equal(b.calls.filter(x=>x.method==='study1OwnerE1SlotChangeCommit').length,1);
+ g('e1WsCommit').click();assert.equal(h.tables.AuditLogs.rows.length,2);
 });

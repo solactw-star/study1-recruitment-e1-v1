@@ -179,7 +179,7 @@ test('private candidate OWNER route and six existing read RPCs refuse non-owner 
  assert.throws(()=>c.study1OwnerE1SlotAudit(),/OWNER_REACHED_READ_BOUNDARY/);
  assert.equal(readAttempts,1);
  for(const name of ['study1ConsentVersionUpload','study1ConsentVersionSelect','study1ConsentVersionPublication',
-  'study1OwnerE1SignedBookingRepair','study1EConsentOwnerWithdraw','adminSaveSandboxConfig',
+  'study1OwnerE1SlotChangeCommit','study1OwnerE1SignedBookingRepair','study1EConsentOwnerWithdraw','adminSaveSandboxConfig',
   'study1FormalHoldSlot','getPublicConsentDocument'])assert.throws(()=>c[name](),/STUDY1_V2_PUBLIC_READ_ONLY/,name);
  assert.equal(c.getPublicConfig().open,false);
  assert.equal(c.getPublicConfig().consentReady,false);
@@ -196,7 +196,7 @@ test('private E1 management derives from read-only candidate, keeps public and n
  assert.throws(()=>m.publicRpcSurface(candidate),/unguarded public RPC/);
  const accidental=candidate.map(f=>f.name==='appsscript'?{...f,source:f.source.replace('"MYSELF"','"ANYONE"')}:f);
  assert.throws(()=>m.closedManifest(accidental),/unguarded public RPC/);
- assert.deepEqual(candidate.filter(f=>f.source!==read.find(p=>p.name===f.name).source).map(f=>f.name).sort(),['AdminConsole','AdminSandbox','Website']);
+ assert.deepEqual(candidate.filter(f=>f.source!==read.find(p=>p.name===f.name).source).map(f=>f.name).sort(),['AdminConsole','AdminSandbox','Study1FormalBooking','Website']);
  const html=candidate.find(f=>f.name==='AdminConsole').source;
  assert.match(html,/私人 E1 文件管理候選｜非正式營運/);
  assert.doesNotMatch(html,/<div hidden><label for="e1PdfFile">/);
@@ -208,6 +208,7 @@ test('private E1 management derives from read-only candidate, keeps public and n
  for(const name of ['Website','AdminSandbox','Study1FormalBooking','Study1WizardP0Bridge','Study1ParticipantIntake','Study1FormalConsent'])
   vm.runInContext(candidate.find(f=>f.name===name).source,c);
  const names=['study1ConsentVersionUpload','study1ConsentVersionSelect','study1ConsentVersionPublication'];
+ assert.throws(()=>c.study1OwnerE1SlotChangeCommit({}),/管理身分無法驗證/);
  for(const a of ['', 'other@example.invalid']){
   active=a;
   for(const n of names)assert.throws(()=>c[n]({experiment:'E1',researcherPresigned:true}),/管理身分無法驗證/);

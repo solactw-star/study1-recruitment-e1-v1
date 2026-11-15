@@ -150,7 +150,9 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
 <h3>場次變更草稿（PI 核定前預檢）</h3>
 <button id="e1WsNew" type="button" disabled>新增場次草稿</button>
 <div class="booking-filter-grid"><div><label for="e1WsDraftId">原場次識別碼</label><input id="e1WsDraftId" maxlength="64"></div><div><label for="e1WsDraftStart">開始（臺灣時間）</label><input id="e1WsDraftStart" type="datetime-local"></div><div><label for="e1WsDraftEnd">結束（臺灣時間）</label><input id="e1WsDraftEnd" type="datetime-local"></div><div><label for="e1WsDraftLocation">地點代碼</label><input id="e1WsDraftLocation" maxlength="80"></div><div><label for="e1WsDraftCap">名額</label><input id="e1WsDraftCap" type="number" min="1" step="1"></div></div>
-<button id="e1WsPreview" type="button" disabled>檢查新增／修改草稿</button><button id="e1WsClose" type="button" disabled>預檢關閉場次</button><p id="e1WsDraftResult" class="booking-feedback" role="status"></p>
+<button id="e1WsPreview" type="button" disabled>檢查新增／修改草稿</button><button id="e1WsClose" type="button" disabled>預檢關閉場次</button><button id="e1WsOpen" type="button" disabled>預檢開放場次</button><p id="e1WsDraftResult" class="booking-feedback" role="status"></p>
+<label><input id="e1WsConfirm" type="checkbox" disabled> 我已核對這次場次變更、PI 核定依據與原預約影響</label>
+<button id="e1WsCommit" type="button" disabled>儲存已核定場次變更</button><p id="e1WsCommitResult" class="booking-feedback" role="status">須先取得此草稿的獨立核定；此處不會自行核准或開放報名。</p>
 </section>
 <section id="e1OwnerSlotAudit" aria-labelledby="e1OwnerSlotAuditTitle">
 <h2 id="e1OwnerSlotAuditTitle">E1 正式場次｜唯讀核定前查核</h2>
@@ -1284,7 +1286,7 @@ e1RecruitmentDraftSetup_();
 function e1WorkspaceSetup_(){
  const el=id=>document.getElementById(id),load=el('e1WsLoad');
  if(!load||typeof load.addEventListener!=='function')return;
- let data=null,offset=0,epoch=0,busy=false,selected=null,creating=false;
+ let data=null,offset=0,epoch=0,busy=false,selected=null,creating=false,approvedDraft=null,writeUncertain=false;
  const val=id=>el(id).value;
  const status=msg=>{el('e1WsStatusText').textContent=msg;};
  const draft=msg=>{el('e1WsDraftResult').textContent=msg;};
@@ -1292,7 +1294,9 @@ function e1WorkspaceSetup_(){
  const cells=(parent,values)=>{const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v==null?'—':String(v);tr.appendChild(td);}parent.appendChild(tr);return tr;};
  const local=iso=>new Date(Date.parse(iso)+8*3600000).toISOString().slice(0,16);
  const utc=local=>{if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local))throw Error('時間格式不合法');const d=new Date(local+':00+08:00');const iso=d.toISOString();if(new Date(d.getTime()+8*3600000).toISOString().slice(0,16)!==local)throw Error('日期不合法');return iso;};
- const resetDraft=()=>{selected=null;creating=false;el('e1WsPreview').disabled=true;el('e1WsClose').disabled=true;draft('選擇場次或新增草稿。');};
+
+ const clearApproval=()=>{approvedDraft=null;el('e1WsConfirm').checked=false;el('e1WsConfirm').disabled=true;el('e1WsCommit').disabled=true;};
+ const resetDraft=()=>{selected=null;creating=false;clearApproval();el('e1WsPreview').disabled=true;el('e1WsClose').disabled=true;el('e1WsOpen').disabled=true;draft('選擇場次或新增草稿。');};
  const drawSlots=()=>{
   const body=el('e1WsSlots');clear(body);if(!data)return;
   for(const r of data.slots.filter(x=>!val('e1WsDate')||local(x.startAtUtc).slice(0,10)===val('e1WsDate')).sort((a,b)=>a.startAtUtc.localeCompare(b.startAtUtc))){
@@ -1300,11 +1304,11 @@ function e1WorkspaceSetup_(){
    const td=document.createElement('td'),button=document.createElement('button');button.type='button';button.textContent='編輯草稿';
    button.addEventListener('click',()=>{
     if(busy||!data||!data.slots.includes(r))return;
-    epoch++;selected=r;creating=false;
+    epoch++;clearApproval();selected=r;creating=false;
     el('e1WsDraftId').value=r.slotId;el('e1WsDraftId').disabled=true;
     el('e1WsDraftStart').value=local(r.startAtUtc);el('e1WsDraftEnd').value=local(r.endAtUtc);
     el('e1WsDraftLocation').value=r.locationCode;el('e1WsDraftCap').value=String(r.capacity);
-    el('e1WsPreview').disabled=false;el('e1WsClose').disabled=false;draft('草稿尚未寫入。');
+    el('e1WsPreview').disabled=false;el('e1WsClose').disabled=r.status!=='OPEN';el('e1WsOpen').disabled=r.status!=='CLOSED';draft('草稿尚未寫入。');
    });td.appendChild(button);tr.appendChild(td);
   }
  };
@@ -1337,27 +1341,51 @@ function e1WorkspaceSetup_(){
  el('e1WsNext').addEventListener('click',()=>{if(data&&!busy&&offset+50<data.total){offset+=50;refresh();}});
  el('e1WsDate').addEventListener('change',drawSlots);
  el('e1WsNew').addEventListener('click',()=>{
-  if(!data||busy)return;epoch++;selected=null;creating=true;
+  if(!data||busy)return;epoch++;clearApproval();selected=null;creating=true;
   for(const id of ['e1WsDraftId','e1WsDraftStart','e1WsDraftEnd','e1WsDraftLocation','e1WsDraftCap'])el(id).value='';
-  el('e1WsDraftId').disabled=false;el('e1WsPreview').disabled=false;el('e1WsClose').disabled=true;draft('新增草稿；預檢結果不建立正式場次。');
+  el('e1WsDraftId').disabled=false;el('e1WsPreview').disabled=false;el('e1WsClose').disabled=true;el('e1WsOpen').disabled=true;draft('新增草稿；預檢結果不建立正式場次。');
  });
  const preview=action=>{
   if(busy||!data||(!selected&&!creating))return;
-  let q;
+  clearApproval();let q;
   try{q={action,revision:data.revision,slotId:val('e1WsDraftId').trim(),startAtUtc:selected&&val('e1WsDraftStart')===local(selected.startAtUtc)?selected.startAtUtc:utc(val('e1WsDraftStart')),endAtUtc:selected&&val('e1WsDraftEnd')===local(selected.endAtUtc)?selected.endAtUtc:utc(val('e1WsDraftEnd')),locationCode:val('e1WsDraftLocation').trim(),capacity:Number(val('e1WsDraftCap'))};}catch(_){draft('日期格式不合法。');return;}
-  const current=++epoch;busy=true;load.disabled=true;el('e1WsPreview').disabled=true;el('e1WsClose').disabled=true;
+  const current=++epoch;busy=true;load.disabled=true;el('e1WsPreview').disabled=true;el('e1WsClose').disabled=true;el('e1WsOpen').disabled=true;
   const done=()=>{busy=false;load.disabled=false;return current===epoch;};
   const fail=()=>{resetDraft();draft('預檢未核實：可能是名額不足、已有預約、來源已改變或權限不足。請重新查詢。');};
   google.script.run.withFailureHandler(()=>{if(done())fail();}).withSuccessHandler(r=>{
    if(!done())return;
    if(!r||r.mode!=='E1_SLOT_CHANGE_PREVIEW'||r.revision!==q.revision||r.action!==action||r.written!==false||r.actionAuthority!=='NONE'||r.requiresPiApproval!==true||!r.after||r.after.slotId!==q.slotId||r.after.capacity!==q.capacity||r.after.startAtUtc!==q.startAtUtc||r.after.endAtUtc!==q.endAtUtc||r.after.locationCode!==q.locationCode){fail();return;}
-   draft('預檢通過（未儲存）：'+r.after.slotId+'｜'+r.after.status+'｜名額 '+r.after.capacity+'；原預約保留，仍待 PI 核定及正式寫入授權。');
-   el('e1WsPreview').disabled=false;el('e1WsClose').disabled=!selected;
+   if(!/^[a-f0-9]{64}$/.test(r.proposal||'')||typeof r.canCommit!=='boolean'){fail();return;}
+   const old=r.before?'原 '+r.before.status+'／名額 '+r.before.capacity+'／已暫留 '+r.before.held+'／已確認 '+r.before.confirmed+'／候補 '+r.before.waitlisted:'原場次不存在';
+   draft('預檢通過（未儲存）：'+r.after.slotId+'｜'+old+' → '+r.after.status+'｜名額 '+r.after.capacity+'；原預約保留。核定草稿代碼：'+r.proposal+
+    (r.canCommit?'｜核定依據：'+r.approvalRef+'；原因：'+r.approvalReason:'；仍待適用 PI 核定、正式寫入授權及安全條件。'));
+   if(r.canCommit&&!writeUncertain&&typeof r.approvalRef==='string'&&typeof r.approvalReason==='string'){
+    approvedDraft={request:q,proposal:r.proposal,status:r.after.status};el('e1WsConfirm').disabled=false;
+   }
+   el('e1WsPreview').disabled=false;el('e1WsClose').disabled=!selected||selected.status!=='OPEN';el('e1WsOpen').disabled=!selected||selected.status!=='CLOSED';
   }).study1OwnerE1SlotChangePreview(q);
  };
  el('e1WsPreview').addEventListener('click',()=>preview(creating?'CREATE':'UPDATE'));
  el('e1WsClose').addEventListener('click',()=>preview('CLOSE'));
- for(const id of ['e1WsDraftId','e1WsDraftStart','e1WsDraftEnd','e1WsDraftLocation','e1WsDraftCap'])el(id).addEventListener('input',()=>{if(busy){epoch++;resetDraft();}else draft('草稿有修改，尚未核定。');});
+ el('e1WsOpen').addEventListener('click',()=>preview('OPEN'));
+ el('e1WsConfirm').addEventListener('change',()=>{el('e1WsCommit').disabled=!approvedDraft||busy||writeUncertain||!el('e1WsConfirm').checked;});
+ el('e1WsCommit').addEventListener('click',()=>{
+  if(busy||writeUncertain||!approvedDraft||!el('e1WsConfirm').checked)return;
+  const requested=approvedDraft;clearApproval();busy=true;load.disabled=true;
+  const current=++epoch,result=el('e1WsCommitResult');
+  result.textContent='正在儲存一次已核定變更；不得重送。';
+  for(const id of ['e1WsPreview','e1WsClose','e1WsOpen'])el(id).disabled=true;
+  const finish=()=>{busy=false;load.disabled=false;return current===epoch;};
+  const unknown=()=>{writeUncertain=true;finish();resetDraft();result.textContent='儲存結果未知或未核實；禁止重送，本頁只允許重新查詢，請核對原 Slots、核定索引及 AuditLogs。';};
+  google.script.run.withFailureHandler(unknown).withSuccessHandler(r=>{
+   if(!finish()||!r||r.mode!=='E1_SLOT_CHANGE_COMMITTED'||r.proposal!==requested.proposal||
+      r.slotId!==requested.request.slotId||r.action!==requested.request.action||r.status!==requested.status||
+      r.capacity!==requested.request.capacity||r.written!==true||r.reservationsPreserved!==true||
+      r.registryReadback!==true||r.auditReadback!==true){unknown();return;}
+   result.textContent='已儲存並回讀場次、核定索引及原稽核；原預約未修改。';offset=0;refresh();
+  }).study1OwnerE1SlotChangeCommit({request:requested.request,proposal:requested.proposal,confirmed:true});
+ });
+ for(const id of ['e1WsDraftId','e1WsDraftStart','e1WsDraftEnd','e1WsDraftLocation','e1WsDraftCap'])el(id).addEventListener('input',()=>{clearApproval();if(busy){epoch++;resetDraft();}else draft('草稿有修改，尚未核定。');});
 }
 e1WorkspaceSetup_();
 
