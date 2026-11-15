@@ -576,3 +576,8 @@
 - TASK_DOMAIN=`Study1_V2_E1_PRIVATE_VERSION2_DEPLOY_RESUME`；PRE_MAIN_SHA=`4f500f4b923d76db58a7194f42162f9e85e1ca22`；同 SHA 公版311/311、私人58/58 已回讀。依 §70-S.39 與 AGENTS.md，既有授權限同一 V2 GAS、核定 version 2 SHA `b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3`、MYSELF/USER_DEPLOYING。
 - 先前原 Run #43706978095 已成功 HEAD 及 version 2，deploy POST skipped。最新正式 Audit #43707523732 證明 HEAD/version2 同核定 SHA、version1與原兩 deployment 保留，semantic inventory `6cab520e1d8250d11094f62088ee4f1743bcb5e06b974bd88d01f0e7001511a1`。此次專用續作綁定單一 parent、commit message、first attempt；原一次性三階段 workflow 不再觸發。本輪僅 deployment，現場重新 GET 核對、加密備份 Artifact、既有 deploy() 單次 POST 與完整 readback。若現況漂移或已有匹配部署，不送 POST，先查核。禁止 HEAD PUT、createVersion、正式資料或真人收件。
 - SYNC_STATUS=`VERSION_2_DEPLOY_RESUME_PENDING_RUN`；需同版直接相關 CI、實際 backup/部署/ACL/版本與原 deployment 不變之日誌。未核真 UI 或正式啟用。發生 UNKNOWN 只 GET，不重送。
+
+### 2026-11-15｜version 2 部署 POST 後讀回延遲
+- SOURCE_VERSION/SHA=`029a91d6fbd7be2894c8baaee39f9ff046ca9711`；公版 Run #43708421628 311/311，私人 Run #43708421645 59/59，原始日誌同版 0 FAIL/skip。實際 Run #43708421687 automatic-inventory Job #132794491654 同版確認原版本 1/2、兩 deployment、核定 HEAD 及 semantic inventory；專用 resume Job #132794586053，原多階段 job skipped。
+- 寫前加密 backup Artifact 14159745839 成功。唯一部署 POST 回應含合格 deploymentId、Script ID、version 2（既有程式驗證通過後才可執行 getDeployment），隨後 direct GET HTTP 404，故 `DEPLOY_POST_ACCEPTED_READBACK_UNKNOWN`，不可視為未執行。19:20:48 隨後即時 GET 清單仍僅 HEAD/version 1、兩 versions；不推斷新部署不存在、不再次 POST。不重做 HEAD 或 version。
+- 本次僅對既有 automaticAudit 增量加入 version 2 如已出現在清單，核對同 ID 的 GET、核定版號/SHA、MYSELF/USER_DEPLOYING；由普通 main push 觸發 GET-only，兩個一次性 mutation job 條件均不符。若無新可核實部署，保留 UNKNOWN 阻塞並以唯讀觀察接續。原正式資料、公開權限及 E1 收件保持關閉。

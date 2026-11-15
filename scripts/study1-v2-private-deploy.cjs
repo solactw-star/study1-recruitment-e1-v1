@@ -460,7 +460,22 @@ async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
  assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
  const c=core.credentials(env.V2_GAS_CLASPRC_JSON);
  const api=await apiFactory(c,undefined,undefined,undefined,true);
- return audit(api);
+ const state=await audit(api);
+ // Read-only recovery after Run 43708421687 returned a deployment response
+ // but immediate direct GET was 404. Never issue another POST from audit.
+ const matches=normalizedDeployments(state.deps).filter(d=>d.version===RESUME_VERSION);
+ if(matches.length===1&&state.proofs.some(p=>p.version===RESUME_VERSION&&p.sha===VERIFIED_VERSION2_SHA&&p.known&&p.access==='MYSELF')){
+  const listed=matches[0];
+  const direct=normalizedDeployments([await api.getDeployment(listed.id)])[0];
+  assert(JSON.stringify(direct)===JSON.stringify(listed),'version 2 direct deployment differs from list');
+  assert(direct.points.some(p=>p.web?.access==='MYSELF'&&p.web.executeAs==='USER_DEPLOYING'),'version 2 private deployment ACL not verified');
+  report('V2_VERSION2_DIRECT_READBACK_VERIFIED=true');
+  // The owner-only URL is returned to the authorized operator separately.
+  const url=direct.points.find(p=>p.web?.access==='MYSELF'&&p.web.executeAs==='USER_DEPLOYING')?.web?.url;
+  if(url&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)&&env.GITHUB_STEP_SUMMARY&&process.env.V2_PRIVATE_TEST_MODE!=='true')
+   fs.appendFileSync(env.GITHUB_STEP_SUMMARY,'Verified OWNER-only version 2 web app: '+url+'\n');
+ }else report('V2_VERSION2_DIRECT_READBACK_VERIFIED=false');
+ return state;
 }
 function oneShotInvocation(env,event){
  assert(env.V2_ONCE_RELEASE==='1'&&env.GITHUB_REPOSITORY===REPO&&env.GITHUB_REF==='refs/heads/main'&&
