@@ -4,7 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),{execFileSync}=require('node:child_process');
 const core=require('./study1-v2-gas-head-only.cjs'),d=require('./study1-v2-private-deploy.cjs');
 const {SID,REPO}=core;
-const PARENT='9512b57146828d50bb4f53d8012863b8a33e10bb',MESSAGE='release-v2 authorized public login-only browse 2026-11-15';
+const PARENT='e1b75093d98a56c00f4c941da234703179736a5f',MESSAGE='release-v2 authorized public login-only browse correction 2026-11-15';
 const BASE_FP='f36f8a5ce9d1658fc7d7cb5370438253d773e3f1d91c344de01ecdded2aed658';
 const assert=(v,m)=>{if(!v)throw Error('V2_PUBLIC_RELEASE_BLOCKED: '+m)};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));

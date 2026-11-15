@@ -464,7 +464,7 @@ function privateOwnerManagementCandidate(files){
 // Bind this run to the closed, allowlisted private candidate of its exact checkout.
 const PRIVATE_TARGET=digest(privateOwnerManagementCandidate(localSources()));
 module.exports={PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
- canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,
+ canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,latestMain,
  runnerPaths,aad,audit,prepare,apply};
 if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));

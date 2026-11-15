@@ -538,6 +538,7 @@ test('version 2 continuation only accepts its exact new event; original stages c
 
 test('authorized public release adapter allows only exact main event and login-only verified URL',()=>{
  const p=require('../scripts/study1-v2-public-release.cjs');
+ assert.equal(typeof core.latestMain,'function','release uses exported main verification');
  const env={V2_PUBLIC_RELEASE:'1',GITHUB_REPOSITORY:d.REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'push',
   GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'d'.repeat(40),GITHUB_RUN_ID:'1'};
  const event={before:p.PARENT,after:env.GITHUB_SHA,ref:env.GITHUB_REF,head_commit:{id:env.GITHUB_SHA,message:p.MESSAGE},

@@ -282,8 +282,8 @@ jobs:
   public-readonly-approved-once:
     if: >-
       ${{ github.event_name == 'push' && github.repository == 'solactw-star/study1-recruitment-e1-v1'
-      && github.ref == 'refs/heads/main' && github.event.before == '9512b57146828d50bb4f53d8012863b8a33e10bb'
-      && github.event.head_commit.message == 'release-v2 authorized public login-only browse 2026-11-15' && github.run_attempt == 1 }}
+      && github.ref == 'refs/heads/main' && github.event.before == 'e1b75093d98a56c00f4c941da234703179736a5f'
+      && github.event.head_commit.message == 'release-v2 authorized public login-only browse correction 2026-11-15' && github.run_attempt == 1 }}
     needs: automatic-inventory
     runs-on: ubuntu-latest
     timeout-minutes: 25
