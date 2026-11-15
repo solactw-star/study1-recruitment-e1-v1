@@ -619,3 +619,9 @@
 - TASK_DOMAIN=Study1_V2_PUBLIC_READONLY_UAT；SOURCE_VERSION/SHA=`0cdc6d3ce115c52a244b916a4aac16a429d2a6e3`。再次回讀成功發布 Run #43711501002／Job #132803924288 原始日誌（ANYONE/USER_DEPLOYING、version 3、原私人部署不變、收件 false）、現行 Website.doGet 與 manifest、最新規格及 AGENTS.md；此為歷史成功部署證據，不冒稱新的遠端 GET。
 - 最新使用者截圖及實測：Chrome 無痕視窗、非 OWNER Google 帳號仍出現 Google Drive「需要存取權」。因此多帳號登入衝突可能性下降，不再要求同樣測試。Google 官方 Issue #574946511 截至 2026-11-15 為 Assigned/P2、無修復公告，11/13 有最小 HTML standalone script 及兩獨立 Gmail 重現非 owner 存取錯誤的回報；是相似平台候選原因而非本案確診。尚未取得 OWNER 同一 public /exec 比較結果或實際 GAS executions；不可聲稱 doGet 未執行。
 - LAST_VERIFIED_STEP=PUBLIC_V3_NONOWNER_INCOGNITO_UAT_FAILED；BLOCKERS=PUBLIC_UI_ACCESS_FAILED；PUBLIC_DEPLOYED=true、PUBLIC_UI_VERIFIED=false、FORMAL_READY=false、LIVE_INTAKE_ENABLED=false。NEXT_ACTION=僅需一次 OWNER 同一公開 URL 比較與相應 GAS 執行紀錄（現有連線無可核實的 execution log 入口）；若 OWNER 可開且非 OWNER 無相應執行記錄，高度指向 Google 存取層，停止盲目重新部署，評估經授權的獨立公開資訊入口與原安全後端的可行方案。正式 participant 入口及 PI/REC/資安須另驗，不能以靜態首頁冒充完整營運；不改舊系統、不放寬 Drive 資料權限或 ANYONE_ANONYMOUS。若 OWNER 也無法開啟，先查當前帳號與 Google 部署/授權設定。WRITE_OWNER=原進度主檔；SYNC_STATUS=PUBLIC_UI_ACCESS_BLOCKED；本輪僅文件記錄，不改程式、遠端 GAS、部署、資料、權限或排程。
+
+
+### 2026-11-15｜E1 預簽 PDF 原件唯讀復原
+- TASK_DOMAIN=Study1_V2_E1_PDF_READ_RECOVERY；PRE_MAIN_SHA=adf911fdf91f9a05d57dc888df77b6d80a9966d1；依 §70-S.36、39 與 AGENTS.md，獨立推進核心工程。
+- 原 PDF 傳輸或 SHA 驗證失敗後 review 停用，無同憑證重取入口；本輪改原 visitor 的 review 行為，沿用原 token 只讀取 PDF，不重建預約/同意、不重簽；同一 consent object 與 loading 狀態拒絕過時非同步回應。原 SHA、版號、大小、PDF header 檢核保留。新增兩組合成正負測：傳輸錯誤復原、內容篡改與已取代的同 token 回應。 
+- LAST_VERIFIED_STEP=PATCH_PREPARED；COMPLETED=程式/測試/進度候選；NEXT_ACTION=同 SHA CI 回讀、失敗修復及後續 E1 預約/管理缺口；BLOCKERS=PUBLIC_UI_ACCESS_FAILED（獨立）、PI/REC 與真人收件另驗；WRITE_OWNER=唯一 V2 repo；SYNC_STATUS=GITHUB_CI_PENDING。未授權遠端 GAS 寫入、部署、正式資料、真人收件/信件；舊系統封存不變。

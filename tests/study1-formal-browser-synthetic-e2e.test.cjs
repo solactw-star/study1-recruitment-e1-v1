@@ -415,3 +415,46 @@ test('temporary E1 slot inventory failure can reload original inventory without 
  for(const method of ['study1ParticipantBegin','study1ParticipantSendOtp','study1ParticipantVerifyOtp','study1ParticipantEmailStatus'])
   assert.equal(s.calls.filter(x=>x.method===method).length,1,method);
 });
+
+
+function pdfRecoveryHarness(){
+ const source=html.slice(html.indexOf('async function formalVerifyPdf_('),html.indexOf('function formalConsentStatus_(){'));
+ assert.ok(source.includes('function formalConsentReview_()'));
+ const nodes=new Map(),calls=[],messages=[],urls=[];
+ const el=id=>{if(!nodes.has(id))nodes.set(id,{disabled:true,hidden:true,checked:false,textContent:''});return nodes.get(id);};
+ const bytes=Buffer.from('%PDF-1.4\n'+'x'.repeat(110));
+ const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+ const doc={available:true,experiment:'E1',version:'v1',sha256:sha,mime:'application/pdf',bytes:bytes.length,base64:bytes.toString('base64'),title:'synthetic'};
+ const context={el,state:{busy:false},formalInk:true,formalSignSubmitted:false,formalPdfUrl:null,
+  formalConsent:{token:'opaque',documentSha256:sha,documentVersion:'v1',researcherPresigned:true,originalVerified:false,originalLoading:false,signed:false},
+  status:m=>messages.push(m),formalConsentStatus_:()=>calls.push({method:'status'}),
+  rpc:(method,token,ok,fail)=>calls.push({method,token,ok,fail}),
+  atob:s=>Buffer.from(s,'base64').toString('binary'),window:{crypto:crypto.webcrypto},Blob,
+  URL:{createObjectURL:()=>{const url='blob:synthetic-'+urls.length;urls.push(url);return url;}},formalRevoke_:()=>{}};
+ vm.createContext(context);vm.runInContext(source,context);
+ el('readPdf').checked=true;el('agree').checked=true;
+ return {context,doc,el,calls,messages,urls};
+}
+test('E1 original PDF transport failure: same token read-only recovery after SHA verification',async()=>{
+ const h=pdfRecoveryHarness(),c=h.context;
+ c.formalConsentLoadPdf_();
+ assert.equal(h.el('review').disabled,true);assert.equal(h.el('finish').disabled,true);
+ c.formalConsentReview_();assert.equal(h.calls.length,1);
+ h.calls[0].fail();assert.equal(h.el('review').disabled,false);assert.equal(h.el('finish').disabled,true);
+ c.formalConsentReview_();assert.equal(h.calls.length,2);
+ assert.equal(h.calls[0].token,h.calls[1].token);
+ assert.ok(h.calls.every(x=>x.method==='study1FormalConsentOriginalPdf'));
+ await h.calls[1].ok(h.doc);
+ assert.equal(h.urls.length,1);assert.equal(c.formalConsent.originalVerified,true);assert.equal(h.el('finish').disabled,false);
+ c.formalConsentReview_();assert.equal(h.calls[2].method,'status');
+});
+test('E1 original PDF tampering and superseded consent callbacks never enable signing',async()=>{
+ const h=pdfRecoveryHarness(),c=h.context;c.formalConsentLoadPdf_();
+ await h.calls[0].ok({...h.doc,base64:Buffer.from('%PDF-1.4\n'+'y'.repeat(110)).toString('base64')});
+ assert.equal(c.formalConsent.originalVerified,false);assert.equal(h.el('finish').disabled,true);assert.equal(h.el('review').disabled,false);
+ c.formalConsentReview_();const old=c.formalConsent;const pending=h.calls[1].ok(h.doc);
+ c.formalConsent={...old,originalLoading:false,originalVerified:false};await pending;
+ assert.equal(h.urls.length,0);assert.equal(c.formalConsent.originalVerified,false);
+ c.formalConsentRender_();assert.equal(h.el('finish').disabled,true);
+ c.formalSignSubmitted=true;c.formalConsentReview_();assert.equal(h.calls[2].method,'status');
+});

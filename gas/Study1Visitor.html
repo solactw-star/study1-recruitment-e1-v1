@@ -727,7 +727,11 @@ async function formalVerifyPdf_(doc,expected){
 }
 function formalConsentRender_(){
  const x=formalConsent,ready=!!(x&&x.originalVerified&&x.researcherPresigned===true);
- if(el('review'))el('review').disabled=!ready;
+ if(el('review')){
+  el('review').disabled=!(x&&x.researcherPresigned===true)||state.busy||x.originalLoading===true;
+  el('review').textContent=ready||(x&&(x.signed||formalSignSubmitted))?
+   '重新查詢知情同意與PDF副本狀態':'唯讀重新取得研究者預簽PDF';
+ }
  if(el('finish'))el('finish').disabled=!ready||!formalInk||
   !el('readPdf').checked||!el('agree').checked||x.signed===true||
    formalSignSubmitted||state.busy;
@@ -735,36 +739,49 @@ function formalConsentRender_(){
   !x?'尚未核對E1本人有效預約。':
   x.signed?'已在線上簽署；請核對完整PDF副本與原預約狀態。':
   !x.researcherPresigned?'研究者預簽PDF未核實，禁止簽署。':
-  !x.originalVerified?'正在核對研究者預簽完整PDF位元組與SHA。':
+  !x.originalVerified?(x.originalLoading?'正在核對研究者預簽完整PDF位元組與SHA。':
+   '原PDF尚未核實；請使用唯讀重新取得，不可簽署。'):
   '研究者已先簽署完整PDF，請閱讀後於網頁手寫本人簽名。';
 }
+function formalConsentReview_(){
+ const x=formalConsent;
+ if(!x||state.busy||x.originalLoading)return;
+ if(!x.originalVerified&&!x.signed&&!formalSignSubmitted)formalConsentLoadPdf_();
+ else formalConsentStatus_();
+}
 function formalConsentLoadPdf_(){
- if(!formalConsent)return;
- const currentToken=formalConsent.token;
- rpc('study1FormalConsentOriginalPdf',currentToken,async doc=>{
-  if(!formalConsent||formalConsent.token!==currentToken)return;
+ const x=formalConsent;
+ if(!x||x.researcherPresigned!==true||state.busy||x.originalLoading||
+    x.originalVerified||x.signed||formalSignSubmitted)return;
+ x.originalLoading=true;formalConsentRender_();
+ const current=()=>formalConsent===x&&x.originalLoading===true;
+ const failed=message=>{
+  if(!current())return;
+  x.originalLoading=false;x.originalVerified=false;
+  el('officialPdfStatus').textContent='原PDF尚未核實；請使用同一憑證唯讀重新取得。';
+  status(message);formalConsentRender_();
+ };
+ rpc('study1FormalConsentOriginalPdf',x.token,async doc=>{
+  if(!current())return;
   try{
-   const bytes=await formalVerifyPdf_(doc,formalConsent);
-   if(!formalConsent||formalConsent.token!==currentToken)return;
+   const bytes=await formalVerifyPdf_(doc,x);
+   if(!current())return;
+   if(x.signed||formalSignSubmitted){x.originalLoading=false;formalConsentRender_();return;}
    const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));
    formalRevoke_(formalPdfUrl);formalPdfUrl=url;
-   formalConsent.originalVerified=true;
+   x.originalLoading=false;x.originalVerified=true;
    el('officialPdfTitle').textContent=doc.title;
    el('officialPdfVersion').textContent=doc.version;
    el('officialPdfSha').textContent=doc.sha256;
    el('officialPdfDownload').href=url;
    el('officialPdfDownload').hidden=false;
    el('officialPdfViewer').data=url;el('officialPdfViewer').hidden=false;
-   el('officialPdfStatus').textContent=formalConsent.researcherPresigned?
-    '已核對研究者事先簽名PDF的完整位元組、版號與SHA；請閱讀後再手寫本人簽名。':
-    '已核對原核准PDF的完整位元組、實驗別、版號及SHA；尚未簽署。';
+   el('officialPdfStatus').textContent='已核對研究者事先簽名PDF的完整位元組、版號與SHA；請閱讀後再手寫本人簽名。';
    formalConsentRender_();
   }catch(error){
-   formalConsent.originalVerified=false;
-   status('原PDF來源驗證失敗；禁止簽署：'+String(error.message||error));
-   formalConsentRender_();
+   failed('原PDF來源驗證失敗；禁止簽署，可唯讀重新取得同一文件：'+String(error.message||error));
   }
- });
+ },()=>failed('原PDF唯讀取得失敗；請重新取得同一預簽文件，不重新建立預約或同意憑證。'));
 }
 function formalConsentStatus_(){
  if(!formalConsent||state.busy)return;
@@ -888,7 +905,7 @@ function formalConsentAdopt_(reservation,result){
  formalConsent={token:result.token,reservationId:reservation.reservationId,
   slotId:reservation.slotId,documentSha256:result.documentSha256,
   documentVersion:result.documentVersion,researcherPresigned:true,
-  originalVerified:false,staffExplained:false,signed:false,confirmed:false};
+  originalVerified:false,originalLoading:false,staffExplained:false,signed:false,confirmed:false};
  show('consent');formalConsentRender_();formalConsentLoadPdf_();
  status('已核對同一原預約與研究者預簽 PDF；請閱讀後手寫本人簽名。');
  return true;
@@ -1011,7 +1028,7 @@ function formalConsentWire_(){
   });
  }));
  el('step-consent').appendChild(withdrawal);
- el('review').addEventListener('click',formalConsentStatus_);
+ el('review').addEventListener('click',formalConsentReview_);
  for(const id of ['readPdf','agree'])el(id).addEventListener('change',formalConsentRender_);
  el('finish').addEventListener('click',()=>{
   if(!formalConsent||formalConsent.researcherPresigned!==true||
