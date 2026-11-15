@@ -214,7 +214,7 @@ function study1WizardReadBook_(tab,headers){
  * identity at EACH read/append boundary of the original booking kernel.
  * No caller may inject a source adapter into this GAS entry.
  */
-function study1WizardHoldBound_(untrusted){
+function study1WizardHoldBound_(untrusted,consentFence){
  study1WizardP0Gate_();
  const r=study1WizardRequest_(untrusted);
  study1WizardDocument_(r);
@@ -270,6 +270,7 @@ function study1WizardHoldBound_(untrusted){
   },
   appendHold:params=>{
    recheck();
+   if(typeof consentFence==='function')consentFence(r.applicantId,bookingLock);
    if(!last||!slotSha||
       params.applicantId!==r.applicantId||params.slotId!==r.slotId||
       params.idempotencyKey!==issuedKey||

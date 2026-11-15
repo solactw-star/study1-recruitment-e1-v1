@@ -547,3 +547,21 @@ test('V08 browser lost JOIN, CLAIM, CANCEL replies observe original records with
  assert.equal(h.reservations.length,1);assert.equal(h.reservations[0].status,'CANCELLED');
  assert.equal(h.calls.filter(x=>x.name==='study1FormalV08Outcome').length,3);
 });
+
+test('fresh browser cannot recover HOLD, V08 or consent authority from a manually retained case reference',()=>{
+ for(const mode of ['HOLD','MOVE','CONSENT']){
+  const h=simulate(undefined,true,true,mode==='HOLD'?'after_commit':'none','none',mode==='MOVE'?{movePartial:true}:{});
+  h.enter();h.click('hold');
+  if(mode==='MOVE')h.findButton('改至選定E1場次').handlers.get('click')();
+  if(mode==='CONSENT')h.findButton('核對本人暫留並進入最後知情同意').handlers.get('click')();
+  const reference=h.node('formalRecoveryRef').textContent;
+  assert.match(reference,/APP_BROWSER_SYNTH_1234/);assert.match(reference,/REQ_[0-9a-f]{40}/);
+  assert.doesNotMatch(reference,/synthetic@example|aaaaaaaa-bbbb|[a-f0-9]{64}/);
+  const fresh=simulate(undefined,true,true); // independent DOM and JS realm, no transfer of secrets
+  assert.equal(fresh.node('formalRecoveryRef').textContent,'');
+  assert.equal(fresh.click('hold'),false);
+  assert.ok(!fresh.calls.some(c=>/FormalHoldSlot|FormalMove|ConsentBegin|SignPdf|SignedPdfCopy/.test(c.name)));
+  assert.equal(fresh.click('chooseE1'),true);
+  assert.match(fresh.node('status').textContent,/勿重新申請/);
+ }
+});

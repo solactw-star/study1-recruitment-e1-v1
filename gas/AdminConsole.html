@@ -172,6 +172,12 @@ select{font:inherit;width:100%;padding:9px;box-sizing:border-box;border:1px soli
  <p id="e1OpsObservationLimit"><small>此處顯示的是查核時間點的原始來源觀察，不是可授權寫入的交易快照。外部無鎖寫入、查核結束後更新或 A→B→A 變化可能無法偵測。人工處置前須重新查原始來源及已簽 PDF／SHA；通知結果 UNKNOWN 不得補寄。</small></p>
  <div id="e1OpsResults" class="booking-table-wrap" role="region" tabindex="0" aria-label="E1 正式預約與通知核對結果"></div>
  <p><small>狀態不明或資料不一致必須人工核對原始紀錄；不得直接重送郵件、再簽署、重建預約或啟用真人收件。</small></p>
+ <h3>跨工作階段原案件核對（唯讀）</h3>
+ <p>以參與者先前抄錄的原申請編號核對原 Reservations 及同意索引，不重發憑證、不以原列缺失推定未寫入。</p>
+ <label for="e1RecoveryApplicant">原案件編號（APP_）</label>
+ <input id="e1RecoveryApplicant" type="text" autocomplete="off" maxlength="80">
+ <button id="e1RecoveryRead" type="button" class="secondary">唯讀查核原案件</button>
+ <pre id="e1RecoveryResult" role="status" aria-live="polite">尚未核對。</pre>
  <h3>OWNER 手動核對已簽 PDF 與原預約（禁止自動重試）</h3>
  <p>只允許完整研究者預簽 PDF 與本人手寫已簽 PDF 均經伺服器驗證、原 Reservations 唯一有效 HELD 的同一筆。先執行唯讀預檢；核對無誤後才能明確操作一次。過期、取消與任何來源變動不得恢復。</p>
  <label for="e1RepairConsentId">原簽署 PDF 的 E1 同意紀錄 ID</label>
@@ -1204,6 +1210,35 @@ function e1OwnerBookingRepairSetup_(){
 }
 e1OwnerBookingRepairSetup_();
 
+
+function e1RecoverySetup_(){
+ const input=$('e1RecoveryApplicant'),button=$('e1RecoveryRead'),out=$('e1RecoveryResult');
+ if(!input||!button||!out||typeof button.addEventListener!=='function')return;
+ let epoch=0;
+ input.addEventListener('input',()=>{epoch++;out.textContent='案件已變更，請重新唯讀核對。';});
+ button.addEventListener('click',()=>{
+  if(button.disabled)return;
+  const applicant=input.value.trim(),requestEpoch=++epoch;
+  if(!/^APP_[A-Za-z0-9_-]{12,76}$/.test(applicant)){out.textContent='原案件編號格式不合法。';return;}
+  button.disabled=true;out.textContent='正在核對原始來源…';
+  const finish=()=>{button.disabled=false;return requestEpoch===epoch&&input.value.trim()===applicant;};
+  google.script.run.withFailureHandler(()=>{if(finish())out.textContent='原案件查核失敗，維持 UNKNOWN；禁止重送。';})
+   .withSuccessHandler(r=>{
+    if(!finish())return;
+    if(!r||r.readOnly!==true||r.experiment!=='E1'||r.applicantId!==applicant||
+       r.actionAuthority!=='NONE'||r.evidence!=='CURRENT_ORIGINAL_SOURCES_ONLY'||
+       r.disposition!=='OWNER_REVIEW_REQUIRED'||!Array.isArray(r.reservations)||!Array.isArray(r.consents)){
+     out.textContent='原案件來源不一致，維持 UNKNOWN。';return;
+    }
+    const lines=['唯讀觀察；不證明個別 POST 因果，亦不授權後續寫入。'];
+    for(const x of r.reservations)lines.push('原預約 '+x.reservationId+'｜'+x.slotId+'｜'+x.status);
+    for(const x of r.consents)lines.push('原同意 '+x.consentId+'｜'+x.reservationId+'｜'+x.state);
+    if(!r.reservations.length&&!r.consents.length)lines.push('未查得原列，不代表原交易未執行。');
+    out.textContent=lines.join('\n');
+   }).study1OwnerE1RecoveryAudit(applicant);
+ });
+}
+e1RecoverySetup_();
 
 function staffWithdrawalSetup_(){
  const button=$('staffWithdrawalLoad'),out=$('staffWithdrawalResults');

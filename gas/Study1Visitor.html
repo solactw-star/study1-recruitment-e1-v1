@@ -192,6 +192,7 @@ a.pdf{display:inline-block;border:1px solid var(--sea);border-radius:9px;padding
  <button type="button" id="formalDoneBack" class="ghost">返回查看已簽PDF與唯讀核對狀態</button>
 </div>
 </section>
+<p id="formalRecoveryRef" class="help" hidden></p>
 <div id="status" role="status" aria-live="polite">正在確認正式報名服務狀態…</div>
 </div></main><footer>Study1 · NSTC 115-2410-H-033-015｜正式報名以核准程序與公告為準</footer>
 <script>
@@ -314,9 +315,17 @@ if(el('noAvailable'))el('noAvailable').hidden=false;
 show('choose');
 el('chooseE1').addEventListener('click',()=>{
  if(!state.ready||state.busy)return;
- show('screen');status('請完成正式資格初篩與最少必要聯絡資料。');
+ show('screen');status('請完成正式資格初篩與最少必要聯絡資料。若曾申請且關閉或重開頁面，請勿重新申請；以原案件編號聯絡研究團隊。');
 });
 el('screenBack').addEventListener('click',()=>show('choose'));
+function formalRecoveryRef_(action,requestId){
+ const node=el('formalRecoveryRef');
+ if(!node||!state.app||!/^APP_[A-Za-z0-9_-]{12,76}$/.test(state.app.applicantId||''))return;
+ node.hidden=false;
+ node.textContent='原案件核對編號：'+state.app.applicantId+
+  (action&&requestId?'｜原'+action+'交易編號：'+requestId:'')+
+  '。可自行抄錄並私下提供研究團隊；重新開啟網站時不會自動恢復本人憑證。編號不是簽署或查閱資料的授權，請勿公開分享。';
+}
 function formalBeginOutcome_(payload){
  // A one-use Turnstile token must never be replayed to resolve a timeout.
  rpc('study1ParticipantBeginOutcome',{
@@ -330,7 +339,7 @@ function formalBeginOutcome_(payload){
   }
   state.app={applicantId:result.applicantId,screeningId:result.screeningId,
    experiment:'E1',email:payload.email};
-  state.beginUnknown=false;show('otp');
+  formalRecoveryRef_();state.beginUnknown=false;show('otp');
   if(result.status==='PENDING_EMAIL')
    status('已唯讀找回同一原申請；尚未進行信箱驗證，可繼續下一步。');
   else{
@@ -379,7 +388,7 @@ el('screenNext').addEventListener('click',()=>{
   }
   state.app={applicantId:result.applicantId,screeningId:result.screeningId,
    experiment:'E1',email:payload.email};
-  state.beginUnknown=false;
+  formalRecoveryRef_();state.beginUnknown=false;
   show('otp');status('已建立待驗證申請，尚未完成信箱驗證、預約或知情同意。');
  },()=>formalBeginOutcome_(payload));
 });
@@ -937,6 +946,7 @@ function formalConsentStart_(reservation){
  }
  state.pendingConsentRequestId=genRequest();
  state.pendingConsentReservationId=reservation.reservationId;
+ formalRecoveryRef_('CONSENT',state.pendingConsentRequestId);
  rpc('study1FormalConsentBegin',{emailProof:state.emailProof,
   reservationId:reservation.reservationId,requestId:state.pendingConsentRequestId},
   result=>{if(!formalConsentAdopt_(reservation,result))formalConsentIssueRead_(reservation);},
@@ -1045,6 +1055,7 @@ function formalConsentWire_(){
   formalSignSubmitted=true;
   el('finish').disabled=true;
   const token=formalConsent.token;
+  formalRecoveryRef_('CONSENT',state.pendingConsentRequestId);
   rpc('study1EConsentSignPdf',{token,signature:image.split(',')[1],
    name:el('formalName').value.trim(),documentSha:formalConsent.documentSha256,
    read:true,answerAcknowledged:true,agree:true},result=>{
@@ -1117,6 +1128,7 @@ function formalV08Submit_(action,reservation,newSlotId){
  const q={action,requestId:genRequest(),reservationId:action==='JOIN'?'':reservation.reservationId,
   slotId:reservation.slotId,newSlotId:newSlotId||''};
  state.pendingV08=q;
+ formalRecoveryRef_(action,q.requestId);
  formalV08PendingPanel_('已送出一次原異動；等待唯讀核對，勿重送。');
  const method={JOIN:'study1FormalWaitlistJoin',CLAIM:'study1FormalWaitlistClaim',
   CANCEL:'study1FormalCancel',MOVE:'study1FormalMove'}[action];
@@ -1285,6 +1297,7 @@ el('hold').addEventListener('click',()=>{
   }
   // Preserve the original idempotency key across an ambiguous response.
   state.pendingHoldRequestId=requestId;
+  formalRecoveryRef_('HOLD',requestId);
   state.pendingHoldSlotId=chosen.slotId;state.pendingHoldQuote=quote.quote;
   rpc('study1FormalHoldSlot',{emailProof:state.emailProof,
    quote:quote.quote},held=>{

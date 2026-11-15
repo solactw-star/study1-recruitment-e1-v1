@@ -163,6 +163,18 @@ function study1FormalQuoteHold(input){if(typeof study1V2PublicRpcDeny_==='functi
   return {allowed:true,quote:q};
  });
 }
+/** Persistent no-new-reservation fence after the original consent issue has
+ * committed. It is derived under the same mutation lock, not from a tab,
+ * browser-held bearer, or a new storage source. Withdrawal has its own path. */
+function study1FormalNoPriorConsent_(applicantId,lock){
+ if(!lock||lock.hasLock()!==true)throw Error('E1_CONSENT_FENCE_LOCK_REQUIRED');
+ const registry=study1EConsentRegistry_();
+ if(!registry||!Array.isArray(registry.records))
+  throw Error('E1_CONSENT_FENCE_SOURCE_INVALID');
+ if(registry.records.some(x=>x&&x.binding&&x.binding.applicantId===applicantId))
+  throw Error('E1_EXISTING_CONSENT_REQUIRES_OWNER_REVIEW');
+ if(lock.hasLock()!==true)throw Error('E1_CONSENT_FENCE_LOCK_LOST');
+}
 function study1FormalHoldSlot(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  if(!input||typeof input!=='object'||Array.isArray(input)||
     Object.keys(input).sort().join(',')!=='emailProof,quote')
@@ -191,6 +203,7 @@ function study1FormalHoldSlot(input){if(typeof study1V2PublicRpcDeny_==='functio
   const expected=study1BindingHmac_(['E1_V05_HOLD_QUOTE_V1',
    ctx.proof.signature,...Object.keys(untrusted).sort().map(k=>untrusted[k])]);
   if(expected!==quote.signature)throw Error('V05_QUOTE_HMAC_INVALID');
+  study1FormalNoPriorConsent_(ctx.identity.applicantId,ctx.lock);
   study1FormalSlot_(ctx,quote.slotId);
   const document=study1EConsentReadyDocument_('E1');
   if(document.sha256!==quote.documentSha||
@@ -206,7 +219,7 @@ function study1FormalHoldSlot(input){if(typeof study1V2PublicRpcDeny_==='functio
   applicantId:quote.applicantId,screeningId:quote.screeningId,
   challengeId:quote.challengeId,experiment:'E1',slotId:quote.slotId,
   documentSha:quote.documentSha,documentVersion:quote.documentVersion,
-  holdUntilUtc:quote.holdUntilUtc,requestId:quote.requestId});
+  holdUntilUtc:quote.holdUntilUtc,requestId:quote.requestId},study1FormalNoPriorConsent_);
 }
 function study1FormalManageSource_(ctx,reservationId){
  study1BindingId_(reservationId);
@@ -411,6 +424,7 @@ function study1FormalWaitlistJoin(input){if(typeof study1V2PublicRpcDeny_==='fun
  study1FormalWaitlistGate_();study1FormalKey_(input.requestId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
   study1FormalWaitlistGate_();
+  study1FormalNoPriorConsent_(ctx.identity.applicantId,ctx.lock);
   const slot=study1FormalSlot_(ctx,input.slotId),queue=study1FormalQueue_(ctx.snapshot,input.slotId);
   const key='WQ_'+study1BindingHmac_(['E1_V08_WAITLIST_V1',
    ctx.identity.applicantId,slot[0],input.requestId]).slice(0,42);
@@ -450,6 +464,7 @@ function study1FormalWaitlistClaim(input){if(typeof study1V2PublicRpcDeny_==='fu
  study1FormalWaitlistGate_();study1FormalKey_(input.requestId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
   study1FormalWaitlistGate_();
+  study1FormalNoPriorConsent_(ctx.identity.applicantId,ctx.lock);
   const r=study1FormalManageSource_(ctx,input.reservationId);
   if(r[3]==='HELD'&&study1BindingUtc_(r[4])>Date.now())
    return {held:true,reason:'ALREADY_CLAIMED',reservationId:r[0],holdUntilUtc:r[4]};
@@ -481,6 +496,7 @@ function study1FormalCancel(input){if(typeof study1V2PublicRpcDeny_==='function'
   throw Error('V08_CANCEL_REQUEST_INVALID');
  study1FormalKey_(input.requestId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
+  study1FormalNoPriorConsent_(ctx.identity.applicantId,ctx.lock);
   const r=study1FormalManageSource_(ctx,input.reservationId);
   if(r[3]==='CANCELLED')return {cancelled:true,reason:'ALREADY_CANCELLED',
    reservationId:r[0],status:'CANCELLED'};
@@ -503,6 +519,7 @@ function study1FormalMove(input){if(typeof study1V2PublicRpcDeny_==='function')s
   throw Error('V08_MOVE_REQUEST_INVALID');
  study1FormalKey_(input.requestId);
  return study1FormalWithLock_(input.emailProof,ctx=>{
+  study1FormalNoPriorConsent_(ctx.identity.applicantId,ctx.lock);
   const previous=study1FormalManageSource_(ctx,input.reservationId);
   const target=study1FormalSlot_(ctx,input.newSlotId);
   if(previous[2]===target[0])return {moved:false,reason:'UNCHANGED'};
@@ -868,4 +885,49 @@ function study1OwnerE1SignedBookingRepair(input){if(typeof study1V2PublicRpcDeny
   readOnlyReplay:result.readOnlyReplay===true,
   notification:'NOT_SENT_BY_RECONCILIATION',
   next:'VERIFY_ORIGINAL_RESERVATIONS_AND_OUTBOX'};
+}
+
+/** OWNER-only lost browser case lookup. Applicant ID is a reference, never
+ * authentication. Observe original rows and index only, never reconstruct a
+ * lost bearer, resend mail, or infer operation causality from missing rows. */
+function study1OwnerE1RecoveryAudit(applicantId){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1BindingId_(applicantId);
+ if(!/^APP_[A-Za-z0-9_-]{12,76}$/.test(applicantId))throw Error('E1_RECOVERY_REFERENCE_INVALID');
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_RECOVERY_LOCK_BUSY');
+ try{
+  if(lock.hasLock()!==true)throw Error('E1_RECOVERY_LOCK_LOST');
+  study1AdminOwnerRequired_();
+  const read=()=>{
+   const s=study1FormalSnapshot_(),c=study1EConsentRegistry_();
+   if(!c||!Number.isSafeInteger(c.revision)||!Array.isArray(c.records))
+    throw Error('E1_RECOVERY_SOURCE_INVALID');
+   return {s,c};
+  };
+  const a=read(),b=read();
+  if(JSON.stringify([a.s.slots.headers,a.s.slots.rows,a.s.reservations.headers,a.s.reservations.rows,a.c.revision,a.c.records])!==
+     JSON.stringify([b.s.slots.headers,b.s.slots.rows,b.s.reservations.headers,b.s.reservations.rows,b.c.revision,b.c.records]))
+   throw Error('E1_RECOVERY_SOURCE_CHANGED');
+  const asOfUtc=new Date().toISOString();
+  study1FormalValidateSnapshot_(a.s,asOfUtc);
+  const rows=a.s.reservations.rows.filter(r=>r[1]===applicantId);
+  for(const r of rows){
+   const slot=a.s.slots.rows.filter(s=>s[0]===r[2]);
+   if(slot.length!==1)throw Error('E1_RECOVERY_SLOT_NOT_UNIQUE');
+   study1WizardSlotAuthority_({experiment:'E1',slotId:r[2]},slot[0],lock);
+  }
+  const consent=a.c.records.filter(x=>x&&x.binding&&x.binding.applicantId===applicantId);
+  if(consent.length>1||consent.some(x=>x.channel!=='FORMAL_E1'||x.experiment!=='E1'||
+     x.binding.experiment!=='E1'||!['ISSUED','CONFIRMED','SIGNED','WITHDRAWN'].includes(x.state)))
+   throw Error('E1_RECOVERY_CONSENT_SOURCE_MISMATCH');
+  if(lock.hasLock()!==true)throw Error('E1_RECOVERY_LOCK_LOST');
+  return {readOnly:true,experiment:'E1',applicantId,asOfUtc,
+   evidence:'CURRENT_ORIGINAL_SOURCES_ONLY',actionAuthority:'NONE',
+   reservations:rows.map(r=>({reservationId:r[0],slotId:r[2],
+    status:study1FormalEffectiveStatus_(r,asOfUtc),holdUntilUtc:r[4],
+    createdAtUtc:r[6],cancelledAtUtc:r[8],updatedAtUtc:r[9]})),
+   consents:consent.map(x=>({consentId:x.id,reservationId:x.binding.reservationId,state:x.state})),
+   disposition:'OWNER_REVIEW_REQUIRED'};
+ }finally{lock.releaseLock();}
 }

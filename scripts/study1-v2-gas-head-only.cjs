@@ -348,7 +348,7 @@ function privateOwnerReadOnlyCandidate(files){
  const owners={
   AdminSandbox:['study1ConsentVersionList','study1EConsentOwnerList',
    'study1EConsentOwnerSignedPdfDownload','study1EConsentOwnerWithdrawalCases'],
-  Study1FormalBooking:['study1OwnerE1OperationsAudit'],
+  Study1FormalBooking:['study1OwnerE1OperationsAudit','study1OwnerE1RecoveryAudit'],
   Study1WizardP0Bridge:['study1OwnerE1SlotAudit']
  };
  const gate="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";

@@ -140,6 +140,7 @@ function harness(){
   SpreadsheetApp:{openById:book,flush:()=>mutations.push({method:'flush'})}
  });
  vm.runInContext(scripts,ctx,{timeout:4500});
+ ctx.study1EConsentRegistry_=()=>({revision:0,records:[]});
  ctx.study1ParticipantGate_=()=>{if(props.get('OPEN')==='false')
   throw Error('PARTICIPANT_INTAKE_NOT_READY');return true;};
  ctx.study1ParticipantRecPolicy_=()=>({screeningVersion:'E1_TEST_V1',documentSha256:'a'.repeat(64)});
@@ -708,4 +709,46 @@ test('V08 JOIN exact key, CLAIM/CANCEL original row state only, and cross-applic
  assert.equal(h.ctx.study1FormalV08Outcome(cancel).status,'CANCELLED');
  assert.throws(()=>h.ctx.study1FormalV08Outcome({...cancel,emailProof:b}),/NOT_OWNED/);
  assert.equal(h.mutations.length,n);
+});
+
+test('new session cannot HOLD or mutate V08 after durable original consent issue, without a browser latch',()=>{
+ const h=harness(),person=h.person('A'),a=h.proof(person),held=h.holdSlot(a,h.S1);
+ h.ctx.study1EConsentRegistry_=()=>({revision:1,records:[{binding:{applicantId:person.applicantId},state:'ISSUED'}]});
+ const p=h.proof(person),n=h.mutations.length;
+ const req={emailProof:p,reservationId:held.reservationId,requestId:'REQ_FRESH_SESSION_12345678'};
+ assert.throws(()=>h.ctx.study1FormalCancel(req),/EXISTING_CONSENT/);
+ assert.throws(()=>h.ctx.study1FormalMove({...req,newSlotId:h.S2}),/EXISTING_CONSENT/);
+ assert.throws(()=>h.ctx.study1FormalWaitlistClaim(req),/EXISTING_CONSENT/);
+ assert.throws(()=>h.ctx.study1FormalWaitlistJoin({emailProof:p,slotId:h.S2,requestId:req.requestId}),/EXISTING_CONSENT/);
+ const q=h.ctx.study1FormalQuoteHold({emailProof:p,slotId:h.S2,requestId:req.requestId});
+ if(q.allowed)assert.throws(()=>h.ctx.study1FormalHoldSlot({emailProof:p,quote:q.quote}),/EXISTING_CONSENT/);
+ assert.equal(h.mutations.length,n);
+ assert.equal(h.ctx.study1FormalStatus(p).reservations[0].status,'HELD');
+});
+test('OWNER lost-browser reference reads original cancellation/consent without a bearer or writing',()=>{
+ const h=harness(),person=h.person('A'),p=h.proof(person),held=h.holdSlot(p,h.S1);
+ h.failAppend=true;
+ assert.throws(()=>h.ctx.study1FormalMove({emailProof:p,reservationId:held.reservationId,newSlotId:h.S2,requestId:'REQ_LOST_BROWSER_MOVE_12345678'}),/PARTIAL/);
+ h.ctx.study1EConsentRegistry_=()=>({revision:0,records:[]});
+ h.ctx.study1AdminOwnerRequired_=()=>{throw Error('OWNER_REQUIRED');};
+ const n=h.mutations.length;
+ assert.throws(()=>h.ctx.study1OwnerE1RecoveryAudit(person.applicantId),/OWNER_REQUIRED/);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ const r=h.ctx.study1OwnerE1RecoveryAudit(person.applicantId);
+ assert.equal(r.reservations.length,1);assert.equal(r.reservations[0].status,'CANCELLED');
+ assert.equal(r.actionAuthority,'NONE');assert.equal(r.evidence,'CURRENT_ORIGINAL_SOURCES_ONLY');
+ assert.equal(r.disposition,'OWNER_REVIEW_REQUIRED');assert.doesNotMatch(JSON.stringify(r),/tokenHash|emailProof|signature|idempotency_key/);
+ assert.equal(h.mutations.length,n);
+ const empty=h.ctx.study1OwnerE1RecoveryAudit('APP_MISSING_CASE_12345678');
+ assert.equal(empty.reservations.length,0);assert.equal(empty.disposition,'OWNER_REVIEW_REQUIRED');
+});
+test('OWNER lost-browser lookup cannot cross experiment or expose a signed bearer',()=>{
+ const h=harness(),person=h.person('A'),p=h.proof(person),held=h.holdSlot(p,h.S1);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ h.ctx.study1EConsentRegistry_=()=>({revision:7,records:[{id:'CONSENT_SYNTH_12345678',channel:'FORMAL_E1',experiment:'E1',state:'CONFIRMED',tokenHash:'PRIVATE_HASH',binding:{applicantId:person.applicantId,reservationId:held.reservationId,experiment:'E1'}}]});
+ const r=h.ctx.study1OwnerE1RecoveryAudit(person.applicantId);
+ assert.equal(r.consents[0].state,'CONFIRMED');assert.equal(r.reservations[0].status,'HELD');
+ assert.ok(!JSON.stringify(r).includes('PRIVATE_HASH'));
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ assert.throws(()=>h.ctx.study1OwnerE1RecoveryAudit(person.applicantId),/PUBLIC_READ_ONLY/);
 });
