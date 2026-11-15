@@ -35,6 +35,7 @@ function harness(){
    'updated_at_utc','status'],rows:[]},
   Screenings:{headers:['screening_id','applicant_id','rules_version','eligibility_result',
    'screened_at_utc','verified_by'],rows:[]},
+  Notifications:{headers:['notification_id','applicant_id','reservation_id','kind','status','attempts','created_at_utc','sent_at_utc','last_error_code'],rows:[]},
   Verification:{headers:['challenge_id','applicant_id','purpose','otp_hmac',
    'expires_at_utc','attempts','used_at_utc','email','created_at_utc'],rows:[]}
  };
@@ -77,7 +78,7 @@ function harness(){
   return id;
  }
  function book(id){
-  const allowed=id===P?['Applicants','Screenings','Verification']:['Slots','Reservations'];
+  const allowed=id===P?['Applicants','Screenings','Verification']:['Slots','Reservations','Notifications'];
   if(![P,O].includes(id))throw Error('UNKNOWN_SHEET');
   return {getId:()=>id,getSheetByName:name=>{
    if(!allowed.includes(name))return null;
@@ -865,4 +866,57 @@ test('V08 evidence prepare detects changed unrelated original rows before any ca
  h.evidenceCreateHook=f=>{if(f.raw.includes('"action":"CANCEL"')&&f.raw.includes('"stage":"PREPARED"'))h.tables.Slots.rows[1][3]=2;};
  assert.throws(()=>h.ctx.study1FormalCancel({emailProof:p,reservationId:held.reservationId,requestId:'REQ_CANCEL_COMPETE_12345678'}),/PREPARED_SOURCE_CHANGED/);
  assert.equal(h.tables.Reservations.rows[0][3],'HELD');assert.equal(h.evidenceFiles.length,3);
+});
+
+const wsFilter={query:'',status:'ALL',eligibility:'ALL',slotId:'',offset:0};
+function wsHarness(){
+ const h=harness();h.ctx.study1AdminOwnerRequired_=()=>true;
+ h.props.set('STUDY1_PARTICIPANT_DATA_USE_APPROVED','true');
+ h.props.set('STUDY1_ECONSENT_LIVE_SHEETS_APPROVED','true');
+ h.ctx.study1OwnerE1NoticeSnapshot_=()=>({rows:h.tables.Notifications.rows.map(r=>r.slice()),rowCount:h.tables.Notifications.rows.length+1});
+ return h;
+}
+test('P0-B owner roster includes original pre-consent applicants with searchable filters and E1 slot occupancy',()=>{
+ const h=wsHarness(),a=h.person('A'),z=h.person('B');
+ h.tables.Applicants.rows[1][6]='PENDING_EMAIL';
+ const held=h.holdSlot(h.proof(a),h.S1);
+ const r=h.ctx.study1OwnerE1Workspace(wsFilter);
+ assert.equal(r.total,2);assert.equal(r.slots.length,2);
+ assert.equal(r.slots.find(s=>s.slotId===h.S1).remaining,0);
+ assert.equal(r.participants.find(p=>p.applicantId===a.applicantId).bookingStatus,'HELD');
+ assert.equal(r.participants.find(p=>p.applicantId===z.applicantId).bookingStatus,'NOT_BOOKED');
+ assert.equal(h.ctx.study1OwnerE1Workspace({...wsFilter,query:z.applicantId,status:'PENDING_EMAIL'}).total,1);
+ assert.equal(h.ctx.study1OwnerE1Workspace({...wsFilter,slotId:h.S1}).total,1);
+ assert.doesNotMatch(JSON.stringify(r),/example.org|otp_hmac|idempotency_key|tokenHash|SLOT_E2/);
+ h.tables.Screenings.rows[1][2]='OTHER_VERSION';
+ const next=h.ctx.study1OwnerE1Workspace(wsFilter);assert.equal(next.total,1);assert.equal(next.excluded,1);
+});
+test('P0-B capacity, close and new slot preview check original history and revision without mutations',()=>{
+ const h=wsHarness(),a=h.person('A');h.holdSlot(h.proof(a),h.S1);
+ const r=h.ctx.study1OwnerE1Workspace(wsFilter),s=r.slots.find(x=>x.slotId===h.S1);
+ const q={action:'UPDATE',revision:r.revision,slotId:s.slotId,startAtUtc:s.startAtUtc,endAtUtc:s.endAtUtc,capacity:2,locationCode:s.locationCode};
+ const n=h.mutations.length;
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview(q).written,false);
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview({...q,action:'CLOSE',capacity:1}).after.status,'CLOSED');
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,locationCode:'OTHER_ROOM'}),/HISTORY_CONFLICT/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,capacity:0}),/DRAFT_INVALID/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,slotId:h.S3}),/SCOPE_INVALID/);
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview({...q,action:'CREATE',slotId:'SLOT_NEW_12345678'}).after.status,'CLOSED');
+ h.tables.Applicants.rows[0][1]='新姓名';
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview(q),/SOURCE_CHANGED/);
+ assert.equal(h.mutations.length,n);
+});
+test('P0-B owner data gate, public denial and duplicate applicant fail closed',()=>{
+ const h=wsHarness();h.person('A');const n=h.mutations.length;
+ h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/DATA_NOT_APPROVED/);
+ h.props.set('STUDY1_PARTICIPANT_DATA_USE_APPROVED','true');
+ h.ctx.study1AdminOwnerRequired_=()=>{throw Error('OWNER_REQUIRED');};
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/OWNER_REQUIRED/);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ h.tables.Applicants.rows.push(h.tables.Applicants.rows[0].slice());
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/APPLICANT_DUPLICATE/);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/PUBLIC_READ_ONLY/);
+ assert.equal(h.mutations.length,n);
 });

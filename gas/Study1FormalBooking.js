@@ -1125,3 +1125,152 @@ function study1FormalTxnObserve_(applicantId,lock,snapshot,registry){
  }
  return {mode:'APPROVED_EVIDENCE_ONLY',events};
 }
+
+/** P0-B original-source OWNER workspace. Read-only operations plus validated
+ * slot change preview, not a second database or authorization to change Slots.
+ * Exact current screening policy scopes E1; unknown historical versions are
+ * not guessed. The private data-use gate is independent of intake OPEN. */
+function study1OwnerE1WorkspaceGate_(){
+ study1AdminOwnerRequired_();
+ const p=PropertiesService.getScriptProperties();
+ if(p.getProperty('STUDY1_PARTICIPANT_DATA_USE_APPROVED')!=='true'||
+    p.getProperty('STUDY1_ECONSENT_LIVE_SHEETS_APPROVED')!=='true')
+  throw Error('E1_WORKSPACE_DATA_NOT_APPROVED');
+}
+function study1OwnerE1WorkspaceRead_(lock){
+ if(!lock||lock.hasLock()!==true)throw Error('E1_WORKSPACE_LOCK_REQUIRED');
+ study1OwnerE1WorkspaceGate_();
+ const p=PropertiesService.getScriptProperties();
+ const policy=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
+ const read=()=>{
+  const personal=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
+  return {apps:bookingReadOnlyTab_(personal,'Applicants',STUDY1_BINDING_SCHEMA_.applicants),
+   screenings:bookingReadOnlyTab_(personal,'Screenings',STUDY1_BINDING_SCHEMA_.screenings),
+   booking:study1FormalSnapshot_(),consent:study1EConsentRegistry_(),
+   notices:study1OwnerE1NoticeSnapshot_(),
+   raw:p.getProperty('STUDY1_E1_SLOT_REGISTRY_V1'),mac:p.getProperty('STUDY1_E1_SLOT_REGISTRY_HMAC'),
+   approved:p.getProperty('STUDY1_E1_SLOT_REGISTRY_APPROVED')};
+ };
+ const first=read(),second=read();
+ if(JSON.stringify(first)!==JSON.stringify(second)||lock.hasLock()!==true)
+  throw Error('E1_WORKSPACE_SOURCE_CHANGED');
+ const now=new Date().toISOString();
+ study1FormalValidateSnapshot_(first.booking,now);
+ if(first.approved!=='true'||typeof first.raw!=='string'||first.raw.length>200000||
+    study1BindingHmac_(['STUDY1_E1_SLOT_REGISTRY_V1',first.raw])!==first.mac)
+  throw Error('E1_WORKSPACE_SLOT_REGISTRY_NOT_VERIFIED');
+ const registry=JSON.parse(first.raw);
+ if(!Array.isArray(registry)||new Set(registry.map(x=>x.slotId)).size!==registry.length||
+    registry.some(x=>!x||!['E1','E2'].includes(x.experiment)))
+  throw Error('E1_WORKSPACE_SLOT_REGISTRY_INVALID');
+ const e1=new Set(registry.filter(x=>x.experiment==='E1').map(x=>x.slotId));
+ const slots=first.booking.slots.rows.filter(r=>e1.has(r[0]));
+ if(slots.length!==e1.size)throw Error('E1_WORKSPACE_SLOT_MISSING');
+ for(const row of slots)study1WizardSlotAuthority_({experiment:'E1',slotId:row[0]},row,lock);
+ const appIds=new Set(),screenIds=new Set(),byApp=new Map();
+ for(const a of first.apps.rows){
+  study1BindingId_(a[0]);
+  if(appIds.has(a[0]))throw Error('E1_WORKSPACE_APPLICANT_DUPLICATE');
+  appIds.add(a[0]);
+ }
+ for(const s of first.screenings.rows){
+  study1BindingId_(s[0]);
+  if(screenIds.has(s[0])||!appIds.has(s[1]))throw Error('E1_WORKSPACE_SCREENING_MISMATCH');
+  screenIds.add(s[0]);
+  const rows=byApp.get(s[1])||[];rows.push(s);byApp.set(s[1],rows);
+ }
+ const formal=first.consent.records.filter(x=>x&&x.channel==='FORMAL_E1'&&x.experiment==='E1');
+ const notices=study1OwnerE1NoticeProject_(first.consent,first.notices.rows,lock);
+ const bookings=study1OwnerE1BookingProject_(first.consent,first.booking,now,lock);
+ const byNotice=new Map(notices.records.map(x=>[x.id,x])),byBooking=new Map(bookings.records.map(x=>[x.id,x]));
+ const rows=[];let excluded=0;
+ for(const app of first.apps.rows){
+  const screens=byApp.get(app[0])||[];
+  if(screens.length!==1||screens[0][2]!==policy.screeningVersion||screens[0][5]!=='PARTICIPANT_SELF_REPORT'){
+   excluded++;continue;
+  }
+  const screening=screens[0];
+  if(typeof app[1]!=='string'||!['PENDING_EMAIL','EMAIL_VERIFIED'].includes(app[6])||
+     !['ELIGIBLE','INELIGIBLE'].includes(screening[3])){excluded++;continue;}
+  const related=first.booking.reservations.rows.filter(r=>r[1]===app[0]&&e1.has(r[2]));
+  const cs=formal.filter(x=>x.binding&&x.binding.applicantId===app[0]);
+  const c=cs.length===1?cs[0]:null;
+  const consentMatches=c&&related.some(r=>r[0]===c.binding.reservationId&&r[2]===c.binding.slotId);
+  const active=related.filter(r=>['HELD','CONFIRMED','WAITLISTED'].includes(study1FormalEffectiveStatus_(r,now)));
+  const recent=related.slice().sort((a,z)=>String(z[9]||z[6]).localeCompare(String(a[9]||a[6])))[0];
+  const displayed=active.length===1?active[0]:active.length===0?recent:null;
+  rows.push({applicantId:app[0],name:app[1],applicationStatus:app[6],eligibility:screening[3],
+   screenedAtUtc:screening[4],bookingStatus:active.length>1?'UNKNOWN':displayed?study1FormalEffectiveStatus_(displayed,now):'NOT_BOOKED',
+   slotId:displayed?displayed[2]:null,consentState:cs.length===0?'NOT_ISSUED':consentMatches?c.state:'UNKNOWN',
+   consentBookingStatus:consentMatches?(byBooking.get(c.id)||{}).bookingStatus||'UNKNOWN':'NOT_VERIFIED',
+   noticeStatus:cs.length===0?'NOT_QUEUED':consentMatches?(byNotice.get(c.id)||{}).noticeStatus||'UNKNOWN':'SOURCE_MISMATCH'});
+ }
+ const calendar=slots.map(r=>{
+  const linked=first.booking.reservations.rows.filter(x=>x[2]===r[0]);
+  const held=linked.filter(x=>study1FormalEffectiveStatus_(x,now)==='HELD').length;
+  const confirmed=linked.filter(x=>x[3]==='CONFIRMED').length;
+  return {slotId:r[0],startAtUtc:r[1],endAtUtc:r[2],capacity:r[3],locationCode:r[4],status:r[5],
+   held,confirmed,waitlisted:linked.filter(x=>x[3]==='WAITLISTED').length,
+   remaining:r[3]-held-confirmed,historicalCount:linked.length};
+ });
+ study1OwnerE1WorkspaceGate_();
+ if(lock.hasLock()!==true)throw Error('E1_WORKSPACE_LOCK_LOST');
+ return {first,rows,calendar,excluded,now,revision:study1BindingHmac_(['E1_WORKSPACE_REV_V1',JSON.stringify(first)])};
+}
+function study1OwnerE1Workspace(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();
+ if(!input||Object.keys(input).sort().join(',')!=='eligibility,offset,query,slotId,status'||
+    typeof input.query!=='string'||input.query.length>80||!Number.isSafeInteger(input.offset)||input.offset<0||
+    !['ALL','PENDING_EMAIL','EMAIL_VERIFIED'].includes(input.status)||
+    !['ALL','ELIGIBLE','INELIGIBLE'].includes(input.eligibility)||
+    typeof input.slotId!=='string'||input.slotId.length>64)throw Error('E1_WORKSPACE_FILTER_INVALID');
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_WORKSPACE_BUSY');
+ try{
+  const x=study1OwnerE1WorkspaceRead_(lock),query=input.query.trim().toLowerCase();
+  const found=x.rows.filter(r=>(input.status==='ALL'||r.applicationStatus===input.status)&&
+   (input.eligibility==='ALL'||r.eligibility===input.eligibility)&&(!input.slotId||r.slotId===input.slotId)&&
+   (!query||r.applicantId.toLowerCase().includes(query)||r.name.toLowerCase().includes(query)))
+   .sort((a,z)=>String(z.screenedAtUtc).localeCompare(String(a.screenedAtUtc))||a.applicantId.localeCompare(z.applicantId));
+  return {mode:'OWNER_E1_WORKSPACE',experiment:'E1',revision:x.revision,asOfUtc:x.now,
+   total:found.length,excluded:x.excluded,offset:input.offset,pageSize:50,
+   participants:found.slice(input.offset,input.offset+50),slots:x.calendar,
+   actionAuthority:'READ_AND_PREVIEW_ONLY'};
+ }finally{lock.releaseLock();}
+}
+function study1OwnerE1SlotChangePreview(input){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
+ study1AdminOwnerRequired_();
+ study1OwnerE1WorkspaceGate_();
+ if(!input||Object.keys(input).sort().join(',')!=='action,capacity,endAtUtc,locationCode,revision,slotId,startAtUtc'||
+    !['CREATE','UPDATE','CLOSE'].includes(input.action)||!/^[a-f0-9]{64}$/.test(input.revision||'')||
+    !Number.isSafeInteger(input.capacity)||input.capacity<1||
+    typeof input.locationCode!=='string'||input.locationCode.length<1||input.locationCode.length>80||
+    /^[=+\-@]/.test(input.locationCode)||/[<>\x00-\x1f]/.test(input.locationCode))
+  throw Error('E1_SLOT_DRAFT_INVALID');
+ study1BindingId_(input.slotId);
+ const start=study1BindingUtc_(input.startAtUtc),end=study1BindingUtc_(input.endAtUtc);
+ if(end<=start)throw Error('E1_SLOT_DRAFT_TIME_INVALID');
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_WORKSPACE_BUSY');
+ try{
+  const x=study1OwnerE1WorkspaceRead_(lock);
+  if(x.revision!==input.revision)throw Error('E1_SLOT_DRAFT_SOURCE_CHANGED');
+  const existing=x.calendar.find(r=>r.slotId===input.slotId);
+  const original=x.first.booking.slots.rows.find(r=>r[0]===input.slotId);
+  if(input.action==='CREATE'?(original||start<=Date.now()):!existing)
+   throw Error('E1_SLOT_DRAFT_SCOPE_INVALID');
+  if(existing&&(!['OPEN','CLOSED'].includes(existing.status)||input.capacity<existing.held+existing.confirmed))
+   throw Error('E1_SLOT_DRAFT_CAPACITY_OR_STATE_INVALID');
+  if(existing&&existing.historicalCount>0&&(input.startAtUtc!==existing.startAtUtc||
+    input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
+   throw Error('E1_SLOT_DRAFT_HISTORY_CONFLICT');
+  if(input.action==='CLOSE'&&(input.capacity!==existing.capacity||input.startAtUtc!==existing.startAtUtc||
+    input.endAtUtc!==existing.endAtUtc||input.locationCode!==existing.locationCode))
+   throw Error('E1_SLOT_DRAFT_CLOSE_ONLY');
+  return {mode:'E1_SLOT_CHANGE_PREVIEW',revision:x.revision,action:input.action,
+   before:existing||null,after:{slotId:input.slotId,startAtUtc:input.startAtUtc,endAtUtc:input.endAtUtc,
+    locationCode:input.locationCode,capacity:input.capacity,status:input.action==='CLOSE'?'CLOSED':existing?existing.status:'CLOSED'},
+   preservesReservations:true,requiresPiApproval:true,actionAuthority:'NONE',written:false};
+ }finally{lock.releaseLock();}
+}
