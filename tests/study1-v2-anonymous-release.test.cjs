@@ -50,3 +50,16 @@ test('one publish preserves old deployments; competing state or ambiguous POST d
  const bad=scenario('version');await assert.rejects(bad.run(),/unknown POST/);assert.deepEqual(bad.counts,[1,1,0]);
  const race=scenario('competition');await assert.rejects(race.run(),/inventory changed/);assert.deepEqual(race.counts,[0,0,0]);
 });
+
+test('GET-only v4 recovery requires exact historical source, unique deployment and direct anonymous ACL',async()=>{
+ const target='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3',s=initial(),v=dep(4,'ANYONE_ANONYMOUS');
+ const state={...s,proofs:[...s.proofs,{version:4,sha:target,access:'ANYONE_ANONYMOUS',known:true}],deps:[...s.deps,v]};
+ let gets=0;
+ const api={getDeployment:async id=>{gets++;assert.equal(id,v.deploymentId);return v;}};
+ assert.equal(await d.verifyAnonymousV4(api,s),null);
+ assert.equal(await d.verifyAnonymousV4(api,state),'https://script.google.com/macros/s/deployment-4/exec');
+ assert.equal(gets,1);
+ await assert.rejects(d.verifyAnonymousV4(api,{...state,safe:false}),/source\/inventory/);
+ await assert.rejects(d.verifyAnonymousV4(api,{...state,deps:[...state.deps,dep(4,'ANYONE_ANONYMOUS','duplicate')]}),/not unique/);
+ await assert.rejects(d.verifyAnonymousV4({getDeployment:async()=>dep(4,'ANYONE')},state),/differs from list/);
+});

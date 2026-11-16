@@ -57,7 +57,7 @@ jobs:
       - name: Source and audit safety tests (no credentials)
         env:
           V2_PRIVATE_TEST_MODE: 'true'
-        run: node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs
+        run: node --test tests/study1-v2-private-deploy.test.cjs tests/study1-v2-gas-head-only.test.cjs tests/closed.test.cjs tests/study1-v2-anonymous-release.test.cjs
       - name: Automatic V2 inventory (project GET only)
         env:
           V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}

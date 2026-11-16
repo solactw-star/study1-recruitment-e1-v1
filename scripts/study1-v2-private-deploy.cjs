@@ -458,6 +458,21 @@ function autoAuditInvocation(env){
  assert(!env.CONFIRMATION&&!env.PRIVATE_VERSION&&!env.EXPECTED_INVENTORY_SHA256,
   'automatic audit cannot accept mutation inputs');
 }
+// Historical authorized immutable anonymous release: direct GET only.
+async function verifyAnonymousV4(api,state){
+ const target='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
+ const p=state.proofs.find(x=>x.version===4);
+ const matches=normalizedDeployments(state.deps,true).filter(x=>x.version===4);
+ if(!p&&!matches.length)return null;
+ assert(p?.sha===target&&p.access==='ANYONE_ANONYMOUS'&&p.known&&state.safe,'anonymous v4 source/inventory not verified');
+ assert(matches.length===1,'anonymous v4 deployment not unique');
+ const listed=matches[0],direct=normalizedDeployments([await api.getDeployment(listed.id)],true)[0];
+ assert(JSON.stringify(direct)===JSON.stringify(listed),'anonymous v4 direct deployment differs from list');
+ assert(direct.points.length===1&&direct.points[0].web?.access==='ANYONE_ANONYMOUS'&&direct.points[0].web.executeAs==='USER_DEPLOYING','anonymous v4 ACL not verified');
+ const url=direct.points[0].web.url;
+ assert(/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url),'anonymous v4 URL not verified');
+ return url;
+}
 async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
  autoAuditInvocation(env);assertMain(env);reviewedLocal();
  assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
@@ -478,6 +493,8 @@ async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
   if(url&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)&&env.GITHUB_STEP_SUMMARY&&process.env.V2_PRIVATE_TEST_MODE!=='true')
    fs.appendFileSync(env.GITHUB_STEP_SUMMARY,'Verified OWNER-only version 2 web app: '+url+'\n');
  }else report('V2_VERSION2_DIRECT_READBACK_VERIFIED=false');
+ const publicUrl=await verifyAnonymousV4(api,state);
+ if(publicUrl){report('V2_ANONYMOUS_V4_DIRECT_READBACK_VERIFIED=true');report('V2_ANONYMOUS_V4_URL='+publicUrl);}
  return state;
 }
 function oneShotInvocation(env,event){
@@ -644,7 +661,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,
