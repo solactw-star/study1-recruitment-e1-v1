@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/study1-v2-uat-*'
       - 'tests/study1-v2-minimal-uat.test.cjs'
+      - 'tests/study1-v2-uat-shared.test.cjs'
       - 'gas/**'
       - '.github/workflows/study1-v2-minimal-uat-ci.yml'
 permissions:
@@ -19,11 +20,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/study1-v2-minimal-uat.test.cjs tests/study1-pdf-stamp-core.test.cjs tests/booking.test.cjs
+      - run: node --test tests/study1-v2-minimal-uat.test.cjs tests/study1-v2-uat-shared.test.cjs tests/study1-pdf-stamp-core.test.cjs tests/booking.test.cjs
       - run: node scripts/study1-v2-uat-page.cjs "$RUNNER_TEMP/Study1-isolated-UAT.html"
       - uses: actions/upload-artifact@v4
         with:
           name: Study1-isolated-UAT
           path: ${{ runner.temp }}/Study1-isolated-UAT.html
+          if-no-files-found: error
+          retention-days: 14
+      - name: Package local shared UAT (no credentials or database)
+        run: |
+          d="$RUNNER_TEMP/Study1-shared-UAT"
+          mkdir -p "$d/scripts" "$d/gas"
+          cp scripts/study1-v2-uat-{page.cjs,session.js,ui.js,shared.cjs,shared-ui.js} "$d/scripts/"
+          cp gas/{Study1Visitor.html,BookingCore.js,Study1PdfLib.js,Study1PdfStampCore.js} "$d/gas/"
+          cp docs/study1-v2-shared-uat-local.md "$d/README.md"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Study1-shared-UAT
+          path: ${{ runner.temp }}/Study1-shared-UAT/
           if-no-files-found: error
           retention-days: 14

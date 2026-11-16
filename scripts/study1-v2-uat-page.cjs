@@ -1,7 +1,6 @@
 'use strict';
 // Deterministic derived UAT HTML; keep formal GAS files and their guards intact.
 const fs=require('node:fs'),path=require('node:path');
-const core=require('./study1-v2-gas-head-only.cjs');
 const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
 function replace(s,from,to){if(s.split(from).length!==2)throw Error('UAT source anchor changed: '+from.slice(0,80));return s.replace(from,to);}
 function browserBooking(){const s=read('gas/BookingCore.js'),i=s.indexOf('/** Read column headings ONLY');if(i<1)throw Error('booking portability anchor');return s.slice(0,i);}
@@ -33,7 +32,7 @@ function build(){
  const scripts=[read('gas/Study1PdfLib.js'),kernel(),read('scripts/study1-v2-uat-ui.js')];if(scripts.some(s=>/<\/script|<\?/i.test(s)))throw Error('unsafe embedded script delimiter');
  return html+scripts.map(s=>'<script>'+s+'\n</script>').join('')+'</body></html>\n';
 }
-function candidate(){const base=core.anonymousReadOnlyCandidate();const files=base.map(f=>f.name==='Website'?{...f,source:replace(f.source,'function doGet(e){',"function doGet(e){\n if(e&&e.parameter&&e.parameter.view==='uat')return HtmlService.createHtmlOutputFromFile('Study1IsolatedUat').setTitle('Study1 隔離人工驗收').addMetaTag('viewport','width=device-width, initial-scale=1');")}:f);
+function candidate(){const core=require('./study1-v2-gas-head-only.cjs');const base=core.anonymousReadOnlyCandidate();const files=base.map(f=>f.name==='Website'?{...f,source:replace(f.source,'function doGet(e){',"function doGet(e){\n if(e&&e.parameter&&e.parameter.view==='uat')return HtmlService.createHtmlOutputFromFile('Study1IsolatedUat').setTitle('Study1 隔離人工驗收').addMetaTag('viewport','width=device-width, initial-scale=1');")}:f);
  files.push({name:'Study1IsolatedUat',type:'HTML',source:build()});core.closedManifest(files,true);core.closedWebsite(files);core.publicRpcSurface(files);return files;
 }
 module.exports={kernel,build,candidate};
