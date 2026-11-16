@@ -1713,3 +1713,12 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 ### 70-S.43｜2026-11-16 一次性匿名公開入口集中部署授權
 
 使用者本輪明確授權同一唯一 V2 GAS，以當前經審 public-readonly 原始碼衍生僅 manifest access 為 ANYONE_ANONYMOUS、executeAs 保持 USER_DEPLOYING 的匿名唯讀候選；同版適用正負測、遠端完整來源／既有私人及 v3 inventory、加密備份、競寫、單次 HEAD PUT／version POST／deployment POST 與回讀後交付真實匿名入口。此為本次一個精確 main push 的集中授權，非日後常設部署授權；不得重送未知 mutation，不得修改既有 v1/v2 私人或 v3 部署、不觸正式資料、REC、真人 Email／收件、舊系統。新匿名入口屬第一階段，後續隔離完整操作驗收另按 §70-S.42 進行。僅以實際遠端及登出 UI 證據判定可開啟；OPEN=false、CONSENT_READY=false、FORMAL_READY=false、LIVE_INTAKE_ENABLED=false。
+
+### 70-S.44｜2026-11-16 使用者確認：保留 GAS V2，極簡招募與可操作人工驗收優先
+
+本節為使用者最新明確決策，取代先前 Cloudflare 遷移方向及 §70-S.41–.43 中衝突的工作排序；保留其研究程序、安全、角色、歷史發布授權及有效 REC 限制。唯一原 GitHub solactw-star/study1-recruitment-e1-v1、原 V2 GAS Script ID 1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f、Google Sheets/Drive 資料責任不變。Cloudflare 子網域已建立但不再遷移或發布，保留為備援，不建立第二正式系統。匿名 v4 在完全未登入 Google 的 Edge 已人工通過首頁；校方管理 Chrome 尚失敗，普通 Chrome/手機待集中相容性驗收，不重做已通過的入口測試、不將其作為核心開發前置。
+
+- **P0**：同一原參與者介面的 E1 正常完整流程：最低必要資格自陳、聯絡與 Email OTP → 日期時間、名額與暫留 → 核對 → 閱讀研究者網站外預簽的完整版 PDF、本人手寫簽名、可信臺灣日期 → 完整簽署 PDF 與獨立 Reservations 確認 → 副本與必要通知。正式程序不因簡化而自行改變。優先使用原 BookingCore、正式 booking/consent/OTP 核心與 PDFLib，正負測及真正介面操作；不以另建展示網站或假 PDF 當完整驗收。
+- **人工驗收先行**：本輪授權實作、測試並集中部署同一 V2 的隔離人工驗收版本，保留匿名 v4 與私人 v2 原不可變部署；測試使用虛構身分、合成時段、真正可開啟的合成多頁 PDF、測試筆跡、模擬 OTP 或受控測試信箱；資料/權限與正式完全隔離，不寄給真實受試者、不把測試資料寫正式 Sheets/Drive/Properties。可分階段先交付可操作 UI/真 PDF，須明確標示本機/測試持久化與共用容量等尚未驗證部分；正式資料接線及真人收件另行授權。任何測試候選在公開面須維持正式 RPC deny、不可接觸研究個資；具體發布只限此次隔離驗收範圍，原備份、競寫、同版測試、單次異動及遠端回讀原則不變。
+- **P1/P2**：暫緩大型自訂管理首頁、個案詳細模組、統計、行政待辦及 E2；保留已有程式、測試與版本歷史，以原 Sheets/Drive 及必要私人後台支援研究者管理。不省略正式場次、PDF 核定、個資、預約交易一致性、必要通知及安全驗證。OPEN/CONSENT_READY/FORMAL_READY/LIVE_INTAKE_ENABLED=false 直到另行核准。不要以 REC/PI 正式啟用核准阻止隔離 UAT。
+- **排程**：沿用原每小時任務 6ae2e4049ac48191b4e5ae8972bf5cc3，更新 prompt 為本節優先序，保留原頻率/啟停；若工具無法更新，記錄 SYNC_FAILED 並以正式主檔最新條文作唯一接續依據，禁止新增重複排程或恢復 Cloudflare/舊 Repo。
