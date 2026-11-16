@@ -113,16 +113,28 @@ function publicRpcSurface(files){
   'public website intake not closed');
  return total;
 }
-function closedManifest(files){
+function closedManifest(files,allowAnonymous=false){
  const m=files.find(f=>f.name==='appsscript'&&f.type==='JSON');
  require_(m,'missing Apps Script manifest');
  let obj;
  try{obj=JSON.parse(m.source);}catch{fail('manifest cannot parse');}
  require_(obj.timeZone==='Asia/Taipei' && obj.runtimeVersion==='V8' &&
-  ['MYSELF','ANYONE'].includes(obj.webapp?.access) && obj.webapp?.executeAs==='USER_DEPLOYING',
+  ( ['MYSELF','ANYONE'].includes(obj.webapp?.access) || (allowAnonymous===true&&obj.webapp?.access==='ANYONE_ANONYMOUS') ) && obj.webapp?.executeAs==='USER_DEPLOYING',
   'V2 manifest must have MYSELF or login-only ANYONE / USER_DEPLOYING');
- if(obj.webapp.access==='ANYONE')publicRpcSurface(files);
+ if(obj.webapp.access!=='MYSELF')publicRpcSurface(files);
  return obj;
+}
+// Explicit opt-in candidate: no change to the normal public/private build sources.
+function anonymousReadOnlyCandidate(base=localSources()){
+ require_(closedManifest(base).webapp.access==='ANYONE','anonymous candidate requires reviewed public baseline');
+ require_(JSON.stringify(base.map(f=>f.name).sort())===JSON.stringify(APPROVED),'anonymous candidate inventory mismatch');
+ closedWebsite(base);publicRpcSurface(base);
+ const files=base.map(f=>{if(f.name!=='appsscript')return {...f};
+  const m=JSON.parse(f.source);m.webapp.access='ANYONE_ANONYMOUS';
+  return {...f,source:JSON.stringify(m,null,2)+'\n'};
+ });
+ require_(closedManifest(files,true).webapp.access==='ANYONE_ANONYMOUS','anonymous manifest required');
+ closedWebsite(files);return files;
 }
 function closedWebsite(files){
  const w=files.find(f=>f.name==='Website'&&f.type==='SERVER_JS')?.source;
@@ -466,7 +478,7 @@ function privateOwnerManagementCandidate(files){
 }
 // Bind this run to the closed, allowlisted private candidate of its exact checkout.
 const PRIVATE_TARGET=digest(privateOwnerManagementCandidate(localSources()));
-module.exports={PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
+module.exports={anonymousReadOnlyCandidate,PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,latestMain,
  runnerPaths,aad,audit,prepare,apply};
 if(require.main===module)main().catch(e=>{

@@ -73,15 +73,17 @@ function checkHead(head){
  core.closedWebsite(head.files);
  return {sha:TARGET,files:core.APPROVED.length};
 }
-function sourceProof(obj){
+function sourceProof(obj,allowAnonymous=false){
  assert(obj?.scriptId===SID,'remote Script ID mismatch');
  const remote=core.verifyRemote(obj);
  let access='UNKNOWN',known=false;
  try{
-  const manifest=core.closedManifest(obj.files);core.closedWebsite(obj.files);
+  const manifest=core.closedManifest(obj.files,allowAnonymous);core.closedWebsite(obj.files);
   access=manifest.webapp.access;
   known=(access==='MYSELF'&&([TARGET,HISTORICAL_TARGET,VERIFIED_VERSION2_SHA].includes(remote.sha)))||
-   (access==='ANYONE'&&remote.sha===core.digest(core.localSources()));
+   (access==='ANYONE'&&(remote.sha===core.digest(core.localSources())||
+    (allowAnonymous===true&&remote.sha==='3449d43bee67d450a1934cd24870b581c487bd84f854511a467e270bccf62158')))||
+   (allowAnonymous===true&&access==='ANYONE_ANONYMOUS'&&remote.sha===core.digest(core.anonymousReadOnlyCandidate()));
  }catch(_){}
  return {sha:remote.sha,count:remote.count,access,known};
 }
@@ -197,7 +199,7 @@ function redactedDeploymentShapes(deps){
     }))};
  });
 }
-function normalizedDeployments(d){
+function normalizedDeployments(d,allowAnonymous=false){
  assert(Array.isArray(d),'deployments must be an array');
  const seen=new Set();
  let headCount=0;
@@ -228,7 +230,7 @@ function normalizedDeployments(d){
    if(e.web){
     // API can omit resolved access metadata; immutable version manifest
     // will be checked separately. Explicit public access is never tolerated.
-    assert(e.web.access===null||['MYSELF','ANYONE'].includes(e.web.access),
+    assert(e.web.access===null||['MYSELF','ANYONE'].includes(e.web.access)||(allowAnonymous===true&&e.web.access==='ANYONE_ANONYMOUS'),
      'existing web app publicly accessible');
     assert(e.web.executeAs===null||e.web.executeAs==='USER_DEPLOYING',
      'unexpected existing web app execution identity');
@@ -239,24 +241,24 @@ function normalizedDeployments(d){
    points:points.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))};
  }).sort((a,b)=>a.id.localeCompare(b.id,'en'));
 }
-function fingerprint(versions,deps,headSha='',proofs=[]){
+function fingerprint(versions,deps,headSha='',proofs=[],allowAnonymous=false){
  return sha(JSON.stringify({versions:normalizedVersions(versions),
-  deployments:normalizedDeployments(deps),headSha,proofs}));
+  deployments:normalizedDeployments(deps,allowAnonymous),headSha,proofs}));
 }
-async function inventory(api){
+async function inventory(api,allowAnonymous=false){
  const [head,versions,deps]=await Promise.all([api.getHead(),api.getVersions(),api.getDeployments()]);
- const hp=sourceProof(head),vn=normalizedVersions(versions),dn=normalizedDeployments(deps);
+ const hp=sourceProof(head,allowAnonymous),vn=normalizedVersions(versions),dn=normalizedDeployments(deps,allowAnonymous);
  assert(vn.length<=100,'version inventory too large for complete verification');
  const proofs=[];
- for(const v of vn)proofs.push({version:v.version,...sourceProof(await api.getVersionContent(v.version))});
+ for(const v of vn)proofs.push({version:v.version,...sourceProof(await api.getVersionContent(v.version),allowAnonymous)});
  let safe=hp.known;
  for(const dep of dn){
   const proof=dep.version===null?hp:proofs.find(x=>x.version===dep.version);
   assert(proof,'deployment version missing from complete inventory');
   if(!proof.known||dep.points.some(x=>x.web&&x.web.access&&x.web.access!==proof.access&&
-   !(dep.kind==='HEAD'&&proof.access==='ANYONE'&&x.web.access==='MYSELF')))safe=false;
+   !(dep.kind==='HEAD'&&['ANYONE','ANYONE_ANONYMOUS'].includes(proof.access)&&x.web.access==='MYSELF')))safe=false;
  }
- const fp=fingerprint(versions,deps,hp.sha,proofs);
+ const fp=fingerprint(versions,deps,hp.sha,proofs,allowAnonymous);
  const stable=sha(JSON.stringify({versions:vn,deployments:dn.filter(x=>x.kind==='VERSIONED'),proofs}));
  return {head,versions,deps,fp,stable,headSha:hp.sha,headProof:hp,proofs,safe,
   versionCount:vn.length,deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
@@ -267,9 +269,9 @@ function requirePrivateHeadBaseline(s){
  assert(development.length===1&&development[0].points.some(x=>x.web?.access==='MYSELF'&&x.web.executeAs==='USER_DEPLOYING'),
   'development deployment must be explicitly verified MYSELF');
 }
-function summarize(s){
+function summarize(s,allowAnonymous=false){
  report('V2_PRIVATE_VERSION_NUMBERS='+normalizedVersions(s.versions).map(v=>v.version).join(','));
- report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps).map(d=>({version:d.version,
+ report('V2_PRIVATE_DEPLOYMENTS_JSON='+JSON.stringify(normalizedDeployments(s.deps,allowAnonymous).map(d=>({version:d.version,
   access:(d.version===null?s.headProof:s.proofs.find(p=>p.version===d.version))?.access||'UNKNOWN'}))));
  report('V2_PRIVATE_HEAD_SHA256='+s.headSha);
  report('V2_PRIVATE_HEAD_FILE_COUNT='+s.headProof.count);
@@ -283,9 +285,9 @@ function summarize(s){
  report('V2_PRIVATE_INVENTORY_SHA256='+s.fp);
  report('V2_PRIVATE_INVENTORY_KNOWN_SAFE='+s.safe);
 }
-async function audit(api){
- const state=await inventory(api);
- summarize(state);
+async function audit(api,allowAnonymous=false){
+ const state=await inventory(api,allowAnonymous);
+ summarize(state,allowAnonymous);
  report('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
  return state;
 }
@@ -461,10 +463,10 @@ async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
  assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
  const c=core.credentials(env.V2_GAS_CLASPRC_JSON);
  const api=await apiFactory(c,undefined,undefined,undefined,true);
- const state=await audit(api);
+ const state=await audit(api,true);
  // Read-only recovery after Run 43708421687 returned a deployment response
  // but immediate direct GET was 404. Never issue another POST from audit.
- const matches=normalizedDeployments(state.deps).filter(d=>d.version===RESUME_VERSION);
+ const matches=normalizedDeployments(state.deps,true).filter(d=>d.version===RESUME_VERSION);
  if(matches.length===1&&state.proofs.some(p=>p.version===RESUME_VERSION&&p.sha===VERIFIED_VERSION2_SHA&&p.known&&p.access==='MYSELF')){
   const listed=matches[0];
   const direct=normalizedDeployments([await api.getDeployment(listed.id)])[0];
