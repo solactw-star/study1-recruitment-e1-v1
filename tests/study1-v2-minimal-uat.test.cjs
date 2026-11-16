@@ -25,7 +25,7 @@ function syntheticInk(){
   chunk('IEND',Buffer.alloc(0))]);
 }
 
-function harness(){let now=Date.parse('2026-11-16T16:30:00Z');const sandbox=vm.createContext({PDFLib,crypto:crypto.webcrypto,Uint8Array,Date,Intl});vm.runInContext(u.kernel(),sandbox);return {s:sandbox.study1UatSession(()=>now),advance:ms=>now+=ms};}
+function harness(){let now=Date.parse('2026-11-16T16:30:00Z');const sandbox=vm.createContext({crypto:crypto.webcrypto,Uint8Array,Date,Intl,setTimeout,clearTimeout});vm.runInContext(require('node:fs').readFileSync(require.resolve('../gas/Study1PdfLib.js'),'utf8'),sandbox);vm.runInContext(u.kernel(),sandbox);return {s:sandbox.study1UatSession(()=>now),advance:ms=>now+=ms};}
 function held(s){s.screen(true);const slots=s.verify('12345678');assert.equal(slots.length,3);assert.ok(!slots.some(x=>x.slotId==='TEST_SLOT_1'));return s.hold(slots[0].slotId);}
 test('isolated real five-page original and signed PDF with original booking availability and PDF core',async()=>{
  const {s}=harness();assert.throws(()=>s.screen(false));s.screen(true);assert.throws(()=>s.verify('00000000'));const list=s.verify('12345678');assert.equal(list.length,3);assert.throws(()=>s.hold('TEST_SLOT_1'));s.hold(list[0].slotId);assert.equal(s.status().bookingStatus,'HELD');assert.throws(()=>s.hold(list[1].slotId));
