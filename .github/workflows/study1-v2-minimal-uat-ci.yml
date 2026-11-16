@@ -1,0 +1,29 @@
+name: Study1 V2 minimal isolated appointment and PDF UAT
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/study1-v2-uat-*'
+      - 'tests/study1-v2-minimal-uat.test.cjs'
+      - 'gas/**'
+      - '.github/workflows/study1-v2-minimal-uat-ci.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-uat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/study1-v2-minimal-uat.test.cjs tests/study1-pdf-stamp-core.test.cjs tests/booking.test.cjs
+      - run: node scripts/study1-v2-uat-page.cjs "$RUNNER_TEMP/Study1-isolated-UAT.html"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Study1-isolated-UAT
+          path: ${{ runner.temp }}/Study1-isolated-UAT.html
+          if-no-files-found: error
+          retention-days: 14

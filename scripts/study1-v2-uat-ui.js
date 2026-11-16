@@ -1,0 +1,30 @@
+/* Test UI only: no Google RPC, fetch, storage or real contact inputs. */
+(()=>{'use strict';
+ const el=id=>document.getElementById(id),txt=(id,value)=>{el(id).textContent=value;};
+ const session=study1UatSession();let chosen=null,doc=null,ink=false,busy=false,originalUrl=null,signedUrl=null;
+ const steps=['choose','screen','otp','slots','confirm','consent','done'];
+ const show=name=>{for(const s of steps)el('step-'+s).hidden=s!==name;txt('progressText','隔離驗收 · '+(steps.indexOf(name)+1)+' / '+steps.length);for(const [i,node] of [...el('progress').children].entries())node.classList.toggle('current',i<=steps.indexOf(name));};
+ const say=s=>txt('status',s);
+ const button=(id,fn)=>el(id).addEventListener('click',async()=>{try{await fn();}catch(e){say('測試未完成：'+String(e.message||e));}});
+ const taipei=s=>new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',dateStyle:'full',timeStyle:'short'}).format(new Date(s));
+ const revoke=()=>{if(originalUrl)URL.revokeObjectURL(originalUrl);if(signedUrl)URL.revokeObjectURL(signedUrl);originalUrl=signedUrl=null;};
+ window.addEventListener('pagehide',revoke);
+ button('chooseE1',()=>show('screen'));
+ button('screenNext',()=>{session.screen(el('fictionalEligible').checked);show('otp');say('僅使用預設虛構身分與模擬驗證碼；沒有寄信。');});
+ button('otpVerify',()=>{const list=session.verify(el('otpInput').value);el('slot').replaceChildren();for(const s of list){const o=document.createElement('option');o.value=s.slotId;o.textContent=taipei(s.startAtUtc)+' · 測試剩餘 '+s.remaining;el('slot').append(o);}el('hold').disabled=!list.length;show('slots');say('第一個合成時段已額滿，以下只顯示有名額的時段。');});
+ button('hold',()=>{chosen=session.hold(el('slot').value);txt('v06Date',taipei(chosen.startAtUtc));txt('v06Time',taipei(chosen.endAtUtc));txt('holdUntil',taipei(chosen.holdUntil));show('confirm');say('僅本頁暫留，10 分鐘有效；尚未確認預約。');});
+ button('confirm',async()=>{if(busy)return;busy=true;el('confirm').disabled=true;try{doc=await session.document();originalUrl=URL.createObjectURL(new Blob([doc.bytes],{type:'application/pdf'}));el('officialPdfDownload').href=originalUrl;el('officialPdfViewer').data=originalUrl;txt('officialPdfSha',doc.sha);show('consent');say('這是五頁合成測試 PDF，請使用虛構筆跡，不要簽真名。');}finally{busy=false;el('confirm').disabled=false;}});
+ const canvas=el('visitorSignaturePreview'),ctx=canvas.getContext('2d');let previous=null;
+ const clear=()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='#173341';ctx.lineWidth=3;ctx.lineCap='round';ink=false;previous=null;};
+ clear();
+ const position=e=>{const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height];};
+ canvas.addEventListener('pointerdown',e=>{if(busy)return;e.preventDefault();canvas.setPointerCapture(e.pointerId);previous=position(e);});
+ canvas.addEventListener('pointermove',e=>{if(!previous||busy)return;e.preventDefault();const next=position(e);if(Math.hypot(next[0]-previous[0],next[1]-previous[1])>1){ctx.beginPath();ctx.moveTo(...previous);ctx.lineTo(...next);ctx.stroke();ink=true;previous=next;}});
+ for(const event of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(event,()=>{previous=null;});
+ button('visitorSignatureClear',()=>{if(!busy)clear();});
+ button('finish',async()=>{if(busy)return;if(!ink||!el('readPdf').checked||!el('agree').checked){say('請先閱讀完整測試 PDF、畫上虛構筆跡並確認。');return;}busy=true;el('finish').disabled=true;
+ try{const bytes=Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]),s=>s.charCodeAt(0));const result=await session.sign(bytes,true,true);signedUrl=URL.createObjectURL(new Blob([result.bytes],{type:'application/pdf'}));el('formalDonePdfDownload').href=signedUrl;txt('formalDoneBooking',result.booking.bookingStatus);txt('formalDonePdfSha',result.sha);txt('formalDonePdfDate',result.date);txt('formalDonePages',String(result.pageCount));show('done');say('完整測試 PDF 已重新開啟核對；本頁測試預約已確認。沒有正式紀錄或寄信。');}
+ finally{busy=false;el('finish').disabled=session.status().stage==='DONE';}});
+ button('cancelTest',()=>{if(busy)return;session.cancel();revoke();for(const s of steps)el('step-'+s).hidden=true;el('cancelTest').disabled=true;say('測試已取消，未成立正式預約。重新整理可以重測。');});
+ show('choose');say('僅隔離測試；不使用真實姓名、聯絡方式、簽名或研究時段。');
+})();
