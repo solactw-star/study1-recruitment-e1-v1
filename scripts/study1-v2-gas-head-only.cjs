@@ -210,7 +210,7 @@ function credentials(raw){
   'V2 OAuth secret lacks refresh_token/client_id/client_secret');
  return c;
 }
-async function apiFromCredentials(c,fetcher=fetch){
+async function apiFromCredentials(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),random=Math.random){
  const body=new URLSearchParams({grant_type:'refresh_token',refresh_token:c.refresh_token,
   client_id:c.client_id,client_secret:c.client_secret});
  const auth=await fetcher('https://oauth2.googleapis.com/token',{
@@ -221,12 +221,25 @@ async function apiFromCredentials(c,fetcher=fetch){
  require_(typeof token==='string'&&token.length>15,'OAuth access token unavailable');
  const endpoint='https://script.googleapis.com/v1/projects/'+encodeURIComponent(SID)+'/content';
  async function request(method,files){
-  const response=await fetcher(endpoint,{method,
-   headers:{Authorization:'Bearer '+token,...(files?{'Content-Type':'application/json'}:{})},
-   body:files?JSON.stringify({files:fileData(files)}):undefined,
-   signal:AbortSignal.timeout(30000)});
-  if(!response.ok)fail('V2 GAS HEAD '+method+' failed HTTP '+response.status+' (no retry)');
-  return response.json();
+  // Apply the same bounded read-only transport policy as the existing
+  // inventory API. A transient GET failure must not cause a successful
+  // HEAD write to be misclassified before its full readback.
+  const {GET_RETRY_MAX_ATTEMPTS,retryDelayMs}=require('./study1-v2-private-deploy.cjs');
+  const max=method==='GET'?GET_RETRY_MAX_ATTEMPTS:1;
+  for(let attempt=1;attempt<=max;attempt++){
+   const response=await fetcher(endpoint,{method,
+    headers:{Authorization:'Bearer '+token,...(files?{'Content-Type':'application/json'}:{})},
+    body:files?JSON.stringify({files:fileData(files)}):undefined,
+    signal:AbortSignal.timeout(30000)});
+   if(response.ok)return response.json();
+   const status=response.status;
+   if(method==='GET'&&(status===429||status===503)&&attempt<max){
+    const ms=retryDelayMs(status,attempt,random());
+    console.log('V2_HEAD_GET_RETRY_HTTP_STATUS='+status+' attempt='+attempt+'/'+max+' delay_ms='+ms);
+    await sleep(ms);continue;
+   }
+   fail('V2 GAS HEAD '+method+' failed HTTP '+status+' after '+attempt+' attempt(s) (no further retry)');
+  }
  }
  return {getContent:()=>request('GET'),putContent:files=>request('PUT',files)};
 }

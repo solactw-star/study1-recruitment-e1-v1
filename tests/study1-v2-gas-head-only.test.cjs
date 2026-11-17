@@ -75,6 +75,48 @@ test('OAuth and HTTP update use only new GAS /content endpoint',async()=>{
  assert.deepEqual(calls.slice(1).map(c=>c.method),['GET','PUT']);
  assert.ok(!calls[2].body.includes('.clasp.json'));
 });
+test('HEAD-only transport reuses bounded GET backoff without retrying PUT or authorization failure',async()=>{
+ for(const status of [429,503,401,403,404]){
+  const waits=[],calls=[];
+  const api=await m.apiFromCredentials(creds(),async(url,opts)=>{
+   calls.push(opts.method);
+   if(url.includes('oauth2'))return {ok:true,json:async()=>({access_token:'a-bearer-token-this-is-long'})};
+   return {ok:false,status};
+  },async ms=>waits.push(ms),()=>0);
+  await assert.rejects(api.getContent(),new RegExp('GET failed HTTP '+status));
+  const transient=status===429||status===503;
+  assert.deepEqual(waits,status===429?[30000,60000]:status===503?[1000,2000]:[]);
+  assert.equal(calls.filter(x=>x==='GET').length,transient?3:1);
+  const before=waits.slice();
+  await assert.rejects(api.putContent(fixtures()),new RegExp('PUT failed HTTP '+status));
+  assert.equal(calls.filter(x=>x==='PUT').length,1);
+  assert.equal(calls.filter(x=>x==='POST').length,1);
+  assert.deepEqual(waits,before);
+ }
+});
+test('HEAD prepare and apply tolerate transient GET failures including after the single PUT',async()=>{
+ const e=env(),c=creds(),before=remote();
+ e.EXPECTED_REMOTE_SHA256=m.digest(before.files);
+ const updated=fixtures().map(x=>x.name==='Index'?{...x,source:'new verified content'}:x);
+ let state=before,reads=0,puts=0,auth=0;
+ const waits=[];
+ const api=await m.apiFromCredentials(c,async(url,opts)=>{
+  if(url.includes('oauth2')){auth++;return {ok:true,json:async()=>({access_token:'a-bearer-token-this-is-long'})};}
+  if(opts.method==='PUT'){puts++;state={scriptId:m.SID,files:JSON.parse(opts.body).files};return {ok:true,json:async()=>state};}
+  reads++;
+  if(reads===1||reads===5)return {ok:false,status:503};
+  if(reads===6)return {ok:false,status:429};
+  return {ok:true,json:async()=>state};
+ },async ms=>waits.push(ms),()=>0);
+ try{
+  await m.prepare(api,updated,c,e);
+  assert.equal(puts,0);
+  const result=await m.apply(api,updated,c,e);
+  assert.equal(result.sha,m.digest(updated));
+  assert.equal(puts,1);assert.equal(auth,1);
+  assert.equal(reads,7);assert.deepEqual(waits,[1000,1000,60000]);
+ }finally{fs.rmSync(e.RUNNER_TEMP,{recursive:true,force:true});}
+});
 test('prewrite AES-GCM snapshot is encrypted and authenticated to run and OAuth',()=>{
  const raw=JSON.stringify(remote()),c=creds();const e=m.seal(raw,c.refresh_token,'run-123');
  assert.equal(m.unseal(e,c.refresh_token,'run-123'),raw);
