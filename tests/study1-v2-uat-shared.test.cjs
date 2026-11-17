@@ -110,17 +110,18 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  const t=Date.parse('2026-11-18T02:00:00.000Z'),storeId='SYNTHETIC_UNIT_TEST_ONLY';
  realm.args=JSON.stringify({source:original.bytes,ink:Array.from(syntheticInk()),layout:original.layout,sha:original.hash,at:new Date(t).toISOString()});
  const signed=await vm.runInContext('(async()=>{const x=JSON.parse(args);return study1PdfComposeSigned_(x.source,x.ink,x.layout,{experiment:"E1",version:"UAT-SYNTHETIC-1",sha256:x.sha},new Date(x.at));})()',realm);
- const config={storeId,sourceSha:original.hash,slots:[['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
+ const config={storeId,sourceSha:original.hash,slots:[['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z'],['TEST_SLOT_2','2026-11-19T04:00:00.000Z','2026-11-19T05:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
  const matrix=[['STUDY1_E1_SYNTHETIC_CASES_V1',storeId,...Array(7).fill('')],...Array.from({length:12},()=>Array(9).fill(''))];
- let held=false,deny=false,badParent=false,hasFormula=false,failFlush=false,partial=false,writes=0,opens=0,clock=t;
+ let held=false,deny=false,lose=false,badParent=false,hasFormula=false,failFlush=false,partial=false,writes=0,opens=0,clock=t;
  const sheet={getName:()=> 'SYNTHETIC_CASES',getParent:()=>({getId:()=>badParent?'WRONG':storeId}),getLastRow:()=>13,getLastColumn:()=>9,
   getRange:(r,c,n,m)=>({getValues:()=>matrix.slice(r-1,r-1+n).map(x=>x.slice(c-1,c-1+m)),getFormulas:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>hasFormula&&i===1&&j===1?'=1':'')),
    setValues:v=>{assert.equal(held,true);writes++;matrix[r-1]=v[0].slice();if(partial)matrix[r-1][1]='';}})};
- const svc={getLock:()=>({tryLock:()=>{if(deny||held)return false;held=true;return true;},hasLock:()=>held,releaseLock:()=>{held=false;}}),getSheet:()=>{assert.equal(held,true);opens++;return sheet;},flush:()=>{if(failFlush)throw Error('unknown');},now:()=>clock,decode:s=>Array.from(Buffer.from(s,'base64')),digest:hash};
+ const svc={getLock:()=>({tryLock:()=>{if(deny||held)return false;held=true;return true;},hasLock:()=>held&&!lose,releaseLock:()=>{held=false;}}),getSheet:()=>{assert.equal(held,true);opens++;return sheet;},flush:()=>{if(failFlush)throw Error('unknown');},now:()=>clock,decode:s=>Array.from(Buffer.from(s,'base64')),digest:b=>hash(Buffer.from(b))};
  const tx=choose=>realm.study1UatStoreTransaction_(svc,config,choose);
  const record=i=>({alias:'TEST_0'+(i+1),caseId:'UAT_'+String(i+1).repeat(24),tokenHash:String(i+1).repeat(64),state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''});
  const change=(i,fields)=>tx(rows=>({index:i,record:{...rows[i],...fields}}));
  deny=true;assert.throws(()=>tx(()=>null),/UAT_LOCK_BUSY/);assert.equal(opens,0);deny=false;
+ lose=true;assert.throws(()=>tx(()=>null),/UAT_LOCK_LOST/);assert.equal(opens,0);assert.equal(held,false);lose=false;
  badParent=true;assert.throws(()=>tx(()=>null),/UAT_STORE_IDENTITY/);badParent=false;
  hasFormula=true;assert.throws(()=>tx(()=>null),/MARKER_OR_FORMULA/);hasFormula=false;
  assert.equal(writes,0);
@@ -137,6 +138,14 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  const after=writes;change(0,receipt);assert.equal(writes,after);
  assert.throws(()=>change(0,{state:'CANCELLED'}),/UAT_(UNCONFIRMED_PDF|TRANSITION)/);
  assert.throws(()=>change(1,h),/UAT_SLOT_UNAVAILABLE/);
+ // Expired/cancelled holds release the second slot, without weakening the first confirmed one.
+ const second={...h,slotId:'TEST_SLOT_2'};change(1,second);
+ clock=t+600001;assert.throws(()=>change(1,receipt),/UAT_HOLD_EXPIRED/);
+ change(1,{state:'EXPIRED'});
+ tx(()=>({index:2,record:record(2)}));change(2,{state:'SLOTS'});
+ const nextHold={...second,holdUntil:new Date(clock+600000).toISOString(),holdKey:'f'.repeat(32)};
+ change(2,nextHold);change(2,{state:'CANCELLED'});
+ tx((rows,avail)=>{assert.equal(avail.some(x=>x.slotId==='TEST_SLOT_2'),true);assert.equal(avail.some(x=>x.slotId==='TEST_SLOT_1'),false);return null;});
  // A partially changed persisted PDF is never acknowledged or used for capacity.
  matrix[1][1]='pdf:AAAA';assert.throws(()=>tx(()=>null),/UAT_PDF_INTEGRITY/);
  assert.equal(held,false);
