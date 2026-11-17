@@ -63,3 +63,27 @@ test('GET-only v4 recovery requires exact historical source, unique deployment a
  await assert.rejects(d.verifyAnonymousV4(api,{...state,deps:[...state.deps,dep(4,'ANYONE_ANONYMOUS','duplicate')]}),/not unique/);
  await assert.rejects(d.verifyAnonymousV4({getDeployment:async()=>dep(4,'ANYONE')},state),/differs from list/);
 });
+
+test('immutable verified v4 remains known after GAS source changes; tampered or wrong ACL still refused',async()=>{
+ const fs=require('node:fs'),path=require('node:path');
+ const historical=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-pdf-stamp-core.txt'),'utf8');
+ const current=candidate(),old=current.map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f);
+ const historicalSha='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
+ assert.equal(core.digest(old),historicalSha,'exact historical immutable source');
+ assert.notEqual(core.digest(current),historicalSha);
+ const remote=files=>({scriptId:core.SID,files});
+ const oldProof=d.sourceProof(remote(old),true);
+ assert.equal(oldProof.sha,historicalSha);assert.equal(oldProof.known,true);
+ assert.equal(d.sourceProof(remote(old),false).known,false,'no implicit anonymous authorization');
+ assert.equal(d.sourceProof(remote(current),true).known,true);
+ const unknown=old.map(f=>f.name==='Index'?{...f,source:f.source+'\n<!-- unknown -->'}:f);
+ assert.equal(d.sourceProof(remote(unknown),true).known,false);
+ const wrong=old.map(f=>f.name==='appsscript'?{...f,source:JSON.stringify({...JSON.parse(f.source),webapp:{access:'ANYONE_ANONYMOUS',executeAs:'USER_ACCESSING'}})}:f);
+ assert.equal(d.sourceProof(remote(wrong),true).known,false);
+ const version={scriptId:core.SID,versionNumber:4},deployment=dep(4,'ANYONE_ANONYMOUS');
+ const api={getHead:async()=>remote(old),getVersions:async()=>[version],getDeployments:async()=>[deployment],getVersionContent:async()=>remote(old),getDeployment:async()=>deployment};
+ const state=await d.inventory(api,true);assert.equal(state.safe,true);
+ assert.equal(await d.verifyAnonymousV4(api,state),'https://script.google.com/macros/s/deployment-4/exec');
+ assert.equal((await d.inventory({...api,getVersionContent:async()=>remote(unknown)},true)).safe,false);
+ assert.equal((await d.inventory({...api,getDeployments:async()=>[dep(4,'ANYONE')]},true)).safe,false);
+});

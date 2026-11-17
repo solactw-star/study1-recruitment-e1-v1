@@ -13,6 +13,9 @@ const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
 const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
 const TARGET=core.PRIVATE_TARGET;
+// Immutable anonymous v4, verified by GET-only Run 43795872212 on 2026-11-16.
+// Historical provenance must not depend on the current mutable checkout.
+const VERIFIED_VERSION4_SHA='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
 // Verified historical version 2, read back from release Run 43706978095.
 const VERIFIED_VERSION2_SHA='b33dd95f092e562ab7948645fcf997e2545b9ad9fefe1e6f9bc4cffd9d4d0da3';
 // One authorized execution only, bound to the reviewed parent and push event.
@@ -83,7 +86,7 @@ function sourceProof(obj,allowAnonymous=false){
   known=(access==='MYSELF'&&([TARGET,HISTORICAL_TARGET,VERIFIED_VERSION2_SHA].includes(remote.sha)))||
    (access==='ANYONE'&&(remote.sha===core.digest(core.localSources())||
     (allowAnonymous===true&&remote.sha==='3449d43bee67d450a1934cd24870b581c487bd84f854511a467e270bccf62158')))||
-   (allowAnonymous===true&&access==='ANYONE_ANONYMOUS'&&remote.sha===core.digest(core.anonymousReadOnlyCandidate()));
+   (allowAnonymous===true&&access==='ANYONE_ANONYMOUS'&&(remote.sha===VERIFIED_VERSION4_SHA||remote.sha===core.digest(core.anonymousReadOnlyCandidate())));
  }catch(_){}
  return {sha:remote.sha,count:remote.count,access,known};
 }
@@ -460,7 +463,7 @@ function autoAuditInvocation(env){
 }
 // Historical authorized immutable anonymous release: direct GET only.
 async function verifyAnonymousV4(api,state){
- const target='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
+ const target=VERIFIED_VERSION4_SHA;
  const p=state.proofs.find(x=>x.version===4);
  const matches=normalizedDeployments(state.deps,true).filter(x=>x.version===4);
  if(!p&&!matches.length)return null;
