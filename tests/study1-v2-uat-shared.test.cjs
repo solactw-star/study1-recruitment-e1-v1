@@ -602,3 +602,43 @@ test('same-site admin preview and confirm button block unknown destructive retri
  assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));assert.match(nodes.get('siteTestCases').textContent,/無測試案件/);
  badPreview=true;run();await p.click();assert.equal(c.disabled,true);assert.match(nodes.get('siteTestCases').textContent,/尚未核實/);assert.doesNotMatch(nodes.get('siteTestCases').textContent,/secret/);
 });
+
+test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{
+ const core=require('../scripts/study1-v2-gas-head-only.cjs'),d=require('../scripts/study1-v2-private-deploy.cjs');
+ const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const baseline=core.anonymousReadOnlyCandidate(),target=adapter.sameSiteCandidate(),privateFiles=core.privateOwnerManagementCandidate(core.localSources());
+ const reviewedTargetSha256=core.digest(target),content=files=>({scriptId:core.SID,files});
+ const version=n=>({scriptId:core.SID,versionNumber:n,createTime:'2026-11-17T00:00:00Z',description:'TEST '+n});
+ const dep=(id,n,access)=>({deploymentId:id,deploymentConfig:{scriptId:core.SID,...(n===null?{}:{versionNumber:n}),manifestFileName:'appsscript',description:'TEST'},entryPoints:[{entryPointType:'WEB_APP',webApp:{entryPointConfig:{access,executeAs:'USER_DEPLOYING'},url:'https://script.google.com/macros/s/'+id+'/exec'}}]});
+ const prior=dep('TEST_OFFICIAL',2,'ANYONE_ANONYMOUS'),current=dep('TEST_OFFICIAL',3,'ANYONE_ANONYMOUS');
+ const others=[dep('TEST_DEV',null,'ANYONE_ANONYMOUS'),dep('TEST_PRIVATE',1,'MYSELF')];
+ const oldProofs=[{version:1,...d.sourceProof(content(privateFiles),true)},{version:2,...d.sourceProof(content(baseline),true)}];
+ const snapshot=(files,versions,deps,proofs,safe)=>{const head=content(files),headSha=core.digest(files);return {head,headSha,versions,deps,proofs,safe,fp:d.fingerprint(versions,deps,headSha,proofs,true)};};
+ const before=snapshot(baseline,[version(1),version(2)],[...others,prior],oldProofs,true);
+ const newProof={version:3,...d.sourceProof(content(target),true)};
+ assert.equal(newProof.known,false); // unchanged legacy guard
+ const after=snapshot(target,[version(1),version(2),version(3)],[...others,current],[...oldProofs,newProof],false);
+ const input={before,after,priorDirect:prior,currentDirect:current,newContent:content(target),reviewedTargetSha256};
+ const verify=x=>adapter.verifySameSiteReadback(x);
+ const receipt=verify(input);
+ assert.deepEqual(receipt,{readbackVerified:true,releaseAuthorized:false,runtimeVerified:false,sameOfficialUrl:true,otherDeploymentsUnchanged:true,historicalVersionsUnchanged:true,version:3,sourceSha256:reviewedTargetSha256});
+ assert.doesNotMatch(JSON.stringify(receipt),/TEST_OFFICIAL|TEST_PRIVATE|scriptId|https:/);
+ const mutate=fn=>{const s=structuredClone(input);fn(s);if(s.after)s.after.fp=d.fingerprint(s.after.versions,s.after.deps,s.after.headSha,s.after.proofs,true);return s;};
+ const targetDep=s=>s.after.deps.find(x=>x.deploymentId==='TEST_OFFICIAL');
+ for(const bad of [
+  x=>{x.reviewedTargetSha256='0'.repeat(64);},
+  x=>{x.before.safe=false;},
+  x=>{targetDep(x).entryPoints[0].webApp.url='https://script.google.com/macros/s/WRONG/exec';},
+  x=>{x.currentDirect.deploymentConfig.versionNumber=2;},
+  x=>{x.priorDirect.deploymentId='WRONG';},
+  x=>{x.after.deps.push(dep('TEST_EXTRA',2,'ANYONE_ANONYMOUS'));},
+  x=>{x.after.deps.find(y=>y.deploymentId==='TEST_PRIVATE').deploymentConfig.description='changed';},
+  x=>{x.after.versions[0].description='changed';},
+  x=>{x.after.proofs[0].sha='0'.repeat(64);},
+  x=>{x.newContent=content(baseline);},
+  x=>{x.after.headSha=core.digest(baseline);},
+  x=>{x.newContent.scriptId='OTHER';}
+ ])assert.throws(()=>verify(mutate(bad)));
+ assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>core.publicRpcSurface(target));
+});

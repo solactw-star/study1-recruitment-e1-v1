@@ -419,4 +419,57 @@ function sameSiteCandidate(){
  return result;
 }
 
-module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate};
+/* Evidence-only check for the later, independently authorized update of
+ * ONE existing official deployment. Unlike the old create-deployment path,
+ * the ID and URL must not change. Consumes already obtained GET snapshots;
+ * no network, credentials, workflow trigger, permission or mutation. It
+ * deliberately does NOT change sourceProof, publicRpcSurface, releaseFiles
+ * or the original deployment guard. It cannot authorize a publication. */
+function verifySameSiteReadback({before,after,priorDirect,currentDirect,newContent,reviewedTargetSha256}){
+ const core=require('./study1-v2-gas-head-only.cjs'),d=require('./study1-v2-private-deploy.cjs');
+ const need=(v,m)=>{if(!v)throw Error('SAME_SITE_READBACK_UNVERIFIED: '+m);};
+ const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+ const reviewed=sameSiteCandidate(),target=core.digest(reviewed);
+ need(reviewedTargetSha256===target,'reviewed checkout digest differs');
+ const snapshots=[before,after].map(s=>{
+  need(s&&Array.isArray(s.proofs),'incomplete inventory');
+  const versions=d.normalizedVersions(s.versions),deployments=d.normalizedDeployments(s.deps,true);
+  const head=core.verifyRemote(s.head);
+  need(s.headSha===head.sha&&s.proofs.length===versions.length&&
+   versions.every((v,i)=>s.proofs[i]?.version===v.version)&&
+   s.fp===d.fingerprint(s.versions,s.deps,head.sha,s.proofs,true),'inventory evidence inconsistent');
+  need(deployments.filter(x=>x.kind==='HEAD').length===1,'development deployment missing');
+  return {versions,deployments,head,proofs:s.proofs};
+ });
+ const [a,b]=snapshots;
+ need(before.safe===true&&d.sourceProof(before.head,true).known&&a.proofs.every(p=>p.known===true),'unverified previous source');
+ const isAnon=x=>x.kind==='VERSIONED'&&x.points.length===1&&x.points[0].type==='WEB_APP'&&
+  x.points[0].web?.access==='ANYONE_ANONYMOUS'&&x.points[0].web.executeAs==='USER_DEPLOYING'&&
+  /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(x.points[0].web.url);
+ const oldOfficial=a.deployments.filter(isAnon);
+ need(oldOfficial.length===1,'original official deployment ambiguous');
+ const prior=oldOfficial[0],current=b.deployments.find(x=>x.id===prior.id);
+ need(a.proofs.some(p=>p.version===prior.version&&p.known&&p.access==='ANYONE_ANONYMOUS'),'original deployment source unknown');
+ need(equal(d.normalizedDeployments([priorDirect],true)[0],prior),'previous direct/list mismatch');
+ need(current&&isAnon(current)&&current.version!==prior.version&&current.manifest===prior.manifest&&
+  equal(current.points,prior.points),'official deployment identity, URL or ACL changed');
+ need(equal(d.normalizedDeployments([currentDirect],true)[0],current),'current direct/list mismatch');
+ need(equal(a.deployments.filter(x=>x.id!==prior.id),b.deployments.filter(x=>x.id!==prior.id)),
+  'another deployment changed or a deployment was added/removed');
+ const added=b.versions.filter(x=>!a.versions.some(v=>v.version===x.version));
+ need(added.length===1&&added[0].version===current.version&&
+  equal(b.versions.filter(x=>x.version!==current.version),a.versions),'immutable version inventory changed unexpectedly');
+ need(equal(b.proofs.filter(x=>x.version!==current.version),a.proofs),'historical version content changed');
+ const newProof=b.proofs.find(p=>p.version===current.version),immutable=core.verifyRemote(newContent);
+ need(b.head.sha===target&&immutable.sha===target&&newProof?.sha===target&&
+  immutable.count===reviewed.length&&newProof.count===reviewed.length&&b.head.count===reviewed.length,
+  'HEAD or new immutable version does not match reviewed source');
+ // The historical guard is expected not to recognize this candidate yet.
+ // Source equality and semantic deployment identity are evidence, not a
+ // replacement for that guard or for the actual browser/runtime acceptance.
+ return {readbackVerified:true,releaseAuthorized:false,runtimeVerified:false,
+  sameOfficialUrl:true,otherDeploymentsUnchanged:true,historicalVersionsUnchanged:true,
+  version:current.version,sourceSha256:target};
+}
+
+module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate,verifySameSiteReadback};
