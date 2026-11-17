@@ -267,3 +267,35 @@ test('private GAS operation contract completes booking and real five-page PDF th
  await run(keyC,'hold',{slotId:'TEST_SLOT_2',requestId:'5'.repeat(32)});assert.equal((await run(keyC,'cancel')).bookingStatus,'CANCELLED');
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
 });
+
+test('trusted UAT configuration and narrow request envelope fail closed without exposing raw service errors',async()=>{
+ const vm=require('node:vm'),id='TEST_ONLY_BOOK_123456789012345',gate='a'.repeat(64),key='b'.repeat(64),now=Date.parse('2026-11-17T01:00:00.000Z'),iso=t=>new Date(t).toISOString();
+ class FakeDate extends Date{static now(){return now;}}
+ const config={profile:'E1_SYNTHETIC_UAT_V1',storeId:id,sourceSha:'c'.repeat(64),gateSha:hash(gate),expiresAt:iso(now+86400000),slots:[['TEST_SLOT_1',iso(now+7200000),iso(now+10800000),1,'TEST_ONLY','OPEN','TEST',iso(now)]]};
+ const realm=vm.createContext({Date:FakeDate,Uint8Array,Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
+ for(const p of ['gas/Study1PdfStampCore.js','scripts/study1-v2-uat-gas-services.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const validate=(c,fp=hash(id))=>realm.study1UatConfigValidate_(JSON.stringify(c),now,fp);
+ assert.equal(validate(config).storeId,id);
+ assert.equal(Object.hasOwn(validate(config),'expiresAt'),false);
+ for(const bad of [{...config,profile:'FORMAL'},{...config,storeId:'OTHER_BOOK_123456789012345'},{...config,expiresAt:iso(now)},{...config,expiresAt:iso(now+8*86400000)},{...config,gate:gate},{...config,slots:[...config.slots,...config.slots]},{...config,slots:[config.slots[0].map((x,i)=>i===4?'REAL_PLACE':x)]},{...config,gateSha:config.sourceSha}]){
+  assert.throws(()=>validate(bad),/UAT_SERVER_CONFIG_REQUIRED/);
+ }
+ assert.throws(()=>validate(config,'d'.repeat(64)),/UAT_SERVER_CONFIG_REQUIRED/);
+ let propertyReads=0,scriptId='WRONG';realm.ScriptApp={getScriptId:()=>scriptId};
+ realm.PropertiesService={getScriptProperties:()=>({getProperty:k=>{propertyReads++;assert.equal(k,'STUDY1_E1_SYNTHETIC_UAT_V1');return JSON.stringify(config);}})};
+ assert.throws(()=>realm.study1UatTrustedConfig_(),/UAT_SERVER_CONFIG_REQUIRED/);assert.equal(propertyReads,0);
+ scriptId='1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f';
+ assert.throws(()=>realm.study1UatTrustedConfig_(),/UAT_SERVER_CONFIG_REQUIRED/);assert.equal(propertyReads,1); // mock ID cannot match real pinned store
+ let calls=0;realm.study1UatTrustedConfig_=()=>validate(config);
+ realm.study1UatGasOperation_=async(c,a,op,p)=>{calls++;assert.equal(c.storeId,id);assert.equal(a.gate,gate);assert.equal(a.caseKey,key);assert.equal(op,'read');assert.equal(Object.keys(p).length,0);return {caseId:'UAT_TEST',formal:false};};
+ const req={gate,caseKey:key,operation:'read',payload:{}};
+ for(const bad of [{...req,storeId:id},{...req,gate:key},{...req,operation:'FORMAL'},{...req,caseKey:'bad'},{...req,payload:[]}]){
+  const ans=await realm.study1UatControlledRequest_(bad);assert.equal(ans.ok,false);assert.equal(ans.error,'UAT_REQUEST_REJECTED');
+ }
+ assert.equal(calls,0);
+ assert.equal((await realm.study1UatControlledRequest_(req)).value.caseId,'UAT_TEST');assert.equal(calls,1);
+ realm.study1UatGasOperation_=async()=>{throw Error('private secret '+id+' '+gate);};
+ const rejected=await realm.study1UatControlledRequest_(req);assert.equal(rejected.error,'UAT_REQUEST_REJECTED');assert.ok(!JSON.stringify(rejected).includes(id));
+ realm.study1UatGasOperation_=async()=>{throw Error('UAT_WRITE_UNKNOWN_READ_CASE');};
+ assert.equal((await realm.study1UatControlledRequest_(req)).error,'UAT_WRITE_UNKNOWN_READ_CASE');
+});
