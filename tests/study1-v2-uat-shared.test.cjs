@@ -304,6 +304,13 @@ test('reviewable online UAT candidate uses original apply template, owner bounda
  const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,id)=>a.find(f=>f.name===id).source;
  assert.equal(core.closedManifest(candidate).webapp.access,'MYSELF');assert.equal(candidate.length,base.length+3);
+ const added=candidate.filter(f=>!base.some(x=>x.name===f.name));
+ for(const file of added){
+  const names=[...file.source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]);
+  assert.ok(names.length>0&&names.every(n=>n.endsWith('_')),file.name);
+ }
+ assert.doesNotMatch(get(candidate,'Study1UatSession'),/function study1UatSession\(/);
+ assert.match(get(candidate,'Study1UatSession'),/function study1UatDocument_\(/);
  assert.equal(core.closedManifest(base).webapp.access,'ANYONE');assert.ok(core.publicRpcSurface(base)>=35);
  assert.throws(()=>core.publicRpcSurface(candidate),/formal visitor is not isolated|unguarded public RPC/);
  for(const f of base.filter(f=>!['Website','Study1Visitor','appsscript'].includes(f.name)))assert.equal(get(candidate,f.name),f.source);
