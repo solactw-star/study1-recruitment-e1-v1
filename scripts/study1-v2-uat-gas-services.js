@@ -175,3 +175,37 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  // Only after the transaction core has verified persistence, re-open the complete copy.
  return study1UatCaseCopy_(saved,approved.slots,Date.now());
 }
+
+/* Server-only configuration for the existing dedicated E1 test store.
+ * There is no setter, URL parameter, browser-selected table, or FORMAL fallback.
+ * The deployment must explicitly provide this internal profile; public v4 has no
+ * call site. Keep the pinned store fingerprint separate from mutable Properties.
+ */
+function study1UatConfigValidate_(raw,at,storeFingerprint){
+ const deny=()=>{throw Error('UAT_SERVER_CONFIG_REQUIRED');};
+ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+ const iso=s=>typeof s==='string'&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s;
+ if(typeof raw!=='string'||raw.length>6000||!Number.isSafeInteger(at)||!hex(storeFingerprint))deny();
+ let c;try{c=JSON.parse(raw);}catch(_){deny();}
+ if(!c||Array.isArray(c)||Object.keys(c).sort().join(',')!=='expiresAt,gateSha,profile,slots,sourceSha,storeId'||
+  c.profile!=='E1_SYNTHETIC_UAT_V1'||typeof c.storeId!=='string'||!/^[A-Za-z0-9_-]{20,100}$/.test(c.storeId)||
+  study1PdfDigest_(Array.from(c.storeId,x=>x.charCodeAt(0)))!==storeFingerprint||
+  !hex(c.gateSha)||!hex(c.sourceSha)||c.gateSha===c.sourceSha||
+  !iso(c.expiresAt)||Date.parse(c.expiresAt)<=at||Date.parse(c.expiresAt)>at+7*86400000||
+  !Array.isArray(c.slots)||c.slots.length<1||c.slots.length>4)deny();
+ const ids=new Set();
+ for(const row of c.slots){
+  if(!Array.isArray(row)||row.length!==8||!/^TEST_SLOT_[1-4]$/.test(row[0])||ids.has(row[0])||
+   !iso(row[1])||!iso(row[2])||Date.parse(row[2])-Date.parse(row[1])!==3600000||
+   row[3]!==1||row[4]!=='TEST_ONLY'||row[5]!=='OPEN'||row[6]!=='TEST'||!iso(row[7])||
+   Date.parse(row[7])>at||Date.parse(row[1])>Date.parse(c.expiresAt)+7*86400000)deny();
+  ids.add(row[0]);
+ }
+ return {storeId:c.storeId,sourceSha:c.sourceSha,gateSha:c.gateSha,slots:c.slots.map(s=>s.slice())};
+}
+function study1UatTrustedConfig_(){
+ // Exact V2 Script and sole provisioned test sheet (SHA-256 of its ID, not ID).
+ if(ScriptApp.getScriptId()!=='1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f')throw Error('UAT_SERVER_CONFIG_REQUIRED');
+ return study1UatConfigValidate_(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_SYNTHETIC_UAT_V1'),Date.now(),
+  'da054874a5b2a59ad318e74a392e5e0b3db993fcb2f114dc8c7537bb95549cdb');
+}
