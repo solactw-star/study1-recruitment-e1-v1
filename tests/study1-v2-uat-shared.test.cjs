@@ -503,6 +503,24 @@ test('same official site source routes preserve formal closure and require real 
  const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
  assert.equal(JSON.parse(get('appsscript')).webapp.access,'ANYONE_ANONYMOUS');
+ // Review evidence only: this does NOT enroll the candidate in any release
+ // profile or authorize a remote mutation. Compare every file against the
+ // existing anonymous closed baseline, not the superseded MYSELF build.
+ const baseline=core.anonymousReadOnlyCandidate(core.localSources()),baseNames=baseline.map(f=>f.name).sort();
+ const extra=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
+ assert.deepEqual(files.map(f=>f.name).sort(),[...baseNames,...extra].sort());
+ const modified=baseline.filter(f=>get(f.name)!==f.source).map(f=>f.name).sort();
+ assert.deepEqual(modified,['AdminConsole','Study1Visitor','Website']);
+ for(const f of baseline)assert.equal(files.find(x=>x.name===f.name).type,f.type);
+ assert.equal(get('appsscript'),baseline.find(f=>f.name==='appsscript').source);
+ const globals=source=>[...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]).filter(n=>!n.endsWith('_')).sort();
+ const oldGlobals=globals(baseline.find(f=>f.name==='Website').source);
+ assert.deepEqual(globals(get('Website')),[...oldGlobals,'study1E1SyntheticUat','study1SiteTestCleanup'].sort());
+ for(const name of extra)assert.deepEqual(globals(get(name)),[]);
+ const candidateSha=core.digest(files);
+ assert.match(candidateSha,/^[a-f0-9]{64}$/);
+ assert.equal(candidateSha,core.digest(adapter.sameSiteCandidate()));
+ console.log('SAME_SITE_REVIEW_ONLY '+JSON.stringify({candidateSha256:candidateSha,fileCount:files.length,modified,added:extra,access:'ANYONE_ANONYMOUS',executeAs:'USER_DEPLOYING',releaseAuthorized:false}));
  assert.throws(()=>core.publicRpcSurface(files));
  assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
  const html=get('Study1Visitor'),admin=get('AdminConsole');
@@ -532,9 +550,8 @@ test('same official site source routes preserve formal closure and require real 
   services.beforeCleanup();maintenance.push(JSON.parse(JSON.stringify(m)));
   assert.equal(services.afterCleanup(),true);return {gateRotationRequired:false};
  };
- effective=owner;
- for(const user of ['', 'other@example.invalid']){
-  active=user;
+ for(const [user,runner] of [['',owner],['other@example.invalid',owner],[owner,'other@example.invalid'],[owner,'']]){
+  active=user;effective=runner;
   const form=c.doGet({parameter:{view:'apply'}});assert.equal(form.mode,'FORMAL');assert.equal(form.siteOwner,false);
   assert.throws(()=>c.doGet({parameter:{view:'apply',test:'1'}}),/拒絕存取/);
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
@@ -543,7 +560,7 @@ test('same official site source routes preserve formal closure and require real 
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
  }
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
- active=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
+ active=owner;effective=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
  assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
  assert.equal((await c.study1E1SyntheticUat({operation:'read'})).value,'read');
  assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,true);
