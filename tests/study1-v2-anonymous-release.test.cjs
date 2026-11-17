@@ -100,7 +100,7 @@ test('immutable verified v4 remains known after GAS source changes; tampered or 
  try{
   fs.mkdirSync(path.join(temp,'scripts'));
   const root=path.join(__dirname,'..');
-  for(const name of ['study1-v2-gas-head-only.cjs','study1-v2-private-deploy.cjs','study1-v2-release-source.cjs'])fs.copyFileSync(path.join(root,'scripts',name),path.join(temp,'scripts',name));
+  for(const name of ['study1-v2-gas-head-only.cjs','study1-v2-private-deploy.cjs','study1-v2-release-source.cjs','study1-v2-release-evidence.cjs'])fs.copyFileSync(path.join(root,'scripts',name),path.join(temp,'scripts',name));
   fs.cpSync(path.join(root,'gas'),path.join(temp,'gas'),{recursive:true});
   fs.writeFileSync(path.join(temp,'gas','NextFeature.js'),'function nextFeature_(){}');
   const devCore=require(path.join(temp,'scripts','study1-v2-gas-head-only.cjs'));

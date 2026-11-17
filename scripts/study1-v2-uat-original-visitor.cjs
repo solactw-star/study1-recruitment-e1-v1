@@ -477,7 +477,7 @@ function sameSiteCandidate(){
  * deliberately does NOT change sourceProof, publicRpcSurface, releaseFiles
  * or the original deployment guard. It cannot authorize a publication. */
 function verifySameSiteReadback({before,after,priorDirect,currentDirect,newContent,reviewedTargetSha256}){
- const core=require('./study1-v2-gas-head-only.cjs'),d=require('./study1-v2-private-deploy.cjs');
+ const core=require('./study1-v2-release-source.cjs'),d=require('./study1-v2-release-evidence.cjs');
  const need=(v,m)=>{if(!v)throw Error('SAME_SITE_READBACK_UNVERIFIED: '+m);};
  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
  const reviewed=sameSiteCandidate(),target=core.digest(reviewed);

@@ -5,10 +5,10 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {execFileSync} = require('node:child_process');
 
-const {REPO,SID,APPROVED,fail,require_,sha,fileData,canonical,digest,readDevelopmentSources,requireReviewedInventory,localSources,closedManifest,closedWebsite,publicRpcSurface,anonymousReadOnlyCandidate,privateOwnerReadOnlyCandidate,privateOwnerManagementCandidate}=require('./study1-v2-release-source.cjs');
+const {REPO,SID,APPROVED,fail,require_,sha,fileData,canonical,digest,readDevelopmentSources,requireReviewedInventory,localSources,closedManifest,closedWebsite,publicRpcSurface,anonymousReadOnlyCandidate,privateOwnerReadOnlyCandidate,privateOwnerManagementCandidate,verifyRemote,reviewedPrivateTarget}=require('./study1-v2-release-source.cjs');
 const CONFIRM = 'I_AUTHORIZE_STUDY1_V2_HEAD_ONLY';
 const PRIVATE_CONFIRM = 'I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_HEAD_ONLY';
-// reviewedPrivateTarget() is derived from this reviewed checkout below, never from an old deployment hash.
+// reviewedPrivateTarget() is derived from the shared source layer, never from an old deployment hash.
 function releaseProfile(env){const profile=env.SOURCE_PROFILE||'public_readonly';
  require_(['public_readonly','private_e1_management'].includes(profile),'invalid V2 source profile');
  return profile;
@@ -88,12 +88,6 @@ async function apiFromCredentials(c,fetcher=fetch,sleep=ms=>new Promise(resolve=
   }
  }
  return {getContent:()=>request('GET'),putContent:files=>request('PUT',files)};
-}
-function verifyRemote(head){
- require_(head?.scriptId===SID,'remote returned the wrong Script ID');
- const count=canonical(head.files).split('\n').length;
- require_(count>=2,'remote HEAD is not a full GAS source set');
- return {sha:digest(head.files),count};
 }
 function seal(bytes,refreshToken,aad){
  const salt=crypto.randomBytes(32),iv=crypto.randomBytes(12);
@@ -255,14 +249,6 @@ async function main(){
  }
  if(mode==='prepare')await prepare(api,files,c,process.env,true);
  else await apply(api,files,c,process.env,async()=>latestMain(process.env),async()=>{},true);
-}
-// Bind this run to the closed, allowlisted private candidate of its exact checkout.
-let privateTarget;
-function reviewedPrivateTarget(){
- // Pin the first successfully reviewed checkout in this process, not at import.
- // A failed or incomplete development checkout grants no release authority.
- if(privateTarget===undefined)privateTarget=digest(privateOwnerManagementCandidate(localSources()));
- return privateTarget;
 }
 module.exports={anonymousReadOnlyCandidate,get PRIVATE_TARGET(){return reviewedPrivateTarget();},PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,readDevelopmentSources,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,latestMain,

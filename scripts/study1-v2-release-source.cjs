@@ -290,4 +290,20 @@ function privateOwnerManagementCandidate(files){
  return result;
 }
 
-module.exports={REPO,SID,APPROVED,fail,require_,sha,fileData,canonical,digest,readDevelopmentSources,requireReviewedInventory,localSources,closedManifest,closedWebsite,publicRpcSurface,anonymousReadOnlyCandidate,privateOwnerReadOnlyCandidate,privateOwnerManagementCandidate};
+function verifyRemote(head){
+ require_(head?.scriptId===SID,'remote returned the wrong Script ID');
+ const count=canonical(head.files).split('\n').length;
+ require_(count>=2,'remote HEAD is not a full GAS source set');
+ return {sha:digest(head.files),count};
+}
+
+// Bind this run to the closed, allowlisted private candidate of its exact checkout.
+let privateTarget;
+function reviewedPrivateTarget(){
+ // Pin the first successfully reviewed checkout in this process, not at import.
+ // A failed or incomplete development checkout grants no release authority.
+ if(privateTarget===undefined)privateTarget=digest(privateOwnerManagementCandidate(localSources()));
+ return privateTarget;
+}
+
+module.exports={REPO,SID,APPROVED,fail,require_,sha,fileData,canonical,digest,readDevelopmentSources,requireReviewedInventory,localSources,closedManifest,closedWebsite,publicRpcSurface,anonymousReadOnlyCandidate,privateOwnerReadOnlyCandidate,privateOwnerManagementCandidate,verifyRemote,reviewedPrivateTarget};

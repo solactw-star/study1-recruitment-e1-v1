@@ -426,7 +426,8 @@ test('ordinary main pushes audit only; manual and one-time bound release jobs re
   'sheets.googleapis.com','SpreadsheetApp','clasp push','putContent(','MailApp','script.run']){
   assert.ok(!script.includes(banned),banned);
  }
- assert.ok(script.includes("const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7'"));
+ const evidence=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-release-evidence.cjs'),'utf8');
+ assert.ok(evidence.includes("const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7'"));
  assert.equal(d.TARGET,core.PRIVATE_TARGET);
  assert.ok(wf.includes("secrets.V2_GAS_CLASPRC_JSON"));
  assert.ok(wf.includes('group: study1-v2-gas-head-only'));
@@ -668,4 +669,20 @@ test('public version 3 resume has independently bound event and no HEAD or versi
  assert.ok(job.includes(p.RESUME_PARENT)&&job.includes(p.RESUME_MESSAGE));
  assert.match(job,/actions\/download-artifact@v4/);
  assert.ok(job.indexOf('resume-prepare')<job.indexOf('actions/upload-artifact@v4')&&job.indexOf('actions/upload-artifact@v4')<job.indexOf('resume-apply'));
+});
+
+
+test('historical evidence layer is independent of old publishing clients and preserves existing function identity',()=>{
+ const evidence=require('../scripts/study1-v2-release-evidence.cjs'),source=require('../scripts/study1-v2-release-source.cjs');
+ for(const name of ['sourceProof','normalizedVersions','normalizedDeployments','deploymentVersionShape','redactedDeploymentShapes','fingerprint','readOnlyAclEvidence'])assert.equal(d[name],evidence[name],name);
+ assert.equal(core.verifyRemote,source.verifyRemote);
+ assert.equal(core.PRIVATE_TARGET,source.reviewedPrivateTarget());
+ const bytes=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-release-evidence.cjs'),'utf8');
+ assert.deepEqual([...bytes.matchAll(/require\('([^']+)'\)/g)].map(x=>x[1]).sort(),['./study1-v2-release-source.cjs','node:crypto']);
+ for(const name of ['makeApi','inventory','audit','deploy','createImmutableVersion','rollback'])assert.equal(evidence[name],undefined,name);
+ assert.equal(d.HISTORICAL_TARGET,evidence.HISTORICAL_TARGET);
+ const candidate={scriptId:source.SID,files:source.anonymousReadOnlyCandidate()};
+ assert.equal(evidence.sourceProof(candidate,true).known,true);
+ assert.equal(evidence.sourceProof(candidate,false).known,false);
+ assert.throws(()=>evidence.sourceProof({...candidate,scriptId:'OTHER'},true),/remote Script ID mismatch/);
 });

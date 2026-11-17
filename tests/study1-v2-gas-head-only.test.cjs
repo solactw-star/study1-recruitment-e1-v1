@@ -383,7 +383,7 @@ test('before-PUT inventory guard and after-PUT readback gate prevent blind retri
  const same=await m.audit({...api,getHead:async()=>({scriptId:m.SID,files:target}),getVersions:async()=>[],getDeployments:async()=>[dep('DEV',0,'MYSELF')]},target);
  assert.equal(same.modeDiffers,false);assert.equal(same.writeAuthorized,false);
  const src=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-gas-head-only.cjs'),'utf8');
- const main=src.slice(src.indexOf('async function main(){'),src.indexOf('// Bind this run to the closed'));
+ const main=src.slice(src.indexOf('async function main(){'),src.indexOf('module.exports='));
  assert.match(main,/if\(mode==='audit'\)\{[\s\S]*?d\.makeApi\(c,undefined,undefined,undefined,true\)/);
  assert.ok(main.indexOf('return audit(')<main.indexOf('apiFromCredentials(c)'));
  });

@@ -652,7 +652,7 @@ test('same-site admin preview and confirm button block unknown destructive retri
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{
- const core=require('../scripts/study1-v2-gas-head-only.cjs'),d=require('../scripts/study1-v2-private-deploy.cjs');
+ const core=require('../scripts/study1-v2-gas-head-only.cjs'),d=require('../scripts/study1-v2-release-evidence.cjs');
  const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const baseline=core.anonymousReadOnlyCandidate(),target=adapter.sameSiteCandidate(),privateFiles=core.privateOwnerManagementCandidate(core.localSources());
  const reviewedTargetSha256=core.digest(target),content=files=>({scriptId:core.SID,files});

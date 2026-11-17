@@ -6,6 +6,7 @@ on:
       - 'gas/**'
       - 'scripts/study1-v2-gas-head-only.cjs'
       - 'scripts/study1-v2-release-source.cjs'
+      - 'scripts/study1-v2-release-evidence.cjs'
       - 'scripts/study1-v2-recruitment-copy.cjs'
       - 'tests/study1-v2-recruitment-copy.test.cjs'
       - '.github/workflows/study1-v2-recruitment-copy.yml'
