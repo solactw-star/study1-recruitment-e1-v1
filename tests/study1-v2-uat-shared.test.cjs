@@ -150,3 +150,35 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  matrix[1][1]='pdf:AAAA';assert.throws(()=>tx(()=>null),/UAT_PDF_INTEGRITY/);
  assert.equal(held,false);
 });
+
+test('internal GAS service binding authorizes only own case with explicit gate, real service method contract and no full snapshot return',()=>{
+ const vm=require('node:vm'),id='TEST_ONLY_BOOK_123456789012345',gate='a'.repeat(64),keyA='b'.repeat(64),keyB='c'.repeat(64);
+ const config={storeId:id,gateSha:hash(gate),sourceSha:'d'.repeat(64),slots:[['TEST_SLOT_1','2099-01-01T02:00:00.000Z','2099-01-01T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-17T00:00:00.000Z']]};
+ const matrix=[['STUDY1_E1_SYNTHETIC_CASES_V1',id,...Array(7).fill('')],...Array.from({length:12},()=>Array(9).fill(''))];
+ let locked=false,lockCalls=0,opens=0,writes=0,flushes=0,wrongName=false,extraSheet=false;
+ const sheet={getName:()=> 'SYNTHETIC_CASES',getParent:()=>({getId:()=>id}),getLastRow:()=>13,getLastColumn:()=>9,
+  getRange:(row,col,n,m)=>({getValues:()=>matrix.slice(row-1,row-1+n).map(r=>r.slice(col-1,col-1+m)),getFormulas:()=>Array.from({length:n},()=>Array(m).fill('')),setValues:v=>{assert.equal(locked,true);writes++;matrix[row-1]=v[0].slice();}})};
+ const realm=vm.createContext({Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest()),base64Decode:s=>Array.from(Buffer.from(s,'base64'))},
+  LockService:{getScriptLock:()=>{lockCalls++;return {tryLock:()=>{if(locked)return false;locked=true;return true;},hasLock:()=>locked,releaseLock:()=>{locked=false;}}}},
+  SpreadsheetApp:{openById:x=>{assert.equal(locked,true);assert.equal(x,id);opens++;return {getId:()=>id,getName:()=>wrongName?'Wrong book':'Study1 E1 SYNTHETIC UAT ONLY',getSheets:()=>extraSheet?[sheet,sheet]:[sheet]};},flush:()=>{assert.equal(locked,true);flushes++;}}});
+ for(const p of ['gas/BookingCore.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-store-transaction.js','scripts/study1-v2-uat-gas-services.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const tx=(caseKey,fn,accessGate=gate,approved=config)=>realm.study1UatGasCaseTransaction_(approved,{gate:accessGate,caseKey},fn);
+ const create=(k,alias)=>{const tokenHash=hash(k);return {alias,caseId:'UAT_'+tokenHash.slice(0,24),tokenHash,state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''};};
+ const peek=mine=>({record:null,value:mine?{caseId:mine.caseId}:null});
+ assert.throws(()=>tx(keyA,peek,'f'.repeat(64)),/UAT_ACCESS_DENIED/);assert.equal(opens,0);assert.equal(lockCalls,0);
+ assert.throws(()=>tx(gate,peek),/UAT_ACCESS_DENIED/);
+ assert.throws(()=>tx(keyA,peek,gate,{...config,unexpected:true}),/UAT_SERVER_CONFIG_REQUIRED/);
+ wrongName=true;assert.throws(()=>tx(keyA,peek),/UAT_STORE_IDENTITY/);wrongName=false;
+ extraSheet=true;assert.throws(()=>tx(keyA,peek),/UAT_STORE_IDENTITY/);extraSheet=false;
+ assert.equal(writes,0);assert.equal(locked,false);
+ const a=create(keyA,'TEST_01'),b=create(keyB,'TEST_02');
+ assert.equal(tx(keyA,mine=>{assert.equal(mine,null);return {record:a,value:a.caseId};}),a.caseId);
+ assert.equal(tx(keyB,peek),null);
+ assert.throws(()=>tx(keyB,()=>({record:a,value:null})),/UAT_CASE_BINDING/);
+ assert.throws(()=>tx(keyB,()=>({record:{...b,alias:'TEST_01'},value:null})),/UAT_CASE_UNAVAILABLE/);
+ assert.equal(tx(keyB,()=>({record:b,value:b.caseId})),b.caseId);
+ assert.equal(tx(keyA,peek).caseId,a.caseId);assert.equal(tx(keyB,peek).caseId,b.caseId);
+ assert.throws(()=>tx(keyA,()=>({record:b,value:null})),/UAT_CASE_BINDING/);
+ assert.equal(writes,2);assert.equal(flushes,2);assert.equal(locked,false);
+ assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));assert.ok(!JSON.stringify(matrix).includes(keyB));
+});
