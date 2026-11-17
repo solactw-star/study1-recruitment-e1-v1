@@ -301,10 +301,14 @@ async function audit(api,files){
   targetSha:target.sha,inventorySha:state.fp,baselineKnownSafe:state.safe,
   modeDiffers:access!==target.access,writeAuthorized:false};
 }
-async function prepare(api,files,c,env){
+async function prepare(api,files,c,env,allowAlreadySynced=false){
  const head=await api.getContent(),before=verifyRemote(head),target=digest(files);
  require_(before.sha===env.EXPECTED_REMOTE_SHA256,'remote SHA differs from manually reviewed audit');
- require_(target!==before.sha,'GAS HEAD already equals reviewed local source (no unnecessary write)');
+ const alreadySynced=target===before.sha;
+ // Only an ordinary, currently authorized HEAD-only invocation may finish
+ // without a write. Historical one-shot release callers keep their previous
+ // exact baseline requirements. This does not authorize a mode transition.
+ require_(!alreadySynced||allowAlreadySynced===true,'GAS HEAD already equals reviewed local source (no unnecessary write)');
  const bytes=JSON.stringify({scriptId:SID,githubSha:env.GITHUB_SHA,head:{scriptId:head.scriptId,files:fileData(head.files)}},null,2);
  const enc=seal(bytes,c.refresh_token,aad(env));
  require_(unseal(enc,c.refresh_token,aad(env))===bytes,'backup encryption/decryption self-check failed');
@@ -320,9 +324,10 @@ async function prepare(api,files,c,env){
  console.log('V2_PREWRITE_BASE_SHA256='+before.sha);
  console.log('V2_PREWRITE_TARGET_SHA256='+target);
  console.log('V2_PREWRITE_BACKUP_SHA256='+sha(JSON.stringify(enc)));
+ if(alreadySynced)console.log('V2_PREWRITE_HEAD_ALREADY_MATCHES=true');
  return {before:before.sha,target};
 }
-async function apply(api,files,c,env,beforePut=async()=>{},afterPut=async()=>{}){
+async function apply(api,files,c,env,beforePut=async()=>{},afterPut=async()=>{},allowAlreadySynced=false){
  const p=runnerPaths(env);
  const s=JSON.parse(fs.readFileSync(p.state,'utf8'));
  require_(s.scriptId===SID && s.githubSha===env.GITHUB_SHA && s.runId===env.GITHUB_RUN_ID &&
@@ -337,6 +342,21 @@ async function apply(api,files,c,env,beforePut=async()=>{},afterPut=async()=>{})
  const current=verifyRemote(await api.getContent());
  require_(current.sha===s.before,'remote HEAD modified after encrypted backup');
  await beforePut();
+ if(s.before===s.target){
+  require_(allowAlreadySynced===true,'GAS HEAD already matches; no mutation authorized for this phase');
+  // The same authorization, encrypted backup, source binding, main and
+  // inventory guards still run. An already-complete stage performs no PUT,
+  // does not report a write, and grants no version or deployment authority.
+  const unchanged=verifyRemote(await api.getContent());
+  require_(unchanged.sha===s.target&&unchanged.count===files.length,'already-synced HEAD changed during phase');
+  await afterPut();
+  console.log('V2_HEAD_ONLY_ALREADY_SYNCED=true');
+  console.log('V2_HEAD_SHA256='+unchanged.sha);
+  console.log('V2_HEAD_FILE_COUNT='+unchanged.count);
+  console.log('V2_HEAD_PUT_COUNT=0');
+  console.log('V2_DEPLOYMENT_MUTATIONS=0');
+  return {...unchanged,alreadySynced:true,mutationPerformed:false};
+ }
  // No atomic CAS in the Google Apps Script API. Never retry/rollback an ambiguous PUT.
  try{
   await api.putContent(files);
@@ -379,16 +399,16 @@ async function main(){
   };
   d.requirePrivateHeadBaseline(first);
   require_(first.fp===process.env.EXPECTED_INVENTORY_SHA256,'private HEAD inventory differs from prior audit');
-  if(mode==='prepare'){await guard();await prepare(api,files,c,process.env);}
+  if(mode==='prepare'){await guard();await prepare(api,files,c,process.env,true);}
   else await apply(api,files,c,process.env,guard,async()=>{
    const after=await d.inventory(inventoryApi);
    d.requirePrivateHeadBaseline(after);
    require_(after.headSha===reviewedPrivateTarget()&&after.stable===first.stable,'private HEAD or immutable deployment inventory readback mismatch');
-  });
+  },true);
   return;
  }
- if(mode==='prepare')await prepare(api,files,c,process.env);
- else await apply(api,files,c,process.env,async()=>latestMain(process.env));
+ if(mode==='prepare')await prepare(api,files,c,process.env,true);
+ else await apply(api,files,c,process.env,async()=>latestMain(process.env),async()=>{},true);
 }
 function privateOwnerReadOnlyCandidate(files){
  // Offline only: never used by main(), localSources(), prepare(), apply(), or workflow.

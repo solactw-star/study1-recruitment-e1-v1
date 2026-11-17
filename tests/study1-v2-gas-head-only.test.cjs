@@ -151,6 +151,29 @@ test('post-backup drift rejects before PUT; verified success makes just one PUT'
  assert.equal(writes,1);assert.equal(result.sha,m.digest(updated));
  fs.rmSync(e.RUNNER_TEMP,{recursive:true,force:true});
 });
+test('current authorized HEAD-only stage finishes an already matched target without PUT or version permission',async()=>{
+ const e=env(),c=creds(),before=remote();e.EXPECTED_REMOTE_SHA256=m.digest(before.files);
+ let current=before,puts=0,pre=0,post=0;
+ const api={getContent:async()=>current,putContent:async()=>{puts++;throw Error('unexpected PUT')}};
+ const guard=async()=>{pre++},readback=async()=>{post++};
+ try{
+  await assert.rejects(m.prepare(api,before.files,c,e),/already equals reviewed/);
+  await m.prepare(api,before.files,c,e,true);
+  assert.ok(fs.existsSync(m.runnerPaths(e).backup));
+  await assert.rejects(m.apply(api,before.files,c,e,guard,readback),/no mutation authorized for this phase/);
+  assert.equal(puts,0);assert.equal(post,0);
+  const result=await m.apply(api,before.files,c,e,guard,readback,true);
+  assert.equal(result.sha,e.EXPECTED_REMOTE_SHA256);assert.equal(result.alreadySynced,true);
+  assert.equal(result.mutationPerformed,false);assert.equal(puts,0);assert.equal(pre,2);assert.equal(post,1);
+  await assert.rejects(m.apply(api,before.files,c,e,async()=>{throw Error('MODE_OR_INVENTORY_REJECTED')},readback,true),/MODE_OR_INVENTORY_REJECTED/);
+  await assert.rejects(m.apply(api,before.files,c,e,async()=>{current={...before,files:before.files.map(x=>x.name==='Index'?{...x,source:'concurrent change'}:x)}},readback,true),/already-synced HEAD changed/);
+  assert.equal(puts,0);assert.equal(post,1);
+  // A changed baseline after prepare cannot be retroactively accepted.
+  const different={...e,EXPECTED_REMOTE_SHA256:'0'.repeat(64)};
+  await assert.rejects(m.apply(api,before.files,c,different,guard,readback,true),/stale prewrite state/);
+  assert.equal(puts,0);
+ }finally{fs.rmSync(e.RUNNER_TEMP,{recursive:true,force:true});}
+});
 test('PUT timeout never retries or rolls back',async()=>{
  const e=env(),c=creds(),f=fixtures(),before=remote();e.EXPECTED_REMOTE_SHA256=m.digest(before.files);
  const updated=f.map(x=>x.name==='Index'?{...x,source:'new'}:{...x});
