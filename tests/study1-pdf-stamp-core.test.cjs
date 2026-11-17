@@ -108,3 +108,34 @@ test('bundled PDF engine is offline, pinned and not remotely fetched at runtime'
  assert.doesNotMatch(bundle,/XMLHttpRequest|sendBeacon|document\.cookie|fetch\(/);
  assert.ok(bundle.length>500000);
 });
+
+test('GAS-like V8 without timers: full PDF with hundreds of objects signs and reopens; digest receives signed bytes',async()=>{
+ // The real vendor bundle is evaluated in the SAME pure V8 realm, with no Node/browser timers.
+ // Supplying timers from Node would conceal a real GAS runtime incompatibility.
+ let digestCalls=0;
+ const strictUtilities={...utilities,computeDigest:(_,b)=>{
+  assert.ok(Array.from(b).every(x=>Number.isInteger(x)&&x>=-128&&x<=127),'GAS Byte[] must be signed');
+  digestCalls++;
+  return Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest(),x=>x>127?x-256:x);
+ }};
+ const gasRealm=vm.createContext({Utilities:strictUtilities});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas/Study1PdfLib.js'),'utf8'),gasRealm);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas/Study1PdfStampCore.js'),'utf8'),gasRealm);
+ assert.equal(vm.runInContext('typeof setTimeout',gasRealm),'undefined');
+ const doc=await PDFLib.PDFDocument.create();
+ for(let i=0;i<5;i++){
+  const page=doc.addPage([595,842]);
+  page.drawText('SYNTHETIC E1 UAT page '+i,{x:30,y:800});
+ }
+ // Uncompressed indirect objects force load/save beyond default cooperative yield thresholds.
+ for(let i=0;i<220;i++)doc.context.register(doc.context.obj({Type:'SyntheticUAT',Index:i}));
+ const bytes=Buffer.from(await doc.save({useObjectStreams:false,objectsPerTick:Infinity}));
+ const h=sha(bytes),ink=syntheticInk(),at='2026-11-16T18:00:00.000Z';
+ gasRealm.input=JSON.stringify({bytes:Array.from(bytes),ink:Array.from(ink),layout:layout('E1',h),expected:expected('E1',h),at});
+ const result=await vm.runInContext('(async()=>{const x=JSON.parse(input);return study1PdfComposeSigned_(x.bytes,x.ink,x.layout,x.expected,new Date(x.at));})()',gasRealm);
+ assert.equal(result.sourceSha256,h);
+ assert.equal(result.signedSha256,sha(result.signedPdfBytes));
+ assert.equal(result.pageCount,5);assert.equal(result.taipeiDate,'2026/11/17');
+ assert.equal((await PDFLib.PDFDocument.load(Uint8Array.from(result.signedPdfBytes))).getPageCount(),5);
+ assert.ok(digestCalls>=2);
+});

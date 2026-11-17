@@ -8,7 +8,7 @@
 function study1PdfDigest_(bytes){
  if(!Array.isArray(bytes)&&!(bytes instanceof Uint8Array))
   throw Error('PDF SHA input must be byte array');
- return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,Array.from(bytes))
+ return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,Array.from(bytes,b=>{const v=b&255;return v>127?v-256:v;}))
   .map(b=>(b&255).toString(16).padStart(2,'0')).join('');
 }
 function study1PdfLayoutValidate_(layout,expected){
@@ -91,8 +91,9 @@ async function study1PdfComposeSigned_(source,signature,layout,expected,serverDa
        taipeiDate=study1PdfTaipeiDate_(serverDate);
  let pdf;
  try{
+  // Apps Script V8 has no setTimeout. Disable PDFLib's cooperative timer yields.
   pdf=await PDFLib.PDFDocument.load(Uint8Array.from(original),
-   {ignoreEncryption:false,updateMetadata:false});
+   {ignoreEncryption:false,updateMetadata:false,parseSpeed:Infinity});
   if(pdf.isEncrypted)throw Error('加密PDF不可直接簽署');
   if(pdf.getPageCount()!==layout.pageCount)throw Error('原PDF頁數變更');
   const page=pdf.getPage(layout.pageIndex),size=page.getSize();
@@ -108,13 +109,13 @@ async function study1PdfComposeSigned_(source,signature,layout,expected,serverDa
   page.drawText(taipeiDate,{x:layout.date.x,y:layout.date.y,
    size:layout.date.fontSize,font,color:PDFLib.rgb(0,0,0)});
   pdf.setModificationDate(serverDate);
-  const bytes=Array.from(await pdf.save({useObjectStreams:false}));
+  const bytes=Array.from(await pdf.save({useObjectStreams:false,objectsPerTick:Infinity}));
   if(bytes.length<original.length||bytes.length>6000000)
    throw Error('已簽署PDF大小不合理');
   const signedSha=study1PdfDigest_(bytes);
   if(signedSha===originalHash)throw Error('原PDF未發生有效簽署變更');
   const reloaded=await PDFLib.PDFDocument.load(Uint8Array.from(bytes),
-   {ignoreEncryption:false,updateMetadata:false});
+   {ignoreEncryption:false,updateMetadata:false,parseSpeed:Infinity});
   if(reloaded.getPageCount()!==layout.pageCount)
    throw Error('簽署版PDF重開檢查失敗');
   return {sourceSha256:originalHash,signedSha256:signedSha,
