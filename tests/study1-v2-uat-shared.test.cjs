@@ -394,6 +394,20 @@ test('release preflight identifies exact deterministic private candidate and syn
  const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,n)=>a.find(f=>f.name===n).source;
  const candidateSha=core.digest(candidate),baselineSha=core.digest(base);
  assert.equal(candidateSha,core.digest(adapter.onlineCandidate(base)));
+ // The last locally reviewed profile cannot change the resulting UAT bytes.
+ // This is NOT a remote mutation mode or an authorization to reuse a release.
+ assert.equal(candidateSha,core.digest(adapter.onlineCandidate()));
+ const anonymous=core.anonymousReadOnlyCandidate(base),management=core.privateOwnerManagementCandidate(base);
+ for(const previous of [anonymous,management,[...anonymous].reverse()]){
+  assert.deepEqual(adapter.onlineCandidate(previous),candidate);
+ }
+ for(const previous of [base,anonymous,management]){
+  const changed=previous.map(f=>f.name==='Index'?{...f,source:f.source+'\n<!-- drift -->'}:f);
+  assert.throws(()=>adapter.onlineCandidate(changed),/UAT_BASE_INVENTORY/);
+ }
+ assert.throws(()=>adapter.onlineCandidate(candidate),/UAT_BASE_INVENTORY/);
+ assert.throws(()=>core.releaseProfile({SOURCE_PROFILE:'private_e1_uat'}),/invalid V2 source profile/);
+
  assert.notEqual(candidateSha,baselineSha);
  assert.equal(candidate.length,30);
  assert.deepEqual(base.filter(f=>get(candidate,f.name)!==f.source).map(f=>f.name).sort(),['Study1Visitor','Website','appsscript']);

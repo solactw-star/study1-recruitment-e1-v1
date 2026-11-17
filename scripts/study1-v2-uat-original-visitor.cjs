@@ -217,9 +217,22 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
 // Source candidate only: a separate MYSELF owner-controlled profile of the
 // existing V2 project, same original apply view. Never accepted by the
 // existing public release/HEAD-only guards or called by a deploy workflow.
-function onlineCandidate(base){
+function onlineCandidate(input){
  const core=require('./study1-v2-gas-head-only.cjs');
- core.digest(base);
+ // Assembly is independent of the last reviewed UI mode. All modes MUST
+ // derive from this checkout's unchanged, closed public source, never
+ // inherit the OWNER management RPCs or use remote HEAD as the build base.
+ // This is only local assembly, NOT remote inventory proof or permission
+ // to sync, create a version, or deploy. Existing release guards stay strict.
+ const base=core.localSources();
+ const canonicalSha=core.digest(base);
+ if(input!==undefined){
+  const inputSha=core.digest(input);
+  if(inputSha!==canonicalSha&&
+     inputSha!==core.digest(core.anonymousReadOnlyCandidate(base))&&
+     inputSha!==core.digest(core.privateOwnerManagementCandidate(base)))
+   throw Error('UAT_BASE_INVENTORY');
+ }
  if(core.closedManifest(base).webapp.access!=='ANYONE'||JSON.stringify(base.map(f=>f.name).sort())!==JSON.stringify(core.APPROVED))throw Error('UAT_BASE_INVENTORY');
  core.closedWebsite(base);core.publicRpcSurface(base);
  const files=base.map(f=>{
