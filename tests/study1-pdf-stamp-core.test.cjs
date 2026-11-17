@@ -139,3 +139,19 @@ test('GAS-like V8 without timers: full PDF with hundreds of objects signs and re
  assert.equal((await PDFLib.PDFDocument.load(Uint8Array.from(result.signedPdfBytes))).getPageCount(),5);
  assert.ok(digestCalls>=2);
 });
+
+test('synthetic online UAT document is stable, distinct from local copy, timerless and signs with exact original SHA',async()=>{
+ const realm=vm.createContext({Utilities:utilities});
+ for(const file of ['gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'..',file),'utf8'),realm);
+ assert.equal(vm.runInContext('typeof setTimeout',realm),'undefined');
+ const make=profile=>vm.runInContext('study1UatDocument_('+JSON.stringify(profile)+')',realm);
+ const a=await make('GAS_UAT'),b=await make('GAS_UAT'),local=await make('SHARED_LOCAL');
+ assert.equal(a.hash,sha(a.bytes));assert.equal(a.hash,b.hash);
+ assert.deepEqual(Buffer.from(a.bytes),Buffer.from(b.bytes));assert.notEqual(a.hash,local.hash);
+ await assert.rejects(make('FORMAL'),/Synthetic UAT document profile required/);
+ const doc=await PDFLib.PDFDocument.load(Uint8Array.from(a.bytes));assert.equal(doc.getPageCount(),5);
+ realm.testSource=JSON.stringify({bytes:a.bytes,ink:Array.from(syntheticInk()),layout:a.layout,expected:{experiment:'E1',sha256:a.hash,version:'UAT-SYNTHETIC-1'}});
+ const result=await vm.runInContext('(async()=>{const x=JSON.parse(testSource);return study1PdfComposeSigned_(x.bytes,x.ink,x.layout,x.expected,new Date("2026-11-16T18:00:00.000Z"));})()',realm);
+ assert.equal(result.sourceSha256,a.hash);assert.equal(result.signedSha256,sha(result.signedPdfBytes));assert.equal(result.pageCount,5);assert.equal(result.taipeiDate,'2026/11/17');
+});

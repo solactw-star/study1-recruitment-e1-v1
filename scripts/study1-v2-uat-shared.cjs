@@ -13,7 +13,7 @@ const clockDefault=()=>Date.now();
 function pdfRuntime(){
  const box=vm.createContext({crypto:crypto.webcrypto,Uint8Array,Date,Intl,setTimeout,clearTimeout});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas/Study1PdfLib.js'),'utf8'),box);
- const code=base.kernel().replace('Data: only this browser tab holds synthetic state.','Data: synthetic cases are stored in the local test database.').replace('No files, contact details or signatures are transmitted.','Only fictional test marks are saved; no Google data or mail.');
+ const code=base.kernel();
  vm.runInContext(code,box);return box;
 }
 function dedicatedDir(dir){
@@ -44,7 +44,7 @@ async function openStore({dir,clock=clockDefault}={}){
   assert(version===0||version===1,'TEST_SCHEMA_REQUIRED');
   if(version===0){
    assert(all("SELECT name FROM sqlite_master WHERE type='table'").length===0,'TEST_SCHEMA_REQUIRED');
-   const t=now(),s=box.study1UatSession(()=>t);s.screen(true);const slots=s.verify('12345678');s.hold(slots[0].slotId);const doc=await s.document();
+   const t=now(),s=box.study1UatSession(()=>t,'SHARED_LOCAL');s.screen(true);const slots=s.verify('12345678');s.hold(slots[0].slotId);const doc=await s.document();
    tx(()=>{
     assert(get('PRAGMA user_version').user_version===0,'TEST_INITIALIZATION_RACE_REOPEN');
     db.exec("CREATE TABLE source (id INTEGER PRIMARY KEY CHECK(id=1), bytes BLOB NOT NULL, sha TEXT NOT NULL); CREATE TABLE slots (id TEXT PRIMARY KEY,start TEXT NOT NULL,end TEXT NOT NULL,capacity INTEGER NOT NULL CHECK(capacity=1)); CREATE TABLE cases (id TEXT PRIMARY KEY,alias TEXT NOT NULL UNIQUE,token_hash TEXT NOT NULL UNIQUE,state TEXT NOT NULL CHECK(state IN ('OTP','SLOTS','HELD','EXPIRED','CANCELLED','CONFIRMED')),slot TEXT REFERENCES slots(id),hold_until INTEGER,hold_key TEXT,source_sha TEXT,sign_key TEXT,ink_sha TEXT,pdf BLOB,pdf_sha TEXT,signed_at TEXT,day TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,CHECK((state='CONFIRMED' AND pdf IS NOT NULL AND pdf_sha IS NOT NULL AND sign_key IS NOT NULL) OR (state<>'CONFIRMED' AND pdf IS NULL AND pdf_sha IS NULL))); PRAGMA user_version=1;");
