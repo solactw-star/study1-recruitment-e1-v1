@@ -87,3 +87,91 @@ async function study1UatCaseCopy_(record,slots,at){
  if(pdf.isEncrypted||pdf.getPageCount()!==5)throw Error('UAT_PDF_PAGE_COUNT');
  return {...view,pageCount:5,sha:view.signedSha,bytes:record.pdf};
 }
+
+/* Private operation layer for the existing seven-step isolated UAT contract.
+ * Not an RPC or a web route. Configuration must be supplied by a trusted caller.
+ * No live study records or email, no fallback to a different store.
+ */
+async function study1UatGasOperation_(approved,access,operation,payload){
+ const need=(ok,msg)=>{if(!ok)throw Error(msg);};
+ const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
+ const keys={start:['alias','eligible'],verify:['code'],slots:[],hold:['slotId','requestId'],read:[],document:[],sign:['requestId','sourceSha','ink','read','agree'],copy:[],cancel:[]};
+ need(Object.prototype.hasOwnProperty.call(keys,operation)&&payload&&typeof payload==='object'&&!Array.isArray(payload)&&
+  Object.keys(payload).sort().join(',')===keys[operation].slice().sort().join(','),'UAT_REQUEST');
+ const tx=fn=>study1UatGasCaseTransaction_(approved,access,fn);
+ const unchanged=value=>({record:null,value});
+ const result=(record,at)=>({record,value:study1UatCaseView_(record,approved.slots,at)});
+ const lookup=(mine)=>{need(mine,'UAT_CASE_NOT_FOUND');return mine;};
+ const held=(mine,at)=>{need(mine.state==='HELD'&&Date.parse(mine.holdUntil)>at&&mine.sourceSha===approved.sourceSha,'UAT_HOLD_REQUIRED');return mine;};
+ const availableView=available=>available.map(s=>({slotId:s.slotId,startAtUtc:s.startAtUtc,endAtUtc:s.endAtUtc,remaining:s.remaining}));
+ if(operation==='start')return tx((mine,available,at)=>{
+  need(payload.eligible===true&&/^TEST_(0[1-9]|1[0-2])$/.test(payload.alias),'UAT_SYNTHETIC_IDENTITY_REQUIRED');
+  if(mine){need(mine.alias===payload.alias,'UAT_CASE_BINDING');return unchanged(study1UatCaseView_(mine,approved.slots,at));}
+  const tokenHash=study1PdfDigest_(Array.from(access.caseKey,c=>c.charCodeAt(0)));
+  return result({alias:payload.alias,caseId:'UAT_'+tokenHash.slice(0,24),tokenHash,state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''},at);
+ });
+ if(operation==='verify'||operation==='slots')return tx((record,available)=>{
+  const mine=lookup(record);
+  if(operation==='verify'){
+   need(payload.code==='12345678'&&['OTP','SLOTS'].includes(mine.state),'UAT_SYNTHETIC_OTP_INVALID');
+   if(mine.state==='OTP')return {record:{...mine,state:'SLOTS'},value:availableView(available)};
+  }else need(mine.state==='SLOTS','UAT_CASE_STATE');
+  return unchanged(availableView(available));
+ });
+ if(operation==='read')return tx((mine,available,at)=>unchanged(study1UatCaseView_(lookup(mine),approved.slots,at)));
+ if(operation==='hold')return tx((record,available,at)=>{
+  const mine=lookup(record);
+  need(hex(payload.requestId,32)&&typeof payload.slotId==='string','UAT_REQUEST');
+  if(mine.holdKey===payload.requestId){held(mine,at);need(mine.slotId===payload.slotId,'UAT_HOLD_REPLAY_CONFLICT');return unchanged(study1UatCaseView_(mine,approved.slots,at));}
+  need(mine.state==='SLOTS'&&available.some(s=>s.slotId===payload.slotId),'UAT_SLOT_UNAVAILABLE');
+  return result({...mine,state:'HELD',slotId:payload.slotId,holdUntil:new Date(at+600000).toISOString(),holdKey:payload.requestId,sourceSha:approved.sourceSha},at);
+ });
+ if(operation==='cancel')return tx((record,available,at)=>{
+  const mine=lookup(record);
+  need(mine.state!=='CONFIRMED','UAT_CONFIRMED_IMMUTABLE');
+  if(['CANCELLED','EXPIRED'].includes(mine.state))return unchanged(study1UatCaseView_(mine,approved.slots,at));
+  const expired=mine.state==='HELD'&&Date.parse(mine.holdUntil)<=at;
+  return result({...mine,state:expired?'EXPIRED':'CANCELLED'},at);
+ });
+ if(operation==='copy'){
+  const snapshot=tx(mine=>{need(lookup(mine).state==='CONFIRMED','UAT_COPY_NOT_CONFIRMED');return unchanged(mine);});
+  return study1UatCaseCopy_(snapshot,approved.slots,Date.now());
+ }
+ // Construct the same fixed synthetic original only after an authorized active hold.
+ const snapshot=tx((record,available,at)=>{
+  const mine=lookup(record);
+  if(operation==='sign'&&mine.state==='CONFIRMED')return unchanged({mine,at});
+  return unchanged({mine:held(mine,at),at});
+ });
+ const sameHold=mine=>['caseId','slotId','holdKey','holdUntil','sourceSha'].every(k=>mine[k]===snapshot.mine[k]);
+ const encode=bytes=>Utilities.base64Encode(Array.from(bytes,x=>x>127?x-256:x));
+ if(operation==='document'){
+  const doc=await study1UatDocument_('GAS_UAT');
+  need(doc.hash===approved.sourceSha&&study1PdfDigest_(doc.bytes)===doc.hash&&doc.layout.pageCount===5,'UAT_DOCUMENT_SOURCE');
+  return tx((record,available,at)=>{const mine=held(lookup(record),at);need(sameHold(mine),'UAT_HOLD_CHANGED');return unchanged({caseId:mine.caseId,sha:doc.hash,pageCount:5,bytes:encode(doc.bytes)});});
+ }
+ need(hex(payload.requestId,32)&&payload.read===true&&payload.agree===true&&payload.sourceSha===approved.sourceSha,'UAT_DOCUMENT_BINDING');
+ need(typeof payload.ink==='string'&&payload.ink.length<=120000&&/^[A-Za-z0-9+/]+={0,2}$/.test(payload.ink),'UAT_INK');
+ const ink=Utilities.base64Decode(payload.ink).map(x=>x&255);
+ const u32=i=>ink[i]*16777216+ink[i+1]*65536+ink[i+2]*256+ink[i+3];
+ need(ink.length>=100&&ink.length<=90000&&encode(ink)===payload.ink&&
+  ink.slice(0,8).join(',')==='137,80,78,71,13,10,26,10'&&ink.slice(12,16).join(',')==='73,72,68,82'&&
+  u32(16)>0&&u32(16)<=700&&u32(20)>0&&u32(20)<=160,'UAT_INK');
+ const inkSha=study1PdfDigest_(ink);
+ const replay=mine=>{need(sameHold(mine)&&mine.state==='CONFIRMED'&&mine.signKey===payload.requestId&&mine.inkSha===inkSha,'UAT_SIGN_REPLAY_CONFLICT');return mine;};
+ if(snapshot.mine.state==='CONFIRMED')return study1UatCaseCopy_(replay(snapshot.mine),approved.slots,Date.now());
+ const doc=await study1UatDocument_('GAS_UAT');
+ need(doc.hash===approved.sourceSha&&study1PdfDigest_(doc.bytes)===doc.hash,'UAT_DOCUMENT_SOURCE');
+ const composed=await study1PdfComposeSigned_(doc.bytes,ink,doc.layout,{experiment:'E1',version:'UAT-SYNTHETIC-1',sha256:doc.hash},new Date(snapshot.at));
+ const pdf=encode(composed.signedPdfBytes);
+ need(composed.pageCount===5&&composed.sourceSha256===approved.sourceSha&&study1PdfDigest_(composed.signedPdfBytes)===composed.signedSha256&&pdf.length<=320000,'UAT_SIGNED_PDF');
+ const saved=tx((record,available,at)=>{
+  const mine=lookup(record);
+  if(mine.state==='CONFIRMED')return unchanged(replay(mine));
+  held(mine,at);need(sameHold(mine),'UAT_HOLD_CHANGED');
+  const next={...mine,state:'CONFIRMED',signedSha:composed.signedSha256,signKey:payload.requestId,inkSha,signedAt:composed.serverSignedAt,date:composed.taipeiDate,pdf};
+  return {record:next,value:next};
+ });
+ // Only after the transaction core has verified persistence, re-open the complete copy.
+ return study1UatCaseCopy_(saved,approved.slots,Date.now());
+}
