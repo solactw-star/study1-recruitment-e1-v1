@@ -367,6 +367,22 @@ function targetVersions(s){return s.proofs.filter(v=>v.sha===reviewedPrivateTarg
 function targetDeployed(s){const nums=new Set(targetVersions(s).map(v=>v.version));
  return normalizedDeployments(s.deps).some(d=>d.version!==null&&nums.has(d.version));
 }
+// Only after a successful, identity-checked creation POST: an exact resource
+// can take time to become visible to GET. Reuse the existing bounded schedule.
+// Do not apply this to routine audits, orphan lookup, denied or unknown writes.
+async function readNewResource(get,sleep,unknownMessage){
+ const pause=sleep|| (ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+ let got;
+ for(let i=0;i<READBACK_DELAYS_MS.length;i++){
+  if(i)await pause(READBACK_DELAYS_MS[i]);
+  try{got=await get();break;}
+  catch(e){
+   if(!/HTTP 404\b/.test(String(e.message)))throw e;
+  }
+ }
+ assert(got,unknownMessage);
+ return got;
+}
 async function createImmutableVersion(api,env,assertMain=latestMain,sleep){
  const before=await reviewedMutation(api,env,'version',assertMain);
  assert(!targetDeployed(before),'matching private deployment already exists; use read-only audit');
@@ -386,7 +402,9 @@ async function createImmutableVersion(api,env,assertMain=latestMain,sleep){
  try{v=await api.createVersion(description);}
  catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
  assert(v?.scriptId===SID&&Number.isSafeInteger(v.versionNumber)&&v.versionNumber>0,'version create response ambiguous; stop');
- checkHead(await api.getVersionContent(v.versionNumber));
+ const got=await readNewResource(()=>api.getVersionContent(v.versionNumber),sleep,
+  'new immutable version direct readback unknown; use new audit, no repeat');
+ checkHead(got);
  const after=await settleVersionInventory(api,before,v.versionNumber,true,sleep);
  assert(after.proofs.some(x=>x.version===v.versionNumber&&x.sha===reviewedPrivateTarget()),'immutable version readback mismatch');
  report('V2_PRIVATE_VERSION_VERIFIED=true');
@@ -414,18 +432,8 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  // new resource to GET. First settle the existing complete inventory, then
  // wait only for this exact new deployment's direct readback.
  const after=await settleDeploymentInventory(api,before,created.deploymentId,sleep);
- const pause=sleep|| (ms=>new Promise(resolve=>setTimeout(resolve,ms)));
- let got;
- for(let i=0;i<READBACK_DELAYS_MS.length;i++){
-  if(i)await pause(READBACK_DELAYS_MS[i]);
-  try{got=await api.getDeployment(created.deploymentId);break;}
-  catch(e){
-   // 404 is transient only in this bounded post-create readback context.
-   // Never retry a POST, permission error, or unexpected response.
-   if(!/HTTP 404\b/.test(String(e.message)))throw e;
-  }
- }
- assert(got,'new deployment direct readback unknown; use new audit, no repeat');
+ const got=await readNewResource(()=>api.getDeployment(created.deploymentId),sleep,
+  'new deployment direct readback unknown; use new audit, no repeat');
  // If a direct GET lagged, recheck inventory after it becomes visible:
  // a concurrent version/ACL/deployment change during the wait must stop.
  const fresh=await inventory(api);

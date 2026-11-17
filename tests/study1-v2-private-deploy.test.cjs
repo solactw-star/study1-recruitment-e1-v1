@@ -190,6 +190,42 @@ test('GET-only readback tolerates a temporarily stale versions list after single
  assert.deepEqual(sleeps,[1000]);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
 });
+test('successful version POST with temporarily invisible exact immutable content uses bounded GET only',async()=>{
+ const f=fakeApi(),e=runEnv(),sleeps=[];let reads=0;
+ const original=f.api.getVersionContent;
+ f.api.getVersionContent=async n=>{
+  assert.equal(n,1);
+  if(++reads<=2)throw Error('GET V2 Apps Script API /content HTTP 404 after 1 attempt(s); no mutation inferred');
+  return original(n);
+ };
+ const result=await d.createImmutableVersion(f.api,{...e,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},()=>{},async ms=>{sleeps.push(ms);});
+ assert.deepEqual(result,{version:1,createdNew:true});
+ assert.equal(reads,4); // three exact GET attempts, then full inventory proof
+ assert.deepEqual(sleeps,[1000,2000]);assert.deepEqual(f.counts(),{puts:0,versionCreates:1});
+});
+test('post-create immutable content rejects persistent 404, permission failure, wrong bytes and concurrent changes without another POST',async()=>{
+ for(const kind of ['404','403','wrong-content','drift']){
+  const f=fakeApi(),e=runEnv(),sleeps=[];let reads=0;
+  const original=f.api.getVersionContent;
+  f.api.getVersionContent=async n=>{
+   assert.ok(n===1||kind==='drift');reads++;
+   if(kind==='404'||kind==='403')throw Error('GET V2 Apps Script API /content HTTP '+kind);
+   if(kind==='drift'&&reads===1)throw Error('GET V2 Apps Script API /content HTTP 404');
+   const content=await original(n);
+   if(kind==='wrong-content')content.files[0]={...content.files[0],source:content.files[0].source+'DRIFT'};
+   if(kind==='drift'&&reads===2){
+    const list=f.api.getVersions;
+    f.api.getVersions=async()=>[...(await list()),{scriptId:d.SID,versionNumber:2,description:'CONCURRENT'}];
+   }
+   return content;
+  };
+  await assert.rejects(d.createImmutableVersion(f.api,{...e,PRIVATE_MODE:'version',CONFIRMATION:d.VERSION_CONFIRM},()=>{},async ms=>{sleeps.push(ms);}),
+   kind==='404'?/direct readback unknown/:kind==='403'?/HTTP 403/:kind==='wrong-content'?/diverged/:/inventory changed unexpectedly/);
+  assert.deepEqual(f.counts(),{puts:0,versionCreates:1});
+  assert.equal(reads,kind==='404'?5:kind==='drift'?4:1);
+  assert.deepEqual(sleeps,kind==='404'?[1000,2000,4000,8000]:kind==='drift'?[1000]:[]);
+ }
+});
 test('ambiguous multiple matching orphans stop before any new POST',async()=>{
  const f=fakeApi(),e=runEnv();
  const text='Study1 V2 PRIVATE MYSELF HEAD '+d.TARGET+
