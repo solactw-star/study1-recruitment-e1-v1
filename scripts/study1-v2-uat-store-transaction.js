@@ -105,7 +105,20 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     confirmed:live.filter(c=>c.state==='CONFIRMED').length,pdfs:live.filter(c=>c.pdf!=='').length};
    const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,counts,initial.raw]),c=>c.charCodeAt(0)));
    need(hex(snapshotSha,64),'UAT_CLEANUP_DIGEST');
-   if(maintenance.mode==='preview')return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY'};
+   if(maintenance.mode==='preview'){
+    // Owner maintenance projection: only validated synthetic aliases and
+    // booking status, never hashes, keys, PDF bytes or stored raw rows.
+    const effective=c=>c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state;
+    const cases=live.map(c=>({alias:c.alias,state:effective(c),slotId:c.slotId||null,
+     pdfSaved:c.state==='CONFIRMED'}));
+    const slotSummary=slots.map(s=>{
+     const occupied=cases.filter(c=>c.slotId===s[0]&&['HELD','CONFIRMED'].includes(c.state)).length;
+     const free=available.find(v=>v.slotId===s[0]);
+     return {slotId:s[0],startAtUtc:s[1],endAtUtc:s[2],capacity:s[3],occupied,
+      remaining:s[3]-occupied,bookable:!!free};
+    });
+    return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY',cases,slots:slotSummary};
+   }
    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
    // Optional paired callbacks are trusted server services, never browser input.

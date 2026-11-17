@@ -156,6 +156,13 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  const fixed=JSON.stringify(matrix),beforeReset=writes;
  const p=maintain({mode:'preview'});
  assert.equal(p.counts.cases,3);assert.equal(p.counts.confirmed,1);assert.equal(p.counts.pdfs,1);
+ assert.deepEqual(JSON.parse(JSON.stringify(p.cases)),[
+  {alias:'TEST_01',state:'CONFIRMED',slotId:'TEST_SLOT_1',pdfSaved:true},
+  {alias:'TEST_02',state:'EXPIRED',slotId:'TEST_SLOT_2',pdfSaved:false},
+  {alias:'TEST_03',state:'CANCELLED',slotId:'TEST_SLOT_2',pdfSaved:false}]);
+ assert.deepEqual(JSON.parse(JSON.stringify(p.slots.map(s=>[s.slotId,s.occupied,s.remaining,s.bookable]))),[['TEST_SLOT_1',1,0,false],['TEST_SLOT_2',0,1,true]]);
+ assert.doesNotMatch(JSON.stringify(p),/tokenHash|holdKey|sourceSha|signedSha|signKey|inkSha|caseId|"pdf":|gateSha|storeId/);
+ assert.ok(!JSON.stringify(p).includes(receipt.pdf));
  assert.equal(writes,beforeReset);assert.equal(JSON.stringify(matrix),fixed);
  assert.throws(()=>maintain({mode:'clear',expectedSha:'0'.repeat(64),nextGateSha:newGate}),/STALE_PREVIEW/);
  assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:oldGate}),/CLEANUP_REQUEST/);
@@ -541,18 +548,23 @@ test('same official site source routes preserve formal closure and require real 
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
  let confirmed=false,fail=false;
- for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary','siteTestNewGate'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
+ for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary','siteTestNewGate','siteTestCases','siteTestSlots'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
  const counts={cases:2,holds:1,confirmed:1,pdfs:1},sha='b'.repeat(64);
+ const cases=[{alias:'TEST_01',state:'HELD',slotId:'TEST_SLOT_1',pdfSaved:false},{alias:'TEST_02',state:'CONFIRMED',slotId:'TEST_SLOT_2',pdfSaved:true}];
+ const slots=[1,2].map(n=>({slotId:'TEST_SLOT_'+n,startAtUtc:'2099-01-01T02:00:00.000Z',endAtUtc:'2099-01-01T03:00:00.000Z',capacity:1,occupied:1,remaining:0,bookable:false}));
+ let badPreview=false;
  const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(r){
-  requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts}});
+  requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts,cases:badPreview?[{...cases[0],tokenHash:'secret'},cases[1]]:cases,slots}});
   else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:false,replacementGate:'c'.repeat(64)}});
  }};}};}}}};
  const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed,crypto:{getRandomValues:a=>a.fill(1)},addEventListener(){}},google});
  run();const p=nodes.get('siteTestPreview'),c=nodes.get('siteTestClear'),s=nodes.get('siteTestCleanupSummary');
  assert.equal(c.disabled,true);await c.click();assert.equal(requests.length,0);await p.click();assert.equal(c.disabled,false);
+ assert.match(nodes.get('siteTestCases').textContent,/TEST_02｜已確認/);assert.match(nodes.get('siteTestSlots').textContent,/剩餘 0/);
  await c.click();assert.equal(requests.length,1);confirmed=true;fail=true;await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/不重送/);
  await p.click();assert.equal(c.disabled,true);await c.click();assert.equal(requests.filter(r=>r.mode==='clear').length,1);
  fail=false;run();await p.click();await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/已核實清除/);
  assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'01'.repeat(32)});
- assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));
+ assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));assert.match(nodes.get('siteTestCases').textContent,/無測試案件/);
+ badPreview=true;run();await p.click();assert.equal(c.disabled,true);assert.match(nodes.get('siteTestCases').textContent,/尚未核實/);assert.doesNotMatch(nodes.get('siteTestCases').textContent,/secret/);
 });

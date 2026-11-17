@@ -289,10 +289,37 @@ function sameSiteCleanupController(){
  if(!preview||!clear||!summary||!gateOut)return;
  gateOut.value='';gateOut.hidden=true;
  window.addEventListener('pagehide',()=>{gateOut.value='';gateOut.hidden=true;});
+ const casesOut=el('siteTestCases'),slotsOut=el('siteTestSlots');
+ if(!casesOut||!slotsOut)return;
  let current=null,busy=false,unknown=false,cleared=false;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
  const say=s=>{summary.textContent=s;};
+ const labels={OTP:'待驗證',SLOTS:'待選時段',HELD:'暫留',CONFIRMED:'已確認',CANCELLED:'已取消',EXPIRED:'已逾期'};
+ const exact=(obj,keys)=>obj&&Object.keys(obj).sort().join(',')===keys.slice().sort().join(',');
+ const iso=s=>typeof s==='string'&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s;
+ const validLists=p=>{
+  if(!Array.isArray(p.cases)||p.cases.length!==p.counts.cases||!Array.isArray(p.slots)||p.slots.length<1||p.slots.length>4)return false;
+  if(!p.slots.every(s=>exact(s,['slotId','startAtUtc','endAtUtc','capacity','occupied','remaining','bookable'])&&
+   /^TEST_SLOT_[1-4]$/.test(s.slotId)&&iso(s.startAtUtc)&&iso(s.endAtUtc)&&s.startAtUtc<s.endAtUtc&&
+   s.capacity===1&&[0,1].includes(s.occupied)&&s.remaining===1-s.occupied&&
+   typeof s.bookable==='boolean'&&(!s.bookable||s.remaining===1)))return false;
+  if(new Set(p.slots.map(s=>s.slotId)).size!==p.slots.length)return false;
+  if(!p.cases.every(c=>exact(c,['alias','state','slotId','pdfSaved'])&&/^TEST_(0[1-9]|1[0-2])$/.test(c.alias)&&
+   Object.prototype.hasOwnProperty.call(labels,c.state)&&(c.slotId===null||p.slots.some(s=>s.slotId===c.slotId))&&
+   (!['HELD','CONFIRMED','EXPIRED'].includes(c.state)||c.slotId!==null)&&
+   (!['OTP','SLOTS'].includes(c.state)||c.slotId===null)&&c.pdfSaved===(c.state==='CONFIRMED')))return false;
+  return new Set(p.cases.map(c=>c.alias)).size===p.cases.length&&
+   p.cases.filter(c=>c.state==='HELD').length===p.counts.holds&&
+   p.cases.filter(c=>c.state==='CONFIRMED').length===p.counts.confirmed&&
+   p.slots.every(s=>s.occupied===p.cases.filter(c=>c.slotId===s.slotId&&['HELD','CONFIRMED'].includes(c.state)).length);
+ };
+ const showLists=p=>{
+  casesOut.textContent=p.cases.length?p.cases.map(c=>c.alias+'｜'+labels[c.state]+'｜'+(c.slotId||'未選時段')+'｜'+(c.pdfSaved?'已保存測試 PDF':'無簽署 PDF')).join('\n'):'目前無測試案件';
+  const local=s=>new Date(s).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+  slotsOut.textContent=p.slots.map(s=>s.slotId+'｜'+local(s.startAtUtc)+' – '+local(s.endAtUtc)+'｜已占 '+s.occupied+'/'+s.capacity+'｜剩餘 '+s.remaining+'｜'+(s.bookable?'可預約':'不可預約')).join('\n');
+ };
+ const emptyLists=()=>{casesOut.textContent='尚未核實測試案件';slotsOut.textContent='尚未核實測試場次';};
  const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。此流程不寄信、不寫正式研究資料。';
  const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;};
  const call=request=>new Promise((resolve,reject)=>{
@@ -302,10 +329,11 @@ function sameSiteCleanupController(){
    .study1SiteTestCleanup(request);
  });
  preview.addEventListener('click',async()=>{
-  if(busy)return;busy=true;current=null;buttons();
+  if(busy)return;busy=true;current=null;emptyLists();buttons();
   try{
    const p=await call({mode:'preview'});
-   if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||!hex(p.snapshotSha)||!valid(p.counts))throw Error('BAD_PREVIEW');
+   if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||!hex(p.snapshotSha)||!valid(p.counts)||!validLists(p))throw Error('BAD_PREVIEW');
+   showLists(p);
    if(!unknown&&!cleared)current=p;
    say(describe(p.counts)+(unknown?' 前次清除結果仍待管理者核對；本頁不會重送。':' 請確認後清空。'));
   }catch(_){say('無法取得可信預覽：測試設定、管理權限或前次清除狀態尚待核對。未送出刪除。');}
@@ -318,13 +346,14 @@ function sameSiteCleanupController(){
   let entropy;
   try{entropy=Array.from(window.crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');}
   catch(_){say('無法產生安全亂數，未送出清除。');return;}
-  const p=current;current=null;busy=true;buttons();
+  const p=current;current=null;busy=true;emptyLists();buttons();
   try{
    const result=await call({mode:'clear',expectedSha:p.snapshotSha,confirmation:'CLEAR_TEST_ONLY',entropy});
    if(!result||result.formal!==false||result.scope!=='SYNTHETIC_CASES_ONLY'||!valid(result.cleared)||
     ['cases','holds','confirmed','pdfs'].some(k=>result.cleared[k]!==p.counts[k])||
     result.remainingCases!==0||result.remainingPdfCopies!==0||result.gateRotationRequired!==false||!hex(result.replacementGate))throw Error('BAD_RECEIPT');
    cleared=true;gateOut.value=result.replacementGate;gateOut.hidden=false;
+   casesOut.textContent='已核實清空，無測試案件';slotsOut.textContent='測試名額已釋放；請重新預覽核對目前可約場次。';
    say('已核實清除。'+describe(result.cleared)+' 測試名額已釋放，測試通行碼已更新。請安全複製下方新碼，再返回本網站開始下一次測試。');
   }catch(e){
    // A denied or malformed clear response may not establish whether a
@@ -339,7 +368,7 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // The same-site test management view does not initialize formal/sandbox RPCs.
  const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
  if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
- const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">預覽測試資料</button><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
+ const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
  return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
 }
 function sameSiteCandidate(){
