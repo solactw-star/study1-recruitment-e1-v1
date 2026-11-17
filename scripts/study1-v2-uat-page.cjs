@@ -32,7 +32,7 @@ function build(){
  const scripts=[read('gas/Study1PdfLib.js'),kernel(),read('scripts/study1-v2-uat-ui.js')];if(scripts.some(s=>/<\/script|<\?/i.test(s)))throw Error('unsafe embedded script delimiter');
  return html+scripts.map(s=>'<script>'+s+'\n</script>').join('')+'</body></html>\n';
 }
-function candidate(){const core=require('./study1-v2-gas-head-only.cjs');const base=core.anonymousReadOnlyCandidate();const files=base.map(f=>f.name==='Website'?{...f,source:replace(f.source,'function doGet(e){',"function doGet(e){\n if(e&&e.parameter&&e.parameter.view==='uat')return HtmlService.createHtmlOutputFromFile('Study1IsolatedUat').setTitle('Study1 隔離人工驗收').addMetaTag('viewport','width=device-width, initial-scale=1');")}:f);
+function candidate(){const core=require('./study1-v2-release-source.cjs');const base=core.anonymousReadOnlyCandidate();const files=base.map(f=>f.name==='Website'?{...f,source:replace(f.source,'function doGet(e){',"function doGet(e){\n if(e&&e.parameter&&e.parameter.view==='uat')return HtmlService.createHtmlOutputFromFile('Study1IsolatedUat').setTitle('Study1 隔離人工驗收').addMetaTag('viewport','width=device-width, initial-scale=1');")}:f);
  files.push({name:'Study1IsolatedUat',type:'HTML',source:build()});core.closedManifest(files,true);core.closedWebsite(files);core.publicRpcSurface(files);return files;
 }
 module.exports={kernel,build,candidate};

@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const core=require('../scripts/study1-v2-gas-head-only.cjs');
+const core=require('../scripts/study1-v2-release-source.cjs');
 const folder=path.join(__dirname,'../gas'),files=core.localSources();
 test('login-only ANYONE with deploying identity and formal 27-file RPC closure',()=>{
  const m=JSON.parse(fs.readFileSync(path.join(folder,'appsscript.json'),'utf8'));

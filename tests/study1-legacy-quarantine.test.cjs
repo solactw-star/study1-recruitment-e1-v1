@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const core=require('../scripts/study1-v2-gas-head-only.cjs');
+const core=require('../scripts/study1-v2-release-source.cjs');
 const repo=path.join(__dirname,'..'),gas=path.join(repo,'gas');
 const archive=path.join(__dirname,'fixtures/legacy-gas');
 const expected=Object.freeze({

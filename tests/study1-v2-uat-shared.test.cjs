@@ -389,7 +389,7 @@ test('trusted UAT configuration and narrow request envelope fail closed without 
 });
 
 test('reviewable online UAT candidate uses original apply template, owner boundary and only the isolated RPC',async()=>{
- const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-release-source.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,id)=>a.find(f=>f.name===id).source;
  assert.equal(core.closedManifest(candidate).webapp.access,'MYSELF');assert.equal(candidate.length,base.length+3);
  const added=candidate.filter(f=>!base.some(x=>x.name===f.name));
@@ -478,7 +478,7 @@ test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutat
 });
 
 test('release preflight identifies exact deterministic private candidate and synthetic source, without credentials or remote mutation',async()=>{
- const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-release-source.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,n)=>a.find(f=>f.name===n).source;
  const candidateSha=core.digest(candidate),baselineSha=core.digest(base);
  assert.equal(candidateSha,core.digest(adapter.onlineCandidate(base)));
@@ -494,7 +494,7 @@ test('release preflight identifies exact deterministic private candidate and syn
   assert.throws(()=>adapter.onlineCandidate(changed),/UAT_BASE_INVENTORY/);
  }
  assert.throws(()=>adapter.onlineCandidate(candidate),/UAT_BASE_INVENTORY/);
- assert.throws(()=>core.releaseProfile({SOURCE_PROFILE:'private_e1_uat'}),/invalid V2 source profile/);
+ assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseProfile({SOURCE_PROFILE:'private_e1_uat'}),/invalid V2 source profile/);
 
  assert.notEqual(candidateSha,baselineSha);
  assert.equal(candidate.length,30);
@@ -520,7 +520,7 @@ test('release preflight identifies exact deterministic private candidate and syn
 });
 
 test('same official site source routes preserve formal closure and require real OWNER for test and cleanup',async()=>{
- const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-release-source.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
  assert.equal(JSON.parse(get('appsscript')).webapp.access,'ANYONE_ANONYMOUS');
  // Review evidence only: this does NOT enroll the candidate in any release
@@ -542,7 +542,7 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(candidateSha,core.digest(adapter.sameSiteCandidate()));
  console.log('SAME_SITE_REVIEW_ONLY '+JSON.stringify({candidateSha256:candidateSha,fileCount:files.length,modified,added:extra,access:'ANYONE_ANONYMOUS',executeAs:'USER_DEPLOYING',releaseAuthorized:false}));
  assert.throws(()=>core.publicRpcSurface(files));
- assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
  const html=get('Study1Visitor'),admin=get('AdminConsole');
  assert.match(html,/<\? if \(flowMode === 'GAS_UAT'\) \{ \?>/);
  assert.match(html,/data-site-mode="FORMAL"/);assert.match(html,/data-site-mode="GAS_UAT"/);
@@ -603,7 +603,7 @@ test('same official site source routes preserve formal closure and require real 
  for(const view of ['team','preview','demo'])assert.throws(()=>c.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
 });
 test('same-site assembler source contract rejects unreviewed inventory, bytes, types and RPC deltas',()=>{
- const core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const core=require('../scripts/study1-v2-release-source.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const baseline=core.anonymousReadOnlyCandidate(),target=adapter.sameSiteCandidate();
  const prove=files=>adapter.requireSameSiteSourceDelta(baseline,files);
  assert.equal(prove(target),core.digest(target));
@@ -620,7 +620,7 @@ test('same-site assembler source contract rejects unreviewed inventory, bytes, t
   [change('Study1UatSession',f=>({...f,type:'HTML'})),/unexpected kernel surface/],
   [change('Study1UatStoreTransaction',f=>({...f,source:f.source+'\nfunction unreviewedRpc(){}'})),/unexpected kernel surface/]
  ])assert.throws(()=>prove(files),reason);
- assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
  assert.throws(()=>core.publicRpcSurface(target));
 });
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
@@ -652,7 +652,7 @@ test('same-site admin preview and confirm button block unknown destructive retri
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{
- const core=require('../scripts/study1-v2-gas-head-only.cjs'),d=require('../scripts/study1-v2-release-evidence.cjs');
+ const core=require('../scripts/study1-v2-release-source.cjs'),d=require('../scripts/study1-v2-release-evidence.cjs');
  const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
  const baseline=core.anonymousReadOnlyCandidate(),target=adapter.sameSiteCandidate(),privateFiles=core.privateOwnerManagementCandidate(core.localSources());
  const reviewedTargetSha256=core.digest(target),content=files=>({scriptId:core.SID,files});
@@ -687,7 +687,7 @@ test('same-site post-release evidence checks original URL, immutable content and
   x=>{x.after.headSha=core.digest(baseline);},
   x=>{x.newContent.scriptId='OTHER';}
  ])assert.throws(()=>verify(mutate(bad)));
- assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
  assert.throws(()=>core.publicRpcSurface(target));
 });
 

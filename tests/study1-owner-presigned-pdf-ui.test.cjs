@@ -166,7 +166,7 @@ test('OWNER private completed PDF link appears only after SHA and byte readback,
 
 
 test('private management generated UI locks all PDF writes after UNKNOWN even after a successful fresh directory GET',async()=>{
- const core=require('../scripts/study1-v2-gas-head-only.cjs');
+ const core=require('../scripts/study1-v2-release-source.cjs');
  const candidate=core.privateOwnerManagementCandidate(core.localSources()).find(x=>x.name==='AdminConsole').source;
  const i=candidate.indexOf('function e1OwnerPresignSetup_(){'),j=candidate.indexOf('\ne1OwnerPresignSetup_();',i);
  assert.ok(i>=0&&j>i);

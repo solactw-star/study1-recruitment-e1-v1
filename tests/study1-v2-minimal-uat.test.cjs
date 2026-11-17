@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),crypto=require('node:crypto'),zlib=require('node:zlib');
-const PDFLib=require('../gas/Study1PdfLib.js'),core=require('../scripts/study1-v2-gas-head-only.cjs'),u=require('../scripts/study1-v2-uat-page.cjs');
+const PDFLib=require('../gas/Study1PdfLib.js'),core=require('../scripts/study1-v2-release-source.cjs'),u=require('../scripts/study1-v2-uat-page.cjs');
 const pngCrc=bytes=>{
  let c=0xffffffff;for(const b of bytes){c^=b;for(let j=0;j<8;j++)
  c=(c&1)?(c>>>1)^0xedb88320:c>>>1;}return (c^0xffffffff)>>>0;
