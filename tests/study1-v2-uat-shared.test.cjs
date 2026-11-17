@@ -182,3 +182,35 @@ test('internal GAS service binding authorizes only own case with explicit gate, 
  assert.equal(writes,2);assert.equal(flushes,2);assert.equal(locked,false);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));assert.ok(!JSON.stringify(matrix).includes(keyB));
 });
+
+test('GAS authorized case projection excludes stored credentials and only returns a verified complete PDF copy',async()=>{
+ const vm=require('node:vm'),realm=vm.createContext({Date,Uint8Array,Utilities:{
+  DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest()),
+  base64Decode:s=>Array.from(Buffer.from(s,'base64')),formatDate:()=> '2026/11/18'
+ }});
+ for(const p of ['gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js','scripts/study1-v2-uat-gas-services.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const original=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm);
+ const at=Date.parse('2026-11-18T02:00:00.000Z'),slots=[['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']];
+ realm.args=JSON.stringify({source:original.bytes,ink:Array.from(syntheticInk()),layout:original.layout,sha:original.hash,at:new Date(at).toISOString()});
+ const signed=await vm.runInContext('(async()=>{const x=JSON.parse(args);return study1PdfComposeSigned_(x.source,x.ink,x.layout,{experiment:"E1",version:"UAT-SYNTHETIC-1",sha256:x.sha},new Date(x.at));})()',realm);
+ const held={alias:'TEST_01',caseId:'UAT_'+'a'.repeat(24),tokenHash:'b'.repeat(64),state:'HELD',slotId:'TEST_SLOT_1',holdUntil:new Date(at+600000).toISOString(),holdKey:'c'.repeat(32),sourceSha:original.hash,signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''};
+ const view=realm.study1UatCaseView_,copy=realm.study1UatCaseCopy_;
+ assert.equal(view(held,slots,at).bookingStatus,'HELD');
+ assert.equal(view(held,slots,at+600000).bookingStatus,'EXPIRED');
+ assert.equal(held.state,'HELD');
+ assert.throws(()=>view(null,slots,at),/UAT_CASE_NOT_FOUND/);
+ assert.throws(()=>view(held,[],at),/UAT_CASE_SLOT/);
+ assert.throws(()=>view(held,[...slots,...slots],at),/UAT_CASE_SLOT/);
+ await assert.rejects(copy(held,slots,at),/UAT_COPY_NOT_CONFIRMED/);
+ const record={...held,state:'CONFIRMED',signedSha:signed.signedSha256,signKey:'d'.repeat(32),inkSha:hash(syntheticInk()),signedAt:signed.serverSignedAt,date:signed.taipeiDate,pdf:Buffer.from(signed.signedPdfBytes).toString('base64')};
+ const summary=view(record,slots,at);
+ assert.equal(summary.stage,'DONE');assert.equal(summary.pageCount,null);
+ for(const k of ['tokenHash','holdKey','signKey','inkSha','pdf','bytes'])assert.equal(Object.hasOwn(summary,k),false);
+ const receipt=await copy(record,slots,at);
+ assert.equal(receipt.caseId,record.caseId);assert.equal(receipt.formal,false);assert.equal(receipt.persisted,true);assert.equal(receipt.pageCount,5);assert.equal(receipt.bytes,record.pdf);assert.equal(hash(Buffer.from(receipt.bytes,'base64')),receipt.sha);
+ for(const k of ['tokenHash','holdKey','signKey','inkSha','pdf'])assert.equal(Object.hasOwn(receipt,k),false);
+ await assert.rejects(copy({...record,pdf:Buffer.from('wrong').toString('base64')},slots,at),/UAT_PDF_INTEGRITY/);
+ const one=await PDFLib.PDFDocument.create();one.addPage();const oneBytes=Buffer.from(await one.save());
+ await assert.rejects(copy({...record,pdf:oneBytes.toString('base64'),signedSha:hash(oneBytes)},slots,at),/UAT_PDF_PAGE_COUNT/);
+});
