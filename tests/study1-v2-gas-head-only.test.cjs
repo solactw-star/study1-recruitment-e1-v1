@@ -281,3 +281,44 @@ test('before-PUT inventory guard and after-PUT readback gate prevent blind retri
   assert.equal(writes,1);
  }finally{fs.rmSync(e.RUNNER_TEMP,{recursive:true,force:true});}
 });
+
+ test('HEAD audit separates anonymous current baseline from private target without permitting a write',async()=>{
+ const d=require('../scripts/study1-v2-private-deploy.cjs');
+ const base=m.anonymousReadOnlyCandidate(),target=m.privateOwnerManagementCandidate(m.localSources());
+ const head={scriptId:m.SID,files:base};
+ const dep=(id,version,access)=>({deploymentId:id,deploymentConfig:{scriptId:m.SID,versionNumber:version,manifestFileName:'appsscript'},entryPoints:[{entryPointType:'WEB_APP',webApp:{entryPointConfig:{access,executeAs:'USER_DEPLOYING'},url:'https://example.invalid/'+id}}]});
+ const calls=[];
+ const api={
+  getHead:async()=>{calls.push('GET HEAD');return head;},
+  getVersions:async()=>[{scriptId:m.SID,versionNumber:4}],
+  getDeployments:async()=>[dep('DEV',0,'ANYONE_ANONYMOUS'),dep('PUBLIC',4,'ANYONE_ANONYMOUS')],
+  getVersionContent:async()=>head,
+  putContent:()=>{throw Error('mutation must not be called');},
+  createVersion:()=>{throw Error('mutation must not be called');},
+  createDeployment:()=>{throw Error('mutation must not be called');}
+ };
+ const receipt=await m.audit(api,target);
+ assert.equal(receipt.sha,m.digest(base));
+ assert.equal(receipt.targetSha,m.digest(target));
+ assert.equal(receipt.baselineAccess,'ANYONE_ANONYMOUS');
+ assert.equal(receipt.targetAccess,'MYSELF');
+ assert.equal(receipt.modeDiffers,true);
+ assert.equal(receipt.baselineKnownSafe,true);
+ assert.equal(receipt.writeAuthorized,false);
+ assert.deepEqual(calls,['GET HEAD']);
+ // The exact same inventory remains ineligible under the existing private
+ // mutation contract. An audit never serves as approval for a new mode.
+ const state=await d.inventory(api,true);
+ assert.throws(()=>d.requirePrivateHeadBaseline(state));
+ await assert.rejects(d.inventory(api),/publicly accessible/);
+ const unknown={...head,files:base.map(f=>f.name==='Index'?{...f,source:f.source+'<!-- unknown -->'}:f)};
+ const unverified=await m.audit({...api,getHead:async()=>unknown},target);
+ assert.equal(unverified.baselineKnownSafe,false);
+ assert.equal(unverified.writeAuthorized,false);
+ const same=await m.audit({...api,getHead:async()=>({scriptId:m.SID,files:target}),getVersions:async()=>[],getDeployments:async()=>[dep('DEV',0,'MYSELF')]},target);
+ assert.equal(same.modeDiffers,false);assert.equal(same.writeAuthorized,false);
+ const src=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-gas-head-only.cjs'),'utf8');
+ const main=src.slice(src.indexOf('async function main(){'),src.indexOf('function privateOwnerReadOnlyCandidate('));
+ assert.match(main,/if\(mode==='audit'\)\{[\s\S]*?d\.makeApi\(c,undefined,undefined,undefined,true\)/);
+ assert.ok(main.indexOf('return audit(')<main.indexOf('apiFromCredentials(c)'));
+ });

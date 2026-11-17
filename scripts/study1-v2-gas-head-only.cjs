@@ -264,13 +264,29 @@ function runnerPaths(env){
 }
 function aad(env){return [REPO,SID,env.GITHUB_SHA,env.GITHUB_RUN_ID].join('\n');}
 async function audit(api,files){
- const remote=verifyRemote(await api.getContent());
+ // Inspection has no target-mode precondition. Both the currently known
+ // anonymous/public/private history and the separately reviewed target are
+ // evidence, not permission for a transition. Use the existing inventory
+ // implementation; do not create a second snapshot or loosen a write gate.
+ const d=require('./study1-v2-private-deploy.cjs');
+ const target={sha:digest(files),count:files.length,access:closedManifest(files).webapp.access};
+ const state=await d.audit(api,true);
+ const remote=verifyRemote(state.head);
+ const access=state.headProof.access;
  console.log('V2_AUDIT_REMOTE_SHA256='+remote.sha);
  console.log('V2_AUDIT_REMOTE_FILE_COUNT='+remote.count);
- console.log('V2_AUDIT_REVIEWED_SHA256='+digest(files));
- console.log('V2_AUDIT_REVIEWED_FILE_COUNT='+files.length);
+ console.log('V2_AUDIT_REVIEWED_SHA256='+target.sha);
+ console.log('V2_AUDIT_REVIEWED_FILE_COUNT='+target.count);
+ console.log('V2_AUDIT_BASELINE_ACCESS='+access);
+ console.log('V2_AUDIT_TARGET_ACCESS='+target.access);
+ console.log('V2_AUDIT_MODE_DIFFERS='+(access!==target.access));
+ console.log('V2_AUDIT_INVENTORY_SHA256='+state.fp);
+ console.log('V2_AUDIT_BASELINE_KNOWN_SAFE='+state.safe);
+ console.log('V2_AUDIT_WRITE_AUTHORIZED=false');
  console.log('V2_AUDIT_NO_REMOTE_WRITES=true');
- return remote;
+ return {...remote,baselineAccess:access,targetAccess:target.access,
+  targetSha:target.sha,inventorySha:state.fp,baselineKnownSafe:state.safe,
+  modeDiffers:access!==target.access,writeAuthorized:false};
 }
 async function prepare(api,files,c,env){
  const head=await api.getContent(),before=verifyRemote(head),target=digest(files);
@@ -328,12 +344,18 @@ async function main(){
  require_(process.env.V2_GAS_CLASPRC_JSON?.length>0,
   'GitHub secret V2_GAS_CLASPRC_JSON is absent');
  const c=credentials(process.env.V2_GAS_CLASPRC_JSON);
+ if(mode==='audit'){
+  // The audit phase never constructs a client with project mutation methods
+  // enabled. In particular it never applies a PRIVATE target guard to the
+  // previous HEAD. Mutation phases retain all of their existing restrictions.
+  const d=require('./study1-v2-private-deploy.cjs');
+  return audit(await d.makeApi(c,undefined,undefined,undefined,true),files);
+ }
  const api=await apiFromCredentials(c);
  if(releaseProfile(process.env)==='private_e1_management'){
   const d=require('./study1-v2-private-deploy.cjs');
   const inventoryApi=await d.makeApi(c);
   const first=await d.audit(inventoryApi);
-  if(mode==='audit'){await audit(api,files);return;}
   const guard=async()=>{
    const now=await d.inventory(inventoryApi);
    d.requirePrivateHeadBaseline(now);
@@ -352,8 +374,7 @@ async function main(){
   });
   return;
  }
- if(mode==='audit')await audit(api,files);
- else if(mode==='prepare')await prepare(api,files,c,process.env);
+ if(mode==='prepare')await prepare(api,files,c,process.env);
  else await apply(api,files,c,process.env,async()=>latestMain(process.env));
 }
 function privateOwnerReadOnlyCandidate(files){
