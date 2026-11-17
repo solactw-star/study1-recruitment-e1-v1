@@ -690,3 +690,23 @@ test('same-site post-release evidence checks original URL, immutable content and
  assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
  assert.throws(()=>core.publicRpcSurface(target));
 });
+
+
+test('single lifecycle local check uses current same-site candidate without release permission',async()=>{
+ const lifecycle=require('../scripts/study1-v2-release-lifecycle.cjs');
+ const core=require('../scripts/study1-v2-release-source.cjs');
+ const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const {receipt,state}=await lifecycle.check('check');
+ assert.equal(state,undefined);
+ assert.deepEqual(receipt.candidate,{sourceSha256:core.digest(adapter.sameSiteCandidate()),fileCount:adapter.sameSiteCandidate().length,profile:'SAME_SITE_REVIEW_ONLY'});
+ assert.deepEqual(receipt.stages,{check:'COMPLETED',deploy:'BLOCKED_PENDING_INDEPENDENT_PERMISSION',rollback:'BLOCKED_PENDING_INDEPENDENT_PERMISSION'});
+ assert.equal(receipt.releaseAuthorized,false);assert.equal(receipt.writeAuthorized,false);assert.equal(receipt.runtimeVerified,false);assert.equal(receipt.mutationPerformed,false);
+ const {spawnSync}=require('node:child_process');
+ const script=require('node:path').join(__dirname,'../scripts/study1-v2-release-lifecycle.cjs');
+ const ok=spawnSync(process.execPath,[script,'check'],{encoding:'utf8'});
+ assert.equal(ok.status,0,ok.stderr);assert.deepEqual(JSON.parse(ok.stdout),receipt);
+ for(const args of [['deploy'],['rollback'],['check','remote']]){
+  const denied=spawnSync(process.execPath,[script,...args],{encoding:'utf8'});
+  assert.equal(denied.status,1);assert.match(denied.stderr,/V2_RELEASE_CLI_LOCAL_CHECK_ONLY/);
+ }
+});

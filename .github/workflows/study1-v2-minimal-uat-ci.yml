@@ -6,6 +6,7 @@ on:
       - 'scripts/study1-v2-uat-*'
       - 'scripts/study1-v2-release-source.cjs'
       - 'scripts/study1-v2-release-evidence.cjs'
+      - 'scripts/study1-v2-release-lifecycle.cjs'
       - 'tests/study1-v2-minimal-uat.test.cjs'
       - 'tests/study1-v2-uat-shared.test.cjs'
       - 'gas/**'

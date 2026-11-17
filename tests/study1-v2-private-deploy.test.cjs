@@ -686,3 +686,28 @@ test('historical evidence layer is independent of old publishing clients and pre
  assert.equal(evidence.sourceProof(candidate,false).known,false);
  assert.throws(()=>evidence.sourceProof({...candidate,scriptId:'OTHER'},true),/remote Script ID mismatch/);
 });
+
+
+test('single lifecycle remote check reuses inventory and never enables deploy or rollback',async()=>{
+ const lifecycle=require('../scripts/study1-v2-release-lifecycle.cjs');
+ assert.equal(d.inventory,lifecycle.inventory);
+ const f=fakeApi(),counts={head:0,versions:0,deployments:0};
+ for(const [method,key] of [['getHead','head'],['getVersions','versions'],['getDeployments','deployments']]){
+  const original=f.api[method];f.api[method]=async()=>{counts[key]++;return original();};
+ }
+ const {state,receipt}=await lifecycle.check('check',{scope:'remote',api:f.api});
+ assert.deepEqual(counts,{head:1,versions:1,deployments:1});
+ assert.equal(receipt.baseline.inventorySha256,state.fp);
+ assert.equal(receipt.baseline.knownSafe,true);
+ for(const key of ['releaseAuthorized','writeAuthorized','runtimeVerified','mutationPerformed'])assert.equal(receipt[key],false);
+ assert.equal(receipt.stages.deploy,'BLOCKED_PENDING_INDEPENDENT_PERMISSION');
+ assert.equal(receipt.stages.rollback,'BLOCKED_PENDING_INDEPENDENT_PERMISSION');
+ assert.doesNotMatch(JSON.stringify(receipt),/scriptId|https:|PRIVATE-ONLY-V2-001/);
+ const forbidden=new Proxy({},{get(){throw Error('client accessed');}});
+ for(const mode of ['deploy','rollback','unknown'])await assert.rejects(lifecycle.check(mode,{api:forbidden,scope:'remote'}),/V2_RELEASE_(STAGE_BLOCKED|UNKNOWN_MODE)/);
+ await assert.rejects(lifecycle.check('check',{scope:'local',api:forbidden}),/LOCAL_CHECK_NO_CLIENT/);
+ await assert.rejects(lifecycle.check('check',{scope:'remote'}),/CHECK_SCOPE/);
+ assert.deepEqual(f.counts(),{puts:0,versionCreates:0});
+ f.api.getHead=async()=>({...gas(),scriptId:'OTHER'});
+ await assert.rejects(lifecycle.check('check',{scope:'remote',api:f.api}),/remote Script ID mismatch/);
+});

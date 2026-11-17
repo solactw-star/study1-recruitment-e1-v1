@@ -10,6 +10,7 @@ on:
       - 'scripts/study1-v2-gas-head-only.cjs'
       - 'scripts/study1-v2-release-source.cjs'
       - 'scripts/study1-v2-release-evidence.cjs'
+      - 'scripts/study1-v2-release-lifecycle.cjs'
       - 'tests/study1-v2-gas-head-only.test.cjs'
       - '.github/workflows/study1-v2-gas-head-only.yml'
       - 'docs/V2-MIGRATION-STATUS.md'

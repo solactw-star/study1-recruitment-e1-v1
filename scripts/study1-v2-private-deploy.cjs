@@ -12,6 +12,8 @@ const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
 const {HISTORICAL_TARGET,VERIFIED_VERSION2_SHA,VERIFIED_VERSION4_SHA,sourceProof,normalizedVersions,normalizedDeployments,deploymentVersionShape,redactedDeploymentShapes,fingerprint,readOnlyAclEvidence}=require('./study1-v2-release-evidence.cjs');
+const lifecycle=require('./study1-v2-release-lifecycle.cjs');
+const {inventory}=lifecycle;
 function reviewedPrivateTarget(){return core.PRIVATE_TARGET;}
 // One authorized execution only, bound to the reviewed parent and push event.
 const RELEASE_PARENT='e6020f1b4d9e51c669409c8ddd4fadc69db34c66';
@@ -148,24 +150,6 @@ async function makeApi(c,fetcher=fetch,sleep=ms=>new Promise(resolve=>setTimeout
    {versionNumber:n,manifestFileName:'appsscript',description})
  };
 }
-async function inventory(api,allowAnonymous=false){
- const [head,versions,deps]=await Promise.all([api.getHead(),api.getVersions(),api.getDeployments()]);
- const hp=sourceProof(head,allowAnonymous),vn=normalizedVersions(versions),dn=normalizedDeployments(deps,allowAnonymous);
- assert(vn.length<=100,'version inventory too large for complete verification');
- const proofs=[];
- for(const v of vn)proofs.push({version:v.version,...sourceProof(await api.getVersionContent(v.version),allowAnonymous)});
- let safe=hp.known;
- for(const dep of dn){
-  const proof=dep.version===null?hp:proofs.find(x=>x.version===dep.version);
-  assert(proof,'deployment version missing from complete inventory');
-  if(!proof.known||dep.points.some(x=>x.web&&x.web.access&&x.web.access!==proof.access&&
-   !(dep.kind==='HEAD'&&['ANYONE','ANYONE_ANONYMOUS'].includes(proof.access)&&x.web.access==='MYSELF')))safe=false;
- }
- const fp=fingerprint(versions,deps,hp.sha,proofs,allowAnonymous);
- const stable=sha(JSON.stringify({versions:vn,deployments:dn.filter(x=>x.kind==='VERSIONED'),proofs}));
- return {head,versions,deps,fp,stable,headSha:hp.sha,headProof:hp,proofs,safe,
-  versionCount:vn.length,deploymentCount:dn.length,versionedDeployments:dn.filter(d=>d.version!==null).length};
-}
 function requirePrivateHeadBaseline(s){
  const development=normalizedDeployments(s.deps).filter(x=>x.kind==='HEAD');
  assert(s.safe&&s.headProof.known&&s.headProof.access==='MYSELF','private HEAD baseline or existing deployment unverified');
@@ -189,10 +173,11 @@ function summarize(s,allowAnonymous=false){
  report('V2_PRIVATE_INVENTORY_KNOWN_SAFE='+s.safe);
 }
 async function audit(api,allowAnonymous=false){
- const state=await inventory(api,allowAnonymous);
+ const {state,receipt}=await lifecycle.check('check',{scope:'remote',api,allowAnonymous});
  summarize(state,allowAnonymous);
  report('V2_PRIVATE_ACTUAL_WEB_ACL_JSON='+JSON.stringify(readOnlyAclEvidence(state,allowAnonymous)));
  report('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
+ report('V2_RELEASE_LIFECYCLE_CHECK='+JSON.stringify(receipt));
  return state;
 }
 // Google API GET lists can briefly lag behind a successful POST. Read back
