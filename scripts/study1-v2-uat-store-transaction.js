@@ -108,6 +108,12 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    if(maintenance.mode==='preview')return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY'};
    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+   // Optional paired callbacks are trusted server services, never browser input.
+   // Compare the exact test configuration before clearing, and rotate only
+   // after the bounded sheet write is directly verified under this same lock.
+   const activate=typeof services.afterCleanup==='function';
+   need(activate===(typeof services.beforeCleanup==='function'),'UAT_CLEANUP_LIFECYCLE');
+   if(activate)services.beforeCleanup();
    owned();
    const next=[marker[0],marker[1],'gate:'+maintenance.nextGateSha,'reset:'+new Date(at).toISOString(),
     'cases:'+counts.cases,'holds:'+counts.holds,'confirmed:'+counts.confirmed,'pdf:'+counts.pdfs,''];
@@ -121,9 +127,10 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     need(equal(raw,expected)&&Array.isArray(formulas)&&formulas.length===count+1&&
      formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_CLEANUP_READBACK');
     owned();
+    if(activate){need(services.afterCleanup()===true,'UAT_CLEANUP_CONFIG_READBACK');owned();}
    }catch(_){throw Error('UAT_CLEANUP_UNKNOWN_READBACK');}
    return {formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,at:new Date(at).toISOString(),
-    remainingCases:0,remainingPdfCopies:0,gateRotationRequired:true,
+    remainingCases:0,remainingPdfCopies:0,gateRotationRequired:!activate,
     availability:availability(Array(count).fill(null))};
   }
   const change=choose(JSON.parse(JSON.stringify(initial.records)),available,at);

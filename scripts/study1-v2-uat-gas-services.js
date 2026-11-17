@@ -228,12 +228,15 @@ function study1UatConfigValidate_(raw,at,storeFingerprint){
  }
  return {storeId:c.storeId,sourceSha:c.sourceSha,gateSha:c.gateSha,slots:c.slots.map(s=>s.slice())};
 }
-function study1UatTrustedConfig_(){
+function study1UatTrustedConfigSnapshot_(){
  // Exact V2 Script and sole provisioned test sheet (SHA-256 of its ID, not ID).
  if(ScriptApp.getScriptId()!=='1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f')throw Error('UAT_SERVER_CONFIG_REQUIRED');
- return study1UatConfigValidate_(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_SYNTHETIC_UAT_V1'),Date.now(),
+ const props=PropertiesService.getScriptProperties(),raw=props.getProperty('STUDY1_E1_SYNTHETIC_UAT_V1');
+ const approved=study1UatConfigValidate_(raw,Date.now(),
   'da054874a5b2a59ad318e74a392e5e0b3db993fcb2f114dc8c7537bb95549cdb');
+ return {props,raw,approved};
 }
+function study1UatTrustedConfig_(){return study1UatTrustedConfigSnapshot_().approved;}
 
 /* Narrow internal browser-request contract, ready for an explicitly reviewed
  * isolated deployment call site; NOT itself a callable GAS web RPC.
@@ -258,10 +261,11 @@ async function study1UatControlledRequest_(request){
  }
 }
 
-/* Same-site cleanup request: OWNER required before reading config or store.
- * The server-generated digest is a revocation fence, not a new usable
- * credential. Activation of a replacement credential remains separate.
- * Never accept a browser-chosen store, gate hash, or arbitrary deletion scope.
+/* Same-site cleanup: explicit OWNER confirmation and a current snapshot.
+ * Fresh 256-bit browser entropy from the authorized manager is input to
+ * server derivation, not a client-selected gate hash, store or deletion scope.
+ * Only the dedicated test property is rotated, after verified row cleanup.
+ * A partial cross-store result fails closed; no automatic repeat or rollback.
  */
 function study1SiteTestCleanupRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
@@ -270,9 +274,28 @@ function study1SiteTestCleanupRequest_(request){
   if(!request||typeof request!=='object'||Array.isArray(request))return deny();
   const keys=Object.keys(request).sort().join(',');
   if(request.mode==='preview'&&keys==='mode')return {ok:true,value:study1UatCleanup_({mode:'preview'})};
-  if(request.mode!=='clear'||keys!=='confirmation,expectedSha,mode'||request.confirmation!=='CLEAR_TEST_ONLY'||
-   typeof request.expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedSha))return deny();
-  const nextGateSha=study1PdfDigest_(Array.from('RESET_FENCE:'+Utilities.getUuid()+':'+Utilities.getUuid(),c=>c.charCodeAt(0)));
-  return {ok:true,value:study1UatCleanup_({mode:'clear',expectedSha:request.expectedSha,nextGateSha})};
+  const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+  if(request.mode!=='clear'||keys!=='confirmation,entropy,expectedSha,mode'||request.confirmation!=='CLEAR_TEST_ONLY'||
+   !hex(request.expectedSha)||!hex(request.entropy))return deny();
+  const {props,raw,approved}=study1UatTrustedConfigSnapshot_(),key='STUDY1_E1_SYNTHETIC_UAT_V1';
+  const sha=value=>study1PdfDigest_(Array.from(value,c=>c.charCodeAt(0)));
+  const replacementGate=sha('STUDY1_TEST_RESET_V1:'+request.entropy+':'+request.expectedSha+':'+approved.gateSha);
+  const nextGateSha=sha(replacementGate);
+  const cfg=JSON.parse(raw),nextRaw=JSON.stringify({...cfg,gateSha:nextGateSha});
+  const validateCurrent=()=>{
+   // Before writing either store, require the captured config to be current
+   // and unexpired. The next config differs only in the gate fingerprint.
+   if(props.getProperty(key)!==raw||Date.parse(cfg.expiresAt)<=Date.now())throw Error('UAT_CLEANUP_CONFIG_CHANGED');
+  };
+  const services=study1UatStoreServices_(approved.storeId);
+  services.beforeCleanup=validateCurrent;
+  services.afterCleanup=()=>{
+   validateCurrent();
+   props.setProperty(key,nextRaw);
+   return props.getProperty(key)===nextRaw;
+  };
+  const cleared=study1UatStoreTransaction_(services,approved,null,{mode:'clear',expectedSha:request.expectedSha,nextGateSha});
+  if(!cleared||cleared.gateRotationRequired!==false)throw Error('UAT_CLEANUP_UNKNOWN_READBACK');
+  return {ok:true,value:{...cleared,replacementGate}};
  }catch(e){return {ok:false,error:e&&e.message==='UAT_CLEANUP_UNKNOWN_READBACK'?'UAT_CLEANUP_UNKNOWN_READBACK':'UAT_REQUEST_REJECTED'};}
 }

@@ -165,6 +165,10 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  tx(()=>({index:3,record:record(3)}));
  assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:newGate}),/STALE_PREVIEW/);
  const current=maintain({mode:'preview'});const beforeClear=writes;
+ let lifecycleWrites=0;
+ const staleSvc={...svc,beforeCleanup:()=>{throw Error('CONFIG_STALE');},afterCleanup:()=>{lifecycleWrites++;return true;}};
+ assert.throws(()=>realm.study1UatStoreTransaction_(staleSvc,approved,null,{mode:'clear',expectedSha:current.snapshotSha,nextGateSha:newGate}),/CONFIG_STALE/);
+ assert.equal(writes,beforeClear);assert.equal(lifecycleWrites,0);
  const cleared=maintain({mode:'clear',expectedSha:current.snapshotSha,nextGateSha:newGate});
  assert.equal(writes,beforeClear+1);assert.equal(cleared.cleared.cases,4);assert.equal(cleared.remainingCases,0);
  assert.equal(cleared.remainingPdfCopies,0);assert.equal(cleared.gateRotationRequired,true);
@@ -499,6 +503,15 @@ test('same official site source routes preserve formal closure and require real 
  c.study1UatTrustedConfig_=()=>{config++;return {};};
  c.study1UatControlledRequest_=async r=>{requests++;return {ok:true,value:r.operation};};
  c.study1UatCleanup_=m=>{maintenance.push(JSON.parse(JSON.stringify(m)));return {scope:'SYNTHETIC_CASES_ONLY'};};
+ const propKey='STUDY1_E1_SYNTHETIC_UAT_V1',future=new Date(Date.now()+3600000).toISOString();
+ let raw=JSON.stringify({gateSha:'d'.repeat(64),expiresAt:future,otherTestSetting:'preserve'}),propWrites=0;
+ const props={getProperty:k=>{assert.equal(k,propKey);return raw;},setProperty:(k,v)=>{assert.equal(k,propKey);raw=v;propWrites++;}};
+ c.study1UatTrustedConfigSnapshot_=()=>({props,raw,approved:{gateSha:JSON.parse(raw).gateSha,storeId:'TEST_MOCK_BOOK'}});
+ c.study1UatStoreServices_=id=>{assert.equal(id,'TEST_MOCK_BOOK');return {};};
+ c.study1UatStoreTransaction_=(services,approved,choose,m)=>{
+  assert.equal(choose,null);services.beforeCleanup();maintenance.push(JSON.parse(JSON.stringify(m)));
+  assert.equal(services.afterCleanup(),true);return {gateRotationRequired:false};
+ };
  effective=owner;
  for(const user of ['', 'other@example.invalid']){
   active=user;
@@ -518,25 +531,28 @@ test('same official site source routes preserve formal closure and require real 
    {mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',nextGateSha:sha}])
   assert.equal(c.study1SiteTestCleanup(input).ok,false);
  assert.equal(maintenance.length,1);
- assert.equal(c.study1SiteTestCleanup({mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY'}).ok,true);
+ const cleared=c.study1SiteTestCleanup({mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'b'.repeat(64)});
+ assert.equal(cleared.ok,true);assert.match(cleared.value.replacementGate,/^[a-f0-9]{64}$/);
  assert.equal(maintenance.length,2);assert.equal(maintenance[1].expectedSha,sha);assert.match(maintenance[1].nextGateSha,/^[a-f0-9]{64}$/);
+ assert.equal(propWrites,1);assert.equal(JSON.parse(raw).gateSha,hash(cleared.value.replacementGate));assert.equal(JSON.parse(raw).otherTestSetting,'preserve');
  assert.throws(()=>c.requestOtp(),/尚未開放/);assert.throws(()=>c.submitConsent(),/尚未開放/);assert.equal(c.getPublicConfig().open,false);
  for(const view of ['team','preview','demo'])assert.throws(()=>c.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
 });
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
  let confirmed=false,fail=false;
- for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
+ for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary','siteTestNewGate'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
  const counts={cases:2,holds:1,confirmed:1,pdfs:1},sha='b'.repeat(64);
  const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(r){
   requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts}});
-  else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:true}});
+  else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:false,replacementGate:'c'.repeat(64)}});
  }};}};}}}};
- const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed},google});
+ const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed,crypto:{getRandomValues:a=>a.fill(1)},addEventListener(){}},google});
  run();const p=nodes.get('siteTestPreview'),c=nodes.get('siteTestClear'),s=nodes.get('siteTestCleanupSummary');
  assert.equal(c.disabled,true);await c.click();assert.equal(requests.length,0);await p.click();assert.equal(c.disabled,false);
  await c.click();assert.equal(requests.length,1);confirmed=true;fail=true;await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/不重送/);
  await p.click();assert.equal(c.disabled,true);await c.click();assert.equal(requests.filter(r=>r.mode==='clear').length,1);
  fail=false;run();await p.click();await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/已核實清除/);
- assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY'});
+ assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'01'.repeat(32)});
+ assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));
 });

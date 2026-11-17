@@ -285,8 +285,10 @@ function sameSiteVisitor(source=read('gas/Study1Visitor.html')){
 function sameSiteCleanupController(){
  'use strict';
  const el=id=>document.getElementById(id);
- const preview=el('siteTestPreview'),clear=el('siteTestClear'),summary=el('siteTestCleanupSummary');
- if(!preview||!clear||!summary)return;
+ const preview=el('siteTestPreview'),clear=el('siteTestClear'),summary=el('siteTestCleanupSummary'),gateOut=el('siteTestNewGate');
+ if(!preview||!clear||!summary||!gateOut)return;
+ gateOut.value='';gateOut.hidden=true;
+ window.addEventListener('pagehide',()=>{gateOut.value='';gateOut.hidden=true;});
  let current=null,busy=false,unknown=false,cleared=false;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
@@ -311,14 +313,19 @@ function sameSiteCleanupController(){
  });
  clear.addEventListener('click',async()=>{
   if(busy||unknown||cleared||!current||current.counts.cases===0)return;
-  if(!window.confirm(describe(current.counts)+'\n確定只清空這些測試紀錄？清除後舊測試通行設定失效，須重新啟用測試。'))return;
+  if(!window.confirm(describe(current.counts)+'\n確定只清空這些測試紀錄？清除成功後將自動更新測試通行碼，舊案件及舊通行碼立即失效。'))return;
+  if(!window.crypto||typeof window.crypto.getRandomValues!=='function'){say('瀏覽器安全亂數不可用，未送出清除。');return;}
+  let entropy;
+  try{entropy=Array.from(window.crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');}
+  catch(_){say('無法產生安全亂數，未送出清除。');return;}
   const p=current;current=null;busy=true;buttons();
   try{
-   const result=await call({mode:'clear',expectedSha:p.snapshotSha,confirmation:'CLEAR_TEST_ONLY'});
+   const result=await call({mode:'clear',expectedSha:p.snapshotSha,confirmation:'CLEAR_TEST_ONLY',entropy});
    if(!result||result.formal!==false||result.scope!=='SYNTHETIC_CASES_ONLY'||!valid(result.cleared)||
     ['cases','holds','confirmed','pdfs'].some(k=>result.cleared[k]!==p.counts[k])||
-    result.remainingCases!==0||result.remainingPdfCopies!==0||result.gateRotationRequired!==true)throw Error('BAD_RECEIPT');
-   cleared=true;say('已核實清除。'+describe(result.cleared)+' 測試名額已釋放；舊測試通行設定失效，重新啟用後才能再測。');
+    result.remainingCases!==0||result.remainingPdfCopies!==0||result.gateRotationRequired!==false||!hex(result.replacementGate))throw Error('BAD_RECEIPT');
+   cleared=true;gateOut.value=result.replacementGate;gateOut.hidden=false;
+   say('已核實清除。'+describe(result.cleared)+' 測試名額已釋放，測試通行碼已更新。請安全複製下方新碼，再返回本網站開始下一次測試。');
   }catch(e){
    // A denied or malformed clear response may not establish whether a
    // mutation occurred. Freeze destructive action on this page.
@@ -332,7 +339,7 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // The same-site test management view does not initialize formal/sandbox RPCs.
  const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
  if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
- const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">預覽測試資料</button><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p></section></main>';
+ const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">預覽測試資料</button><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
  return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
 }
 function sameSiteCandidate(){
