@@ -209,3 +209,26 @@ function study1UatTrustedConfig_(){
  return study1UatConfigValidate_(PropertiesService.getScriptProperties().getProperty('STUDY1_E1_SYNTHETIC_UAT_V1'),Date.now(),
   'da054874a5b2a59ad318e74a392e5e0b3db993fcb2f114dc8c7537bb95549cdb');
 }
+
+/* Narrow internal browser-request contract, ready for an explicitly reviewed
+ * isolated deployment call site; NOT itself a callable GAS web RPC.
+ * Never reflect a raw GAS exception, credential, configuration, or table row.
+ */
+async function study1UatControlledRequest_(request){
+ const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys;
+ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+ if(!exact(request,'caseKey,gate,operation,payload')||!hex(request.gate)||!hex(request.caseKey)||
+  request.gate===request.caseKey||!['start','verify','slots','hold','document','sign','read','copy','cancel'].includes(request.operation)||
+  !request.payload||typeof request.payload!=='object'||Array.isArray(request.payload))return deny();
+ try{
+  const approved=study1UatTrustedConfig_();
+  const value=await study1UatGasOperation_(approved,{gate:request.gate,caseKey:request.caseKey},request.operation,request.payload);
+  return {ok:true,value};
+ }catch(e){
+  // A thrown error may occur after a mutation or its flush. No automatic retry.
+  // Distinguish only the explicitly verified unknown-write marker; do not leak
+  // arbitrary service exceptions (they may contain resource identifiers).
+  return {ok:false,error:e&&e.message==='UAT_WRITE_UNKNOWN_READ_CASE'?'UAT_WRITE_UNKNOWN_READ_CASE':'UAT_REQUEST_REJECTED'};
+ }
+}
