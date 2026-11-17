@@ -476,6 +476,14 @@ async function verifyAnonymousV4(api,state){
  assert(/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url),'anonymous v4 URL not verified');
  return url;
 }
+// Manual audit is read-only just like auto-audit; recognize the exact
+// historical anonymous release, never accept it as a write authorization.
+async function manualReadOnlyAudit(api){
+ const state=await audit(api,true);
+ const publicUrl=await verifyAnonymousV4(api,state);
+ if(publicUrl)report('V2_ANONYMOUS_V4_DIRECT_READBACK_VERIFIED=true');
+ return state;
+}
 async function automaticAudit(env,assertMain=latestMain,apiFactory=makeApi){
  autoAuditInvocation(env);assertMain(env);reviewedLocal();
  assert(env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
@@ -652,7 +660,7 @@ async function main(){
  assert(process.env.V2_GAS_CLASPRC_JSON?.length>0,'V2 OAuth secret missing');
  const c=core.credentials(process.env.V2_GAS_CLASPRC_JSON);
  const api=await makeApi(c,undefined,undefined,undefined,mode==='audit'||phase==='prepare');
- if(mode==='audit')await audit(api);
+ if(mode==='audit')await manualReadOnlyAudit(api);
  else if(phase==='prepare')await prepareReleaseBackup(api,c,process.env);
  else{
   verifyReleaseBackup(c,process.env);
@@ -664,7 +672,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,manualReadOnlyAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,
