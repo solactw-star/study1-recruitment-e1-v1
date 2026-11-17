@@ -83,6 +83,12 @@ test('immutable verified v4 remains known after GAS source changes; tampered or 
  const version={scriptId:core.SID,versionNumber:4},deployment=dep(4,'ANYONE_ANONYMOUS');
  const api={getHead:async()=>remote(old),getVersions:async()=>[version],getDeployments:async()=>[deployment],getVersionContent:async()=>remote(old),getDeployment:async()=>deployment};
  const state=await d.inventory(api,true);assert.equal(state.safe,true);
+ const readOnly=await d.manualReadOnlyAudit(api);assert.equal(readOnly.safe,true);
+ await assert.rejects(d.manualReadOnlyAudit({...api,getVersionContent:async()=>remote(unknown)}),/source\/inventory/);
+ await assert.rejects(d.manualReadOnlyAudit({...api,getDeployment:async()=>dep(4,'ANYONE')}),/differs from list/);
+ // The same anonymous inventory is still rejected by the strict write path.
+ await assert.rejects(d.inventory(api),/publicly accessible/);
+
  assert.equal(await d.verifyAnonymousV4(api,state),'https://script.google.com/macros/s/deployment-4/exec');
  assert.equal((await d.inventory({...api,getVersionContent:async()=>remote(unknown)},true)).safe,false);
  assert.equal((await d.inventory({...api,getDeployments:async()=>[dep(4,'ANYONE')]},true)).safe,false);
