@@ -214,3 +214,56 @@ test('GAS authorized case projection excludes stored credentials and only return
  const one=await PDFLib.PDFDocument.create();one.addPage();const oneBytes=Buffer.from(await one.save());
  await assert.rejects(copy({...record,pdf:oneBytes.toString('base64'),signedSha:hash(oneBytes)},slots,at),/UAT_PDF_PAGE_COUNT/);
 });
+
+test('private GAS operation contract completes booking and real five-page PDF through bound service; denies wrong cases and unknown writes',async()=>{
+ const vm=require('node:vm'),id='TEST_ONLY_BOOK_123456789012345',gate='a'.repeat(64),keyA='b'.repeat(64),keyB='c'.repeat(64),keyC='d'.repeat(64);
+ const start=Date.parse('2026-11-18T02:00:00.000Z');let clock=start;
+ class FakeDate extends Date{static now(){return clock;}}
+ const matrix=[['STUDY1_E1_SYNTHETIC_CASES_V1',id,...Array(7).fill('')],...Array.from({length:12},()=>Array(9).fill(''))];
+ let locked=false,opens=0,writes=0,failFlush=false;
+ const sheet={getName:()=> 'SYNTHETIC_CASES',getParent:()=>({getId:()=>id}),getLastRow:()=>13,getLastColumn:()=>9,
+  getRange:(row,col,n,m)=>({getValues:()=>matrix.slice(row-1,row-1+n).map(r=>r.slice(col-1,col-1+m)),getFormulas:()=>Array.from({length:n},()=>Array(m).fill('')),setValues:v=>{assert.equal(locked,true);writes++;matrix[row-1]=v[0].slice();}})};
+ const realm=vm.createContext({Date:FakeDate,Uint8Array,Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest()),base64Decode:s=>Array.from(Buffer.from(s,'base64')),base64Encode:b=>Buffer.from(b).toString('base64'),formatDate:()=> '2026/11/18'},
+  LockService:{getScriptLock:()=>({tryLock:()=>{if(locked)return false;locked=true;return true;},hasLock:()=>locked,releaseLock:()=>{locked=false;}})},
+  SpreadsheetApp:{openById:x=>{assert.equal(locked,true);assert.equal(x,id);opens++;return {getId:()=>id,getName:()=> 'Study1 E1 SYNTHETIC UAT ONLY',getSheets:()=>[sheet]};},flush:()=>{assert.equal(locked,true);if(failFlush)throw Error('UNKNOWN');}}});
+ for(const p of ['gas/BookingCore.js','gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js','scripts/study1-v2-uat-store-transaction.js','scripts/study1-v2-uat-gas-services.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const original=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm);
+ const config={storeId:id,gateSha:hash(gate),sourceSha:original.hash,slots:[
+  ['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z'],
+  ['TEST_SLOT_2','2026-11-19T04:00:00.000Z','2026-11-19T05:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
+ const run=(key,op,p={},g=gate)=>realm.study1UatGasOperation_(config,{gate:g,caseKey:key},op,p);
+ await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true},'e'.repeat(64)),/UAT_ACCESS_DENIED/);assert.equal(opens,0);
+ await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true,email:'not allowed'}),/UAT_REQUEST/);
+ await assert.rejects(run(keyA,'start',{alias:'REAL_PERSON',eligible:true}),/UAT_SYNTHETIC_IDENTITY_REQUIRED/);
+ assert.equal(writes,0);
+ const a=await run(keyA,'start',{alias:'TEST_01',eligible:true});
+ assert.equal(a.stage,'OTP');assert.equal((await run(keyA,'start',{alias:'TEST_01',eligible:true})).caseId,a.caseId);assert.equal(writes,1);
+ await assert.rejects(run(keyB,'start',{alias:'TEST_01',eligible:true}),/UAT_CASE_UNAVAILABLE/);
+ await assert.rejects(run(keyA,'verify',{code:'00000000'}),/UAT_SYNTHETIC_OTP_INVALID/);
+ await assert.rejects(run(keyA,'document'),/UAT_HOLD_REQUIRED/);
+ const slotList=await run(keyA,'verify',{code:'12345678'});assert.equal(slotList.length,2);
+ await run(keyB,'start',{alias:'TEST_02',eligible:true});await run(keyB,'verify',{code:'12345678'});
+ const hold={slotId:'TEST_SLOT_1',requestId:'1'.repeat(32)};
+ const h=await run(keyA,'hold',hold);assert.equal(h.bookingStatus,'HELD');const n=writes;
+ assert.equal((await run(keyA,'hold',hold)).caseId,a.caseId);assert.equal(writes,n);
+ await assert.rejects(run(keyB,'hold',hold),/UAT_SLOT_UNAVAILABLE/);
+ const doc=await run(keyA,'document');assert.equal(doc.caseId,a.caseId);assert.equal(doc.sha,original.hash);assert.equal(doc.pageCount,5);assert.equal(hash(Buffer.from(doc.bytes,'base64')),doc.sha);
+ const sign={requestId:'2'.repeat(32),sourceSha:doc.sha,ink:Buffer.from(syntheticInk()).toString('base64'),read:true,agree:true};
+ await assert.rejects(run(keyA,'sign',{...sign,agree:false}),/UAT_DOCUMENT_BINDING/);
+ await assert.rejects(run(keyA,'sign',{...sign,sourceSha:'f'.repeat(64)}),/UAT_DOCUMENT_BINDING/);
+ await assert.rejects(run(keyA,'sign',{...sign,ink:'AAAA'}),/UAT_INK/);
+ await assert.rejects(run(keyB,'copy'),/UAT_COPY_NOT_CONFIRMED/);
+ failFlush=true;await assert.rejects(run(keyA,'sign',sign),/UAT_WRITE_UNKNOWN_READ_CASE/);failFlush=false;
+ assert.equal(locked,false);const read=await run(keyA,'read');assert.equal(read.stage,'DONE');
+ const receipt=await run(keyA,'copy');assert.equal(receipt.bookingStatus,'CONFIRMED');assert.equal(receipt.caseId,a.caseId);assert.equal(receipt.sourceSha,doc.sha);assert.equal(receipt.sha,read.signedSha);assert.equal(hash(Buffer.from(receipt.bytes,'base64')),receipt.sha);
+ assert.equal((await PDFLib.PDFDocument.load(Buffer.from(receipt.bytes,'base64'))).getPageCount(),5);
+ const after=writes;assert.equal((await run(keyA,'sign',sign)).sha,receipt.sha);assert.equal(writes,after);
+ await assert.rejects(run(keyA,'sign',{...sign,requestId:'3'.repeat(32)}),/UAT_SIGN_REPLAY_CONFLICT/);
+ await assert.rejects(run(keyA,'cancel'),/UAT_CONFIRMED_IMMUTABLE/);
+ const h2=await run(keyB,'hold',{slotId:'TEST_SLOT_2',requestId:'4'.repeat(32)});assert.equal(h2.bookingStatus,'HELD');
+ clock+=600001;assert.equal((await run(keyB,'read')).bookingStatus,'EXPIRED');
+ await assert.rejects(run(keyB,'sign',sign),/UAT_HOLD_REQUIRED/);
+ await run(keyC,'start',{alias:'TEST_03',eligible:true});await run(keyC,'verify',{code:'12345678'});
+ await run(keyC,'hold',{slotId:'TEST_SLOT_2',requestId:'5'.repeat(32)});assert.equal((await run(keyC,'cancel')).bookingStatus,'CANCELLED');
+ assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
+});
