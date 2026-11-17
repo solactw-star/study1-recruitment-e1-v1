@@ -288,9 +288,22 @@ function summarize(s,allowAnonymous=false){
  report('V2_PRIVATE_INVENTORY_SHA256='+s.fp);
  report('V2_PRIVATE_INVENTORY_KNOWN_SAFE='+s.safe);
 }
+// Evidence only: do not infer deployed ACL from the source manifest, or
+// infer permission when the API omits resolved entry point metadata.
+// Neither the authorization checks nor the existing inventory fingerprint change.
+function readOnlyAclEvidence(state,allowAnonymous=false){
+ return normalizedDeployments(state.deps,allowAnonymous).map(d=>{
+  const proof=d.kind==='HEAD'?state.headProof:state.proofs.find(p=>p.version===d.version);
+  return {kind:d.kind,version:d.version,manifestAccess:proof?.access||'UNKNOWN',
+   webEntryPoints:d.points.filter(p=>p.web).map(p=>({
+    access:p.web.access??'omitted',executeAs:p.web.executeAs??'omitted'
+   }))};
+ });
+}
 async function audit(api,allowAnonymous=false){
  const state=await inventory(api,allowAnonymous);
  summarize(state,allowAnonymous);
+ report('V2_PRIVATE_ACTUAL_WEB_ACL_JSON='+JSON.stringify(readOnlyAclEvidence(state,allowAnonymous)));
  report('V2_PRIVATE_AUDIT_NO_MUTATIONS=true');
  return state;
 }
@@ -675,5 +688,5 @@ if(require.main===module)main().catch(e=>{
 module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,manualReadOnlyAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
- deploymentVersionShape,redactedDeploymentShapes,
+ deploymentVersionShape,redactedDeploymentShapes,readOnlyAclEvidence,
  fingerprint,inventory,audit,deploy,settleVersionInventory,settleDeploymentInventory};
