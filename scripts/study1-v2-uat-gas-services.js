@@ -118,6 +118,15 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  const unchanged=value=>({record:null,value});
  const result=(record,at)=>({record,value:study1UatCaseView_(record,approved.slots,at)});
  const lookup=(mine)=>{need(mine,'UAT_CASE_NOT_FOUND');return mine;};
+ // Composition/reopening may yield across a cleanup. Check the same gate
+ // and persisted signed case once more before releasing the PDF bytes.
+ const copyCurrent=async record=>{
+  const copy=await study1UatCaseCopy_(record,approved.slots,Date.now());
+  return tx(mine=>{
+   need(mine&&mine.state==='CONFIRMED'&&mine.caseId===record.caseId&&mine.signedSha===record.signedSha&&mine.pdf===record.pdf,'UAT_COPY_CHANGED');
+   return unchanged(copy);
+  });
+ };
  const held=(mine,at)=>{need(mine.state==='HELD'&&Date.parse(mine.holdUntil)>at&&mine.sourceSha===approved.sourceSha,'UAT_HOLD_REQUIRED');return mine;};
  const availableView=available=>available.map(s=>({slotId:s.slotId,startAtUtc:s.startAtUtc,endAtUtc:s.endAtUtc,remaining:s.remaining}));
  if(operation==='start')return tx((mine,available,at)=>{
@@ -151,7 +160,7 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  });
  if(operation==='copy'){
   const snapshot=tx(mine=>{need(lookup(mine).state==='CONFIRMED','UAT_COPY_NOT_CONFIRMED');return unchanged(mine);});
-  return study1UatCaseCopy_(snapshot,approved.slots,Date.now());
+  return copyCurrent(snapshot);
  }
  // Construct the same fixed synthetic original only after an authorized active hold.
  const snapshot=tx((record,available,at)=>{
@@ -175,7 +184,7 @@ async function study1UatGasOperation_(approved,access,operation,payload){
   u32(16)>0&&u32(16)<=700&&u32(20)>0&&u32(20)<=160,'UAT_INK');
  const inkSha=study1PdfDigest_(ink);
  const replay=mine=>{need(sameHold(mine)&&mine.state==='CONFIRMED'&&mine.signKey===payload.requestId&&mine.inkSha===inkSha,'UAT_SIGN_REPLAY_CONFLICT');return mine;};
- if(snapshot.mine.state==='CONFIRMED')return study1UatCaseCopy_(replay(snapshot.mine),approved.slots,Date.now());
+ if(snapshot.mine.state==='CONFIRMED')return copyCurrent(replay(snapshot.mine));
  const doc=await study1UatDocument_('GAS_UAT');
  need(doc.hash===approved.sourceSha&&study1PdfDigest_(doc.bytes)===doc.hash,'UAT_DOCUMENT_SOURCE');
  const composed=await study1PdfComposeSigned_(doc.bytes,ink,doc.layout,{experiment:'E1',version:'UAT-SYNTHETIC-1',sha256:doc.hash},new Date(snapshot.at));
@@ -189,7 +198,7 @@ async function study1UatGasOperation_(approved,access,operation,payload){
   return {record:next,value:next};
  });
  // Only after the transaction core has verified persistence, re-open the complete copy.
- return study1UatCaseCopy_(saved,approved.slots,Date.now());
+ return copyCurrent(saved);
 }
 
 /* Server-only configuration for the existing dedicated E1 test store.

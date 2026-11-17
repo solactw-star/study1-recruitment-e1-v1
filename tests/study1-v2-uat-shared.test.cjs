@@ -297,6 +297,20 @@ test('private GAS operation contract completes booking and real five-page PDF th
  await assert.rejects(run(keyB,'sign',sign),/UAT_HOLD_REQUIRED/);
  await run(keyC,'start',{alias:'TEST_03',eligible:true});await run(keyC,'verify',{code:'12345678'});
  await run(keyC,'hold',{slotId:'TEST_SLOT_2',requestId:'5'.repeat(32)});assert.equal((await run(keyC,'cancel')).bookingStatus,'CANCELLED');
+ // A cleanup between PDF parsing and its return invalidates the old request.
+ const reopen=realm.study1UatCaseCopy_;
+ realm.study1UatCaseCopy_=async(...args)=>{
+  const result=await reopen(...args);
+  const nextGate=hash('e'.repeat(64));
+  // Simulate the atomic header rotation actually verified in the range test.
+  matrix[0]=['STUDY1_E1_SYNTHETIC_CASES_V1',id,'gate:'+nextGate,
+   'reset:'+new Date(clock).toISOString(),'cases:3','holds:0','confirmed:1','pdf:1',''];
+  for(let i=1;i<matrix.length;i++)matrix[i]=Array(9).fill('');
+  return result;
+ };
+ await assert.rejects(run(keyA,'copy'),/MARKER_OR_FORMULA/);
+ await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true}),/MARKER_OR_FORMULA/);
+ realm.study1UatCaseCopy_=reopen;
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
 });
 

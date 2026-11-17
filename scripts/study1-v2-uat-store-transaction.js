@@ -103,7 +103,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    const live=initial.records.filter(Boolean),counts={
     cases:live.length,holds:live.filter(c=>c.state==='HELD'&&Date.parse(c.holdUntil)>at).length,
     confirmed:live.filter(c=>c.state==='CONFIRMED').length,pdfs:live.filter(c=>c.pdf!=='').length};
-   const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,initial.raw]),c=>c.charCodeAt(0)));
+   const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,counts,initial.raw]),c=>c.charCodeAt(0)));
    need(hex(snapshotSha,64),'UAT_CLEANUP_DIGEST');
    if(maintenance.mode==='preview')return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY'};
    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
