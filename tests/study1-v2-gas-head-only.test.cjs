@@ -383,7 +383,20 @@ test('before-PUT inventory guard and after-PUT readback gate prevent blind retri
  const same=await m.audit({...api,getHead:async()=>({scriptId:m.SID,files:target}),getVersions:async()=>[],getDeployments:async()=>[dep('DEV',0,'MYSELF')]},target);
  assert.equal(same.modeDiffers,false);assert.equal(same.writeAuthorized,false);
  const src=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-gas-head-only.cjs'),'utf8');
- const main=src.slice(src.indexOf('async function main(){'),src.indexOf('function privateOwnerReadOnlyCandidate('));
+ const main=src.slice(src.indexOf('async function main(){'),src.indexOf('// Bind this run to the closed'));
  assert.match(main,/if\(mode==='audit'\)\{[\s\S]*?d\.makeApi\(c,undefined,undefined,undefined,true\)/);
  assert.ok(main.indexOf('return audit(')<main.indexOf('apiFromCredentials(c)'));
  });
+
+
+test('shared source contract has no remote client dependency and old HEAD facade preserves exact source functions',()=>{
+ const source=require('../scripts/study1-v2-release-source.cjs');
+ for(const name of ['localSources','readDevelopmentSources','canonical','digest','closedManifest','closedWebsite','publicRpcSurface','anonymousReadOnlyCandidate','privateOwnerReadOnlyCandidate','privateOwnerManagementCandidate'])assert.equal(m[name],source[name],name);
+ const bytes=fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-release-source.cjs'),'utf8');
+ assert.deepEqual([...bytes.matchAll(/require\('([^']+)'\)/g)].map(x=>x[1]).sort(),['node:crypto','node:fs','node:path']);
+ for(const name of ['apiFromCredentials','prepare','apply','createImmutableVersion','deploy','rollback'])assert.equal(source[name],undefined,name);
+ const base=source.localSources();
+ assert.equal(source.digest(source.anonymousReadOnlyCandidate(base)),m.digest(m.anonymousReadOnlyCandidate(base)));
+ assert.equal(m.PRIVATE_TARGET,source.digest(source.privateOwnerManagementCandidate(base)));
+ assert.throws(()=>m.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+});

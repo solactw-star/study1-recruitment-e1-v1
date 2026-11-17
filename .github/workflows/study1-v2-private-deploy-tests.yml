@@ -8,6 +8,7 @@ on:
       - '.github/workflows/study1-v2-private-deploy-tests.yml'
       - 'scripts/study1-v2-private-deploy.cjs'
       - 'scripts/study1-v2-gas-head-only.cjs'
+      - 'scripts/study1-v2-release-source.cjs'
       - 'tests/study1-v2-gas-head-only.test.cjs'
       - '.github/workflows/study1-v2-gas-head-only.yml'
       - 'docs/V2-MIGRATION-STATUS.md'

@@ -218,7 +218,7 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
 // existing V2 project, same original apply view. Never accepted by the
 // existing public release/HEAD-only guards or called by a deploy workflow.
 function onlineCandidate(input){
- const core=require('./study1-v2-gas-head-only.cjs');
+ const core=require('./study1-v2-release-source.cjs');
  // Assembly is independent of the last reviewed UI mode. All modes MUST
  // derive from this checkout's unchanged, closed public source, never
  // inherit the OWNER management RPCs or use remote HEAD as the build base.
@@ -402,7 +402,7 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
 // not just its test/report. This is a local source contract only: the
 // public release guard and releaseFiles allowlist still reject this profile.
 function requireSameSiteSourceDelta(anonymous,result){
- const core=require('./study1-v2-gas-head-only.cjs');
+ const core=require('./study1-v2-release-source.cjs');
  const sha=core.digest(result);
  core.digest(anonymous);
  const need=(ok,reason)=>{if(!ok)throw Error('SAME_SITE_SOURCE_DELTA: '+reason);};
@@ -432,7 +432,7 @@ function requireSameSiteSourceDelta(anonymous,result){
  return sha;
 }
 function sameSiteCandidate(){
- const core=require('./study1-v2-gas-head-only.cjs'),base=core.localSources();
+ const core=require('./study1-v2-release-source.cjs'),base=core.localSources();
  const prior=onlineCandidate(base),anonymous=core.anonymousReadOnlyCandidate(base);
  const get=(files,name)=>files.find(f=>f.name===name);
  const result=prior.map(f=>{
