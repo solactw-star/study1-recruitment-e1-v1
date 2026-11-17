@@ -331,6 +331,15 @@ function sameSiteCleanupController(){
  preview.addEventListener('click',async()=>{
   if(busy)return;busy=true;current=null;emptyLists();buttons();
   try{
+   if(unknown){
+    const result=await call({mode:'reconcile'});
+    if(!exact(result,['formal','scope','state','readOnly'])||result.formal!==false||result.scope!=='SYNTHETIC_CASES_ONLY'||result.readOnly!==true)throw Error('BAD_RECONCILIATION');
+    const messages={MATCHED_EMPTY:'目前測試資料為空，設定與資料表標記相符；仍須管理者核對新通行碼，不能推定前次清除已成功。',
+     MATCHED_NONEMPTY:'目前設定與資料表標記相符，但仍有測試案件；不能推定前次清除未執行。',
+     CONFIG_MISMATCH_EMPTY:'測試資料表已空，但通行碼設定與資料表標記不一致；暫停測試，交管理者核對。'};
+    if(!Object.prototype.hasOwnProperty.call(messages,result.state))throw Error('BAD_RECONCILIATION');
+    say(messages[result.state]+' 本查核未寫入或重送清除。');return;
+   }
    const p=await call({mode:'preview'});
    if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||!hex(p.snapshotSha)||!valid(p.counts)||!validLists(p))throw Error('BAD_PREVIEW');
    showLists(p);

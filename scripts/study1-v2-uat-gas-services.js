@@ -274,6 +274,14 @@ function study1SiteTestCleanupRequest_(request){
   if(!request||typeof request!=='object'||Array.isArray(request))return deny();
   const keys=Object.keys(request).sort().join(',');
   if(request.mode==='preview'&&keys==='mode')return {ok:true,value:study1UatCleanup_({mode:'preview'})};
+  if(request.mode==='reconcile'&&keys==='mode'){
+   const {props,raw,approved}=study1UatTrustedConfigSnapshot_();
+   const services=study1UatStoreServices_(approved.storeId);
+   services.checkReconcileConfig=()=>{
+    if(props.getProperty('STUDY1_E1_SYNTHETIC_UAT_V1')!==raw||Date.parse(JSON.parse(raw).expiresAt)<=Date.now())throw Error('UAT_CLEANUP_CONFIG_CHANGED');
+   };
+   return {ok:true,value:study1UatStoreTransaction_(services,approved,null,{mode:'reconcile'})};
+  }
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   if(request.mode!=='clear'||keys!=='confirmation,entropy,expectedSha,mode'||request.confirmation!=='CLEAR_TEST_ONLY'||
    !hex(request.expectedSha)||!hex(request.entropy))return deny();

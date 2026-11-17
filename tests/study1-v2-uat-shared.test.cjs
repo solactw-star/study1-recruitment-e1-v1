@@ -189,6 +189,17 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  assert.throws(()=>runNew(null,{mode:'preview'}),/MARKER_OR_FORMULA/);
  const audit=realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},null,{mode:'preview'});
  assert.equal(audit.counts.cases,0);assert.equal(held,false);
+ const auditBefore=writes,stable=JSON.stringify(matrix),auditSvc={...svc,checkReconcileConfig:()=>assert.equal(held,true)};
+ const reconcile=gateSha=>realm.study1UatStoreTransaction_(auditSvc,{...approved,gateSha},null,{mode:'reconcile'});
+ assert.equal(reconcile(newGate).state,'CONFIG_MISMATCH_EMPTY');assert.equal(reconcile(newerGate).state,'MATCHED_EMPTY');
+ assert.equal(reconcile(newGate).readOnly,true);assert.doesNotMatch(JSON.stringify(reconcile(newGate)),/gateSha|storeId|tokenHash/);
+ assert.equal(writes,auditBefore);assert.equal(JSON.stringify(matrix),stable);
+ hasFormula=true;assert.throws(()=>reconcile(newGate),/MARKER_OR_FORMULA/);hasFormula=false;
+ matrix[1][0]='FORMAL_OR_UNKNOWN';assert.throws(()=>reconcile(newGate),/RECONCILE_UNVERIFIED/);matrix[1][0]='';
+ assert.throws(()=>realm.study1UatStoreTransaction_({...svc,checkReconcileConfig:()=>{throw Error('CONFIG_STALE');}},fresh,null,{mode:'reconcile'}),/CONFIG_STALE/);
+ assert.equal(writes,auditBefore);assert.equal(held,false);
+ realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},()=>({index:0,record:record(0)}));
+ assert.equal(reconcile(newerGate).state,'MATCHED_NONEMPTY');
 });
 
 test('internal GAS service binding authorizes only own case with explicit gate, real service method contract and no full snapshot return',()=>{
@@ -516,7 +527,9 @@ test('same official site source routes preserve formal closure and require real 
  c.study1UatTrustedConfigSnapshot_=()=>({props,raw,approved:{gateSha:JSON.parse(raw).gateSha,storeId:'TEST_MOCK_BOOK'}});
  c.study1UatStoreServices_=id=>{assert.equal(id,'TEST_MOCK_BOOK');return {};};
  c.study1UatStoreTransaction_=(services,approved,choose,m)=>{
-  assert.equal(choose,null);services.beforeCleanup();maintenance.push(JSON.parse(JSON.stringify(m)));
+  assert.equal(choose,null);
+  if(m.mode==='reconcile'){services.checkReconcileConfig();return {formal:false,scope:'SYNTHETIC_CASES_ONLY',state:'MATCHED_EMPTY',readOnly:true};}
+  services.beforeCleanup();maintenance.push(JSON.parse(JSON.stringify(m)));
   assert.equal(services.afterCleanup(),true);return {gateRotationRequired:false};
  };
  effective=owner;
@@ -527,12 +540,15 @@ test('same official site source routes preserve formal closure and require real 
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
   assert.equal((await c.study1E1SyntheticUat({operation:'start'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
+  assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
  }
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
  active=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
  assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
  assert.equal((await c.study1E1SyntheticUat({operation:'read'})).value,'read');
  assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,true);
+ assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).value.state,'MATCHED_EMPTY');
+ assert.equal(c.study1SiteTestCleanup({mode:'reconcile',storeId:'OTHER'}).ok,false);assert.equal(propWrites,0);
  const sha='a'.repeat(64);
  for(const input of [{mode:'clear',expectedSha:sha},{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',storeId:'OTHER'},
    {mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',nextGateSha:sha}])
@@ -555,6 +571,7 @@ test('same-site admin preview and confirm button block unknown destructive retri
  let badPreview=false;
  const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(r){
   requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts,cases:badPreview?[{...cases[0],tokenHash:'secret'},cases[1]]:cases,slots}});
+  else if(r.mode==='reconcile')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',state:'CONFIG_MISMATCH_EMPTY',readOnly:true}});
   else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:false,replacementGate:'c'.repeat(64)}});
  }};}};}}}};
  const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed,crypto:{getRandomValues:a=>a.fill(1)},addEventListener(){}},google});
@@ -562,7 +579,7 @@ test('same-site admin preview and confirm button block unknown destructive retri
  assert.equal(c.disabled,true);await c.click();assert.equal(requests.length,0);await p.click();assert.equal(c.disabled,false);
  assert.match(nodes.get('siteTestCases').textContent,/TEST_02｜已確認/);assert.match(nodes.get('siteTestSlots').textContent,/剩餘 0/);
  await c.click();assert.equal(requests.length,1);confirmed=true;fail=true;await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/不重送/);
- await p.click();assert.equal(c.disabled,true);await c.click();assert.equal(requests.filter(r=>r.mode==='clear').length,1);
+ await p.click();assert.equal(c.disabled,true);assert.equal(requests.at(-1).mode,'reconcile');assert.match(s.textContent,/不一致/);await c.click();assert.equal(requests.filter(r=>r.mode==='clear').length,1);
  fail=false;run();await p.click();await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/已核實清除/);
  assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'01'.repeat(32)});
  assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));assert.match(nodes.get('siteTestCases').textContent,/無測試案件/);

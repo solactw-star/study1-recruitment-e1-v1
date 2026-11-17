@@ -21,10 +21,10 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
  // Reset is a distinct internal maintenance operation, not a normal case transition.
  // A rotated gate fingerprint in the header fences all pre-reset transactions,
  // including asynchronous PDF composition that reacquires this same lock.
- const currentMarker=row=>{
+ const currentMarker=(row,gateSha=config.gateSha)=>{
   if(equal(row,marker))return true;
-  if(!Array.isArray(row)||row.length!==width||!hex(config.gateSha,64)||
-     row[0]!==marker[0]||row[1]!==marker[1]||row[2]!=='gate:'+config.gateSha||
+  if(!Array.isArray(row)||row.length!==width||!hex(gateSha,64)||
+     row[0]!==marker[0]||row[1]!==marker[1]||row[2]!=='gate:'+gateSha||
      typeof row[3]!=='string'||!row[3].startsWith('reset:')||!iso(row[3].slice(6))||row[8]!=='')return false;
   const n=(prefix,value)=>typeof value==='string'&&new RegExp('^'+prefix+':(?:[0-9]|1[0-2])$').test(value)?Number(value.slice(prefix.length+1)):-1;
   const cases=n('cases',row[4]),holds=n('holds',row[5]),confirmed=n('confirmed',row[6]),pdf=n('pdf',row[7]);
@@ -35,6 +35,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    'UAT_CLEANUP_REQUEST');
   const k=Object.keys(maintenance).sort().join(',');
   need((maintenance.mode==='preview'&&k==='mode')||
+   (maintenance.mode==='reconcile'&&k==='mode'&&typeof services.checkReconcileConfig==='function')||
    (maintenance.mode==='clear'&&k==='expectedSha,mode,nextGateSha'&&hex(maintenance.expectedSha,64)&&
     hex(maintenance.nextGateSha,64)&&maintenance.nextGateSha!==config.gateSha&&maintenance.nextGateSha!==config.sourceSha),
    'UAT_CLEANUP_REQUEST');
@@ -89,6 +90,29 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    need(new Set(live.map(c=>c.caseId)).size===live.length&&new Set(live.map(c=>c.tokenHash)).size===live.length,'UAT_DUPLICATE_CASE');
    owned();return {raw,records};
   };
+  // Diagnostic only: check both stores under the same lock. A mismatched
+  // marker is inspectable only if canonical and all case cells are empty.
+  // Never accept a mismatched marker as a normal transaction baseline.
+  if(resetting&&maintenance.mode==='reconcile'){
+   services.checkReconcileConfig();owned();
+   const raw=range.getValues(),formulas=range.getFormulas();
+   need(Array.isArray(raw)&&raw.length===count+1&&Array.isArray(formulas)&&formulas.length===count+1&&
+    formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_STORE_MARKER_OR_FORMULA');
+   let state;
+   if(currentMarker(raw[0])){
+    const records=raw.slice(1).map(decode),live=records.filter(Boolean);
+    need(new Set(live.map(c=>c.caseId)).size===live.length&&new Set(live.map(c=>c.tokenHash)).size===live.length,'UAT_DUPLICATE_CASE');
+    state=live.length?'MATCHED_NONEMPTY':'MATCHED_EMPTY';
+   }else{
+    const gate=Array.isArray(raw[0])&&typeof raw[0][2]==='string'?raw[0][2].slice(5):'';
+    need(hex(gate,64)&&gate!==config.gateSha&&currentMarker(raw[0],gate)&&
+     raw.slice(1).every(row=>Array.isArray(row)&&row.length===width&&row.every(x=>x==='')),'UAT_RECONCILE_UNVERIFIED');
+    state='CONFIG_MISMATCH_EMPTY';
+   }
+   owned();need(equal(range.getValues(),raw)&&equal(range.getFormulas(),formulas),'UAT_STORE_CHANGED');
+   services.checkReconcileConfig();owned();
+   return {formal:false,scope:'SYNTHETIC_CASES_ONLY',state,readOnly:true};
+  }
   const initial=snapshot(),at=services.now();
   need(Number.isSafeInteger(at),'UAT_CLOCK');
   // Validate shared capacity even for read-only callers. No data return if stored records conflict.
