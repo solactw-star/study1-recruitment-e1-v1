@@ -73,7 +73,7 @@ function study1UatCaseView_(record,slots,at){
  return {caseId:record.caseId,alias:record.alias,stage:signed?'DONE':status,bookingStatus:status,
   slotId:slot?slot[0]:null,startAtUtc:slot?slot[1]:null,endAtUtc:slot?slot[2]:null,
   holdUntil:slot?record.holdUntil:null,sourceSha:record.sourceSha||null,signedSha:signed?record.signedSha:null,
-  signedAt:signed?record.signedAt:null,date:signed?record.date:null,pageCount:signed?5:null,formal:false,persisted:true};
+  signedAt:signed?record.signedAt:null,date:signed?record.date:null,pageCount:null,formal:false,persisted:true};
 }
 /* Read-back copy must independently verify the stored full PDF before returning bytes.
  * This internal helper accepts only the authorized, persisted case snapshot.
@@ -83,7 +83,7 @@ async function study1UatCaseCopy_(record,slots,at){
  if(view.bookingStatus!=='CONFIRMED')throw Error('UAT_COPY_NOT_CONFIRMED');
  const bytes=Utilities.base64Decode(record.pdf).map(x=>x&255);
  if(study1PdfDigest_(bytes)!==view.signedSha)throw Error('UAT_PDF_INTEGRITY');
- const pdf=await PDFLib.PDFDocument.load(Uint8Array.from(bytes),{updateMetadata:false});
- if(pdf.getPageCount()!==5)throw Error('UAT_PDF_PAGE_COUNT');
- return {...view,sha:view.signedSha,bytes:record.pdf};
+ const pdf=await PDFLib.PDFDocument.load(Uint8Array.from(bytes),{ignoreEncryption:false,updateMetadata:false,parseSpeed:Infinity});
+ if(pdf.isEncrypted||pdf.getPageCount()!==5)throw Error('UAT_PDF_PAGE_COUNT');
+ return {...view,pageCount:5,sha:view.signedSha,bytes:record.pdf};
 }
