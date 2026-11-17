@@ -9,15 +9,17 @@ const REPO = 'solactw-star/study1-recruitment-e1-v1';
 const SID = '1qg3PuI8sGFOAP-pJ889d9RrN0p_e0zsfqM274HgG4sEg9Qjv-xzqeL2f';
 const CONFIRM = 'I_AUTHORIZE_STUDY1_V2_HEAD_ONLY';
 const PRIVATE_CONFIRM = 'I_AUTHORIZE_STUDY1_V2_PRIVATE_E1_HEAD_ONLY';
-// PRIVATE_TARGET is derived from this reviewed checkout below, never from an old deployment hash.
+// reviewedPrivateTarget() is derived from this reviewed checkout below, never from an old deployment hash.
 function releaseProfile(env){const profile=env.SOURCE_PROFILE||'public_readonly';
  require_(['public_readonly','private_e1_management'].includes(profile),'invalid V2 source profile');
  return profile;
 }
 function releaseFiles(env,base=localSources()){
  const profile=releaseProfile(env);
+ requireReviewedInventory(base);
+ closedManifest(base);closedWebsite(base);
  const files=profile==='private_e1_management'?privateOwnerManagementCandidate(base):base;
- require_(profile!=='private_e1_management'||digest(files)===PRIVATE_TARGET,
+ require_(profile!=='private_e1_management'||digest(files)===reviewedPrivateTarget(),
   'reviewed private E1 management SHA mismatch');
  require_(!env.REVIEWED_TARGET_SHA256||env.REVIEWED_TARGET_SHA256===digest(files),'reviewed target SHA mismatch');
  return files;
@@ -28,7 +30,9 @@ const TYPES = Object.freeze({'.js':'SERVER_JS','.gs':'SERVER_JS','.html':'HTML',
 const TEST_ONLY_NONDEPLOYABLE=Object.freeze([
  'Study1FixtureAdapter.js','Study1Team.html','Study1Unified.html','Study1Unified.js'
 ]);
-// Frozen, reviewed source inventory: newly added GAS code must be explicitly reviewed.
+// Current reviewed release inventory, not a permanent file-count requirement.
+// Development source loading is separate. A changed inventory requires explicit
+// source review before any release; existing release profiles remain unchanged.
 const APPROVED = Object.freeze([
  'AdminConsole','AdminSandbox','BookingCancelHoldPreflight','BookingCore',
  'BookingHoldTransaction','BookingReadOnlyLock','BookingReadOnlyLocked',
@@ -127,7 +131,7 @@ function closedManifest(files,allowAnonymous=false){
 // Explicit opt-in candidate: no change to the normal public/private build sources.
 function anonymousReadOnlyCandidate(base=localSources()){
  require_(closedManifest(base).webapp.access==='ANYONE','anonymous candidate requires reviewed public baseline');
- require_(JSON.stringify(base.map(f=>f.name).sort())===JSON.stringify(APPROVED),'anonymous candidate inventory mismatch');
+ requireReviewedInventory(base);
  closedWebsite(base);publicRpcSurface(base);
  const files=base.map(f=>{if(f.name!=='appsscript')return {...f};
   const m=JSON.parse(f.source);m.webapp.access='ANYONE_ANONYMOUS';
@@ -146,7 +150,7 @@ function closedWebsite(files){
   w.includes('function listSlots(){return [];}'),
   'V2 public intake remains closed in Website.js');
 }
-function localSources(root=path.join(__dirname,'..','gas')){
+function readDevelopmentSources(root=path.join(__dirname,'..','gas')){
  const clasp=JSON.parse(fs.readFileSync(path.join(root,'.clasp.json'),'utf8'));
  require_(clasp.scriptId===SID,'local .clasp.json points to a different Script ID');
  const filenames=fs.readdirSync(root,{withFileTypes:true}).filter(x=>x.isFile() && x.name!=='.clasp.json');
@@ -160,10 +164,18 @@ function localSources(root=path.join(__dirname,'..','gas')){
   return {name,type:TYPES[ext],source:fs.readFileSync(path.join(root,x.name),'utf8')};
  });
  canonical(files);
- require_(JSON.stringify(files.map(f=>f.name).sort())===JSON.stringify(APPROVED),
-  'GAS source inventory differs from the fixed reviewed V2 allowlist');
- closedManifest(files);closedWebsite(files);
  return fileData(files);
+}
+function requireReviewedInventory(files){
+ canonical(files);
+ require_(JSON.stringify(files.map(f=>f.name).sort())===JSON.stringify(APPROVED),
+  'GAS source inventory differs from the current reviewed V2 allowlist');
+}
+function localSources(root=path.join(__dirname,'..','gas')){
+ const files=readDevelopmentSources(root);
+ requireReviewedInventory(files);
+ closedManifest(files);closedWebsite(files);
+ return files;
 }
 function invocation(env,mode){
  require_(mode==='audit'||mode==='prepare'||mode==='apply','invalid sync phase');
@@ -179,7 +191,7 @@ function invocation(env,mode){
  }
  if(mode==='audit')require_(env.SYNC_MODE==='audit','audit selection required');
  if(releaseProfile(env)==='private_e1_management'){
-  require_(env.REVIEWED_TARGET_SHA256===PRIVATE_TARGET,'exact private E1 management target SHA required');
+  require_(env.REVIEWED_TARGET_SHA256===reviewedPrivateTarget(),'exact private E1 management target SHA required');
   if(mode!=='audit')require_(/^[a-f0-9]{64}$/.test(env.EXPECTED_INVENTORY_SHA256||''),'private HEAD apply requires prior full inventory audit');
  }
 }
@@ -336,7 +348,7 @@ async function main(){
   else await apply(api,files,c,process.env,guard,async()=>{
    const after=await d.inventory(inventoryApi);
    d.requirePrivateHeadBaseline(after);
-   require_(after.headSha===PRIVATE_TARGET&&after.stable===first.stable,'private HEAD or immutable deployment inventory readback mismatch');
+   require_(after.headSha===reviewedPrivateTarget()&&after.stable===first.stable,'private HEAD or immutable deployment inventory readback mismatch');
   });
   return;
  }
@@ -347,9 +359,7 @@ async function main(){
 function privateOwnerReadOnlyCandidate(files){
  // Offline only: never used by main(), localSources(), prepare(), apply(), or workflow.
  // Start exclusively from the reviewed, closed public source inventory.
- canonical(files);
- require_(JSON.stringify(files.map(f=>f.name).sort())===JSON.stringify(APPROVED),
-  'private candidate requires the reviewed complete V2 inventory');
+ requireReviewedInventory(files);
  require_(closedManifest(files).webapp.access==='ANYONE',
   'private candidate requires the unchanged login-only public baseline');
  closedWebsite(files);
@@ -477,8 +487,14 @@ function privateOwnerManagementCandidate(files){
  return result;
 }
 // Bind this run to the closed, allowlisted private candidate of its exact checkout.
-const PRIVATE_TARGET=digest(privateOwnerManagementCandidate(localSources()));
-module.exports={anonymousReadOnlyCandidate,PRIVATE_TARGET,PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,localSources,closedManifest,closedWebsite,publicRpcSurface,
+let privateTarget;
+function reviewedPrivateTarget(){
+ // Pin the first successfully reviewed checkout in this process, not at import.
+ // A failed or incomplete development checkout grants no release authority.
+ if(privateTarget===undefined)privateTarget=digest(privateOwnerManagementCandidate(localSources()));
+ return privateTarget;
+}
+module.exports={anonymousReadOnlyCandidate,get PRIVATE_TARGET(){return reviewedPrivateTarget();},PRIVATE_CONFIRM,releaseProfile,releaseFiles,privateOwnerManagementCandidate,privateOwnerReadOnlyCandidate,REPO,SID,CONFIRM,APPROVED,invocation,readDevelopmentSources,localSources,closedManifest,closedWebsite,publicRpcSurface,
  canonical,digest,credentials,apiFromCredentials,verifyRemote,seal,unseal,latestMain,
  runnerPaths,aad,audit,prepare,apply};
 if(require.main===module)main().catch(e=>{

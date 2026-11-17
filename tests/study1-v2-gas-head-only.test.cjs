@@ -37,7 +37,7 @@ test('only MYSELF manifest and closed public front-end are accepted',()=>{
  f[0].source=f[0].source.replace('MYSELF','ANYONE_ANONYMOUS');assert.throws(()=>m.closedManifest(f),/MYSELF/);
  f[0].source=manifest();f[1].source=f[1].source.replace('open:false','open:true');assert.throws(()=>m.closedWebsite(f),/closed/);
 });
-test('V2 checked-in gas maps to V2 only and exact expected 27-source formal inventory',()=>{
+test('V2 checked-in gas maps to V2 only and exact current reviewed formal inventory',()=>{
  const dir=process.env.STUDY1_V2_GAS_FIXTURE_DIR;
  if(!dir)return; // optional when independent package uses its own full gas/ directory
  const files=m.localSources(dir);assert.equal(files.length,m.APPROVED.length);
@@ -47,7 +47,10 @@ test('V2 checked-in gas maps to V2 only and exact expected 27-source formal inve
  assert.ok(!files.some(f=>f.name==='程式碼'), 'no inert myFunction entrypoint');
  const clone=fs.mkdtempSync(path.join(os.tmpdir(),'v2-inventory-'));
  for(const p of fs.readdirSync(dir))fs.copyFileSync(path.join(dir,p),path.join(clone,p));
- fs.writeFileSync(path.join(clone,'EXTRA.js'),'x');assert.throws(()=>m.localSources(clone),/allowlist/);
+ fs.writeFileSync(path.join(clone,'EXTRA.js'),'function extra_(){}');
+ assert.ok(m.readDevelopmentSources(clone).some(f=>f.name==='EXTRA'),'ordinary development can stage a new source');
+ assert.throws(()=>m.localSources(clone),/allowlist/);
+ assert.throws(()=>m.releaseFiles({},m.readDevelopmentSources(clone)),/allowlist/);
  fs.rmSync(path.join(clone,'EXTRA.js'));
  fs.copyFileSync(path.join(__dirname,'fixtures/legacy-gas/Study1FixtureAdapter.js'),
   path.join(clone,'Study1FixtureAdapter.js'));
@@ -252,7 +255,7 @@ test('private candidate select and source pointer reject E2, non-presigned and s
  assert.equal(writes,0);assert.equal(checks,1);assert.equal(locks,5);
 });
 
-test('private HEAD release binds previously reviewed 27-source digest and separate authorization',()=>{
+test('private HEAD release binds the current reviewed source digest and separate authorization',()=>{
  const base=m.localSources(),pub=m.releaseFiles({},base),env0=env();
  const e={...env0,SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:m.PRIVATE_TARGET,
   EXPECTED_INVENTORY_SHA256:'a'.repeat(64),CONFIRMATION:m.PRIVATE_CONFIRM};

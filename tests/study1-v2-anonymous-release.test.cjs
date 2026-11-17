@@ -93,3 +93,29 @@ test('immutable verified v4 remains known after GAS source changes; tampered or 
  assert.equal((await d.inventory({...api,getVersionContent:async()=>remote(unknown)},true)).safe,false);
  assert.equal((await d.inventory({...api,getDeployments:async()=>[dep(4,'ANYONE')]},true)).safe,false);
 });
+
+ test('historical immutable proof and module import do not depend on an unfinished development checkout',()=>{
+ const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'study1-release-dev-'));
+ try{
+  fs.mkdirSync(path.join(temp,'scripts'));
+  const root=path.join(__dirname,'..');
+  for(const name of ['study1-v2-gas-head-only.cjs','study1-v2-private-deploy.cjs'])fs.copyFileSync(path.join(root,'scripts',name),path.join(temp,'scripts',name));
+  fs.cpSync(path.join(root,'gas'),path.join(temp,'gas'),{recursive:true});
+  fs.writeFileSync(path.join(temp,'gas','NextFeature.js'),'function nextFeature_(){}');
+  const devCore=require(path.join(temp,'scripts','study1-v2-gas-head-only.cjs'));
+  const devDeploy=require(path.join(temp,'scripts','study1-v2-private-deploy.cjs'));
+  assert.ok(devCore.readDevelopmentSources().some(f=>f.name==='NextFeature'));
+  assert.throws(()=>devCore.localSources(),/allowlist/);
+  assert.throws(()=>devCore.PRIVATE_TARGET,/allowlist/);
+  assert.throws(()=>devDeploy.TARGET,/allowlist/);
+  assert.throws(()=>devCore.releaseFiles({},devCore.readDevelopmentSources()),/allowlist/);
+  const historical=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-pdf-stamp-core.txt'),'utf8');
+  const old=candidate().map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f);
+  const proof=devDeploy.sourceProof({scriptId:devCore.SID,files:old},true);
+  assert.equal(proof.known,true);
+  assert.equal(devDeploy.sourceProof({scriptId:devCore.SID,files:old},false).known,false);
+  const changed=old.map(f=>f.name==='Index'?{...f,source:f.source+'<!-- unknown -->'}:f);
+  assert.equal(devDeploy.sourceProof({scriptId:devCore.SID,files:changed},true).known,false);
+ }finally{fs.rmSync(temp,{recursive:true,force:true});}
+ });

@@ -12,7 +12,7 @@ const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const SID=core.SID,REPO=core.REPO;
 const HISTORICAL_TARGET='73dea801154abbe847863a07df2e623fc1d68622a4442f006d1be7473dd5a0f7';
-const TARGET=core.PRIVATE_TARGET;
+function reviewedPrivateTarget(){return core.PRIVATE_TARGET;}
 // Immutable anonymous v4, verified by GET-only Run 43795872212 on 2026-11-16.
 // Historical provenance must not depend on the current mutable checkout.
 const VERIFIED_VERSION4_SHA='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
@@ -45,7 +45,7 @@ function invocation(env,mode){
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'') &&
   env.REVIEWED_SHA===env.GITHUB_SHA,'exact reviewed GitHub HEAD required');
  assert(env.PRIVATE_MODE===mode,'manual mode mismatch');
- assert(env.REVIEWED_TARGET_SHA256===TARGET,'exact reviewed private E1 candidate SHA required');
+ assert(env.REVIEWED_TARGET_SHA256===reviewedPrivateTarget(),'exact reviewed private E1 candidate SHA required');
  if(mode!=='audit'){
   assert(env.GITHUB_RUN_ATTEMPT==='1','mutation reruns forbidden; use new read-only audit and independent dispatch');
   assert(env.CONFIRMATION===(mode==='version'?VERSION_CONFIRM:CONFIRM),'independent private '+mode+' approval missing');
@@ -62,8 +62,8 @@ function latestMain(env){
  assert(shaLocal===env.GITHUB_SHA&&shaRemote===shaLocal,'V2 main moved since review');
 }
 function reviewedLocal(){
- const files=core.releaseFiles({SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:TARGET});
- assert(files.length===core.APPROVED.length&&core.digest(files)===TARGET,'reviewed private E1 source SHA mismatch');
+ const files=core.releaseFiles({SOURCE_PROFILE:'private_e1_management',REVIEWED_TARGET_SHA256:reviewedPrivateTarget()});
+ assert(files.length===core.APPROVED.length&&core.digest(files)===reviewedPrivateTarget(),'reviewed private E1 source SHA mismatch');
  assert(core.closedManifest(files).webapp.access==='MYSELF','private manifest required');
  core.closedWebsite(files);
  return files;
@@ -71,10 +71,10 @@ function reviewedLocal(){
 function checkHead(head){
  assert(head?.scriptId===SID,'remote Script ID mismatch');
  assert(Array.isArray(head.files)&&head.files.length===core.APPROVED.length,'V2 HEAD missing reviewed source inventory');
- assert(core.digest(head.files)===TARGET,'V2 HEAD diverged from verified source SHA');
+ assert(core.digest(head.files)===reviewedPrivateTarget(),'V2 HEAD diverged from verified source SHA');
  assert(core.closedManifest(head.files).webapp.access==='MYSELF','private manifest required');
  core.closedWebsite(head.files);
- return {sha:TARGET,files:core.APPROVED.length};
+ return {sha:reviewedPrivateTarget(),files:core.APPROVED.length};
 }
 function sourceProof(obj,allowAnonymous=false){
  assert(obj?.scriptId===SID,'remote Script ID mismatch');
@@ -83,9 +83,8 @@ function sourceProof(obj,allowAnonymous=false){
  try{
   const manifest=core.closedManifest(obj.files,allowAnonymous);core.closedWebsite(obj.files);
   access=manifest.webapp.access;
-  known=(access==='MYSELF'&&([TARGET,HISTORICAL_TARGET,VERIFIED_VERSION2_SHA].includes(remote.sha)))||
-   (access==='ANYONE'&&(remote.sha===core.digest(core.localSources())||
-    (allowAnonymous===true&&remote.sha==='3449d43bee67d450a1934cd24870b581c487bd84f854511a467e270bccf62158')))||
+  known=(access==='MYSELF'&&([HISTORICAL_TARGET,VERIFIED_VERSION2_SHA].includes(remote.sha)||remote.sha===reviewedPrivateTarget()))||
+   (access==='ANYONE'&&((allowAnonymous===true&&remote.sha==='3449d43bee67d450a1934cd24870b581c487bd84f854511a467e270bccf62158')||remote.sha===core.digest(core.localSources())))||
    (allowAnonymous===true&&access==='ANYONE_ANONYMOUS'&&(remote.sha===VERIFIED_VERSION4_SHA||remote.sha===core.digest(core.anonymousReadOnlyCandidate())));
  }catch(_){}
  return {sha:remote.sha,count:remote.count,access,known};
@@ -279,8 +278,8 @@ function summarize(s,allowAnonymous=false){
  report('V2_PRIVATE_HEAD_SHA256='+s.headSha);
  report('V2_PRIVATE_HEAD_FILE_COUNT='+s.headProof.count);
  report('V2_PRIVATE_HEAD_ACCESS='+s.headProof.access);
- report('V2_PRIVATE_HEAD_MATCHES_REVIEWED_TARGET='+(s.headSha===TARGET));
- report('V2_PRIVATE_REVIEWED_TARGET_SHA256='+TARGET);
+ report('V2_PRIVATE_HEAD_MATCHES_REVIEWED_TARGET='+(s.headSha===reviewedPrivateTarget()));
+ report('V2_PRIVATE_REVIEWED_TARGET_SHA256='+reviewedPrivateTarget());
  report('V2_PRIVATE_VERSION_PROOFS_JSON='+JSON.stringify(s.proofs));
  report('V2_PRIVATE_VERSION_COUNT='+s.versionCount);
  report('V2_PRIVATE_DEPLOYMENT_COUNT='+s.deploymentCount);
@@ -364,7 +363,7 @@ async function reviewedMutation(api,env,mode,assertMain){
  assertMain(env);
  return before;
 }
-function targetVersions(s){return s.proofs.filter(v=>v.sha===TARGET&&v.known&&v.access==='MYSELF');}
+function targetVersions(s){return s.proofs.filter(v=>v.sha===reviewedPrivateTarget()&&v.known&&v.access==='MYSELF');}
 function targetDeployed(s){const nums=new Set(targetVersions(s).map(v=>v.version));
  return normalizedDeployments(s.deps).some(d=>d.version!==null&&nums.has(d.version));
 }
@@ -375,24 +374,24 @@ async function createImmutableVersion(api,env,assertMain=latestMain,sleep){
  assert(matches.length<=1,'multiple matching orphan versions; manual review required');
  if(matches.length){
   const number=matches[0].version,v=normalizedVersions(before.versions).find(x=>x.version===number);
-  assert(new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub [a-f0-9]{40} Run [0-9]+$').test(v.description),
+  assert(new RegExp('^Study1 V2 PRIVATE MYSELF HEAD '+reviewedPrivateTarget()+' GitHub [a-f0-9]{40} Run [0-9]+$').test(v.description),
    'matching orphan provenance not verified');
   checkHead(await api.getVersionContent(number));
   report('V2_PRIVATE_REUSED_VERIFIED_ORPHAN_VERSION=true');
   report('V2_PRIVATE_VERSION='+number);
   return {version:number,createdNew:false};
  }
- const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
+ const description='Study1 V2 PRIVATE MYSELF HEAD '+reviewedPrivateTarget()+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
  let v;
  try{v=await api.createVersion(description);}
  catch(e){throw Error('V2_PRIVATE_VERSION_POST_UNKNOWN_NO_RETRY: '+e.message);}
  assert(v?.scriptId===SID&&Number.isSafeInteger(v.versionNumber)&&v.versionNumber>0,'version create response ambiguous; stop');
  checkHead(await api.getVersionContent(v.versionNumber));
  const after=await settleVersionInventory(api,before,v.versionNumber,true,sleep);
- assert(after.proofs.some(x=>x.version===v.versionNumber&&x.sha===TARGET),'immutable version readback mismatch');
+ assert(after.proofs.some(x=>x.version===v.versionNumber&&x.sha===reviewedPrivateTarget()),'immutable version readback mismatch');
  report('V2_PRIVATE_VERSION_VERIFIED=true');
  report('V2_PRIVATE_VERSION='+v.versionNumber);
- report('V2_PRIVATE_VERSION_SHA256='+TARGET);
+ report('V2_PRIVATE_VERSION_SHA256='+reviewedPrivateTarget());
  report('V2_PRIVATE_DEPLOYMENT_MUTATIONS=0');
  return {version:v.versionNumber,createdNew:true};
 }
@@ -405,7 +404,7 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  // reviewedMutation just verified the full immutable source and deployment inventory,
  // including the version specified here. No duplicate content/list GET before POST.
  assertMain(env);
- const description='Study1 V2 PRIVATE MYSELF HEAD '+TARGET+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
+ const description='Study1 V2 PRIVATE MYSELF HEAD '+reviewedPrivateTarget()+' GitHub '+env.GITHUB_SHA+' Run '+env.GITHUB_RUN_ID;
  let created;
  try{created=await api.createDeployment(number,description);}
  catch(e){throw Error('V2_PRIVATE_DEPLOY_POST_UNKNOWN_NO_RETRY: '+e.message);}
@@ -424,7 +423,7 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  assert(newDep.points.some(x=>x.web?.access==='MYSELF'&&x.web.executeAs==='USER_DEPLOYING'),'new deployment explicit private ACL not verified');
  report('V2_PRIVATE_DEPLOY_VERIFIED=true');
  report('V2_PRIVATE_VERSION='+number);
- report('V2_PRIVATE_VERSION_SHA256='+TARGET);
+ report('V2_PRIVATE_VERSION_SHA256='+reviewedPrivateTarget());
  report('V2_PRIVATE_ACCESS=MYSELF');
  report('V2_PRIVATE_EXECUTE_AS=USER_DEPLOYING');
  report('V2_PRIVATE_NO_HEAD_UPDATE=true');
@@ -531,7 +530,7 @@ function oneShotInvocation(env,event){
   e.forced===false&&e.deleted===false&&e.created===false&&e.commits?.length===1&&
   e.repository?.full_name===REPO,'one-time release authorization event mismatch');
  assert(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA||'')&&/^[0-9]+$/.test(env.GITHUB_RUN_ID||'')&&
-  TARGET===RELEASE_TARGET,'one-time reviewed source identity mismatch');
+  reviewedPrivateTarget()===RELEASE_TARGET,'one-time reviewed source identity mismatch');
 }
 const ONCE_PHASES=['head-prepare','head-apply','version-prepare','version-apply','deploy-prepare','deploy-apply'];
 function oncePath(env,phase){
@@ -547,7 +546,7 @@ function readOnceStage(env,phase){
  return data;
 }
 function onceEnv(env,mode,s,version){
- return {...env,REVIEWED_SHA:env.GITHUB_SHA,REVIEWED_TARGET_SHA256:TARGET,PRIVATE_MODE:mode,
+ return {...env,REVIEWED_SHA:env.GITHUB_SHA,REVIEWED_TARGET_SHA256:reviewedPrivateTarget(),PRIVATE_MODE:mode,
   PRIVATE_VERSION:version?String(version):'',EXPECTED_INVENTORY_SHA256:s.fp,
   SOURCE_PROFILE:'private_e1_management',EXPECTED_REMOTE_SHA256:s.headSha,
   CONFIRMATION:mode==='version'?VERSION_CONFIRM:mode==='deploy'?CONFIRM:core.PRIVATE_CONFIRM,SYNC_MODE:'apply'};
@@ -625,11 +624,11 @@ async function oneShotPhase(phase,env,c,api,headApi,assertMain=latestMain){
  const newDep=normalizedDeployments(after.deps).find(d=>d.id===v.id);
  assert(newDep&&newDep.version===prev.version&&newDep.points.some(p=>p.web?.access==='MYSELF'&&p.web.executeAs==='USER_DEPLOYING'),'final private deployment proof missing');
  assert(JSON.stringify(normalizedDeployments(after.deps).filter(d=>d.id!==v.id))===JSON.stringify(normalizedDeployments(now.deps)),'existing deployments changed after release');
- assert(after.proofs.some(x=>x.version===prev.version&&x.sha===TARGET&&x.access==='MYSELF'),'final immutable source proof missing');
+ assert(after.proofs.some(x=>x.version===prev.version&&x.sha===reviewedPrivateTarget()&&x.access==='MYSELF'),'final immutable source proof missing');
  writeOnceStage(env,phase,{fp:after.fp,headSha:after.headSha,stable:after.stable,version:v.version});
  summarize(after);
  report('V2_ONCE_RELEASE_VERIFIED=true');report('V2_ONCE_RELEASE_VERSION='+v.version);
- report('V2_ONCE_RELEASE_GAS_TARGET_SHA256='+TARGET);
+ report('V2_ONCE_RELEASE_GAS_TARGET_SHA256='+reviewedPrivateTarget());
  report('V2_ONCE_RELEASE_NO_FORMAL_DATA_OR_INTAKE=true');
 }
 async function oneShotMain(phase,env){
@@ -644,8 +643,8 @@ async function oneShotMain(phase,env){
 function resumeEnv(env){
  assert(env.V2_RESUME_DEPLOY==='1','explicit continuation selection required');
  oneShotInvocation(env);
- assert(TARGET===VERIFIED_VERSION2_SHA,'authorized version 2 differs from current reviewed candidate');
- return onceEnv(env,'deploy',{fp:RESUME_FP,headSha:TARGET},RESUME_VERSION);
+ assert(reviewedPrivateTarget()===VERIFIED_VERSION2_SHA,'authorized version 2 differs from current reviewed candidate');
+ return onceEnv(env,'deploy',{fp:RESUME_FP,headSha:reviewedPrivateTarget()},RESUME_VERSION);
 }
 async function resumeMain(phase,env){
  assert(['resume-prepare','resume-deploy'].includes(phase),'resume only permits deployment backup or deployment');
@@ -685,7 +684,7 @@ if(require.main===module)main().catch(e=>{
  console.error(String(e.message).replace(/https?:\/\/\S+/g,'[URL]'));
  process.exitCode=1;
 });
-module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,manualReadOnlyAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,TARGET,HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
+module.exports={verifyAnonymousV4,RESUME_PARENT,RESUME_MESSAGE,RESUME_VERSION,RESUME_FP,resumeEnv,RELEASE_PARENT,RELEASE_MESSAGE,RELEASE_TARGET,RELEASE_BASE_FP,oneShotInvocation,oneShotPhase,onceEnv,autoAuditInvocation,automaticAudit,manualReadOnlyAudit,releaseBackupPath,releaseBackupAad,prepareReleaseBackup,verifyReleaseBackup,SID,REPO,get TARGET(){return reviewedPrivateTarget();},HISTORICAL_TARGET,VERSION_CONFIRM,CONFIRM,invocation,reviewedLocal,sourceProof,requirePrivateHeadBaseline,createImmutableVersion,
  checkHead,makeApi,retryDelayMs,safeApiRoute,GET_RETRY_MAX_ATTEMPTS,
  normalizedVersions,normalizedDeployments,
  deploymentVersionShape,redactedDeploymentShapes,readOnlyAclEvidence,
