@@ -220,6 +220,39 @@ test('new deployment may appear one GET behind without repeating POST',async()=>
  assert.deepEqual(sleeps,[1000]);
  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
 });
+test('successful POST with temporarily invisible direct deployment settles without repeating mutation',async()=>{
+ const f=fakeApi(),e=runEnv(),sleeps=[];
+ const original=f.api.getDeployment;let direct=0;
+ f.api.getDeployment=async id=>{
+  direct++;if(direct<=2)throw Error('GET V2 Apps Script API deployment HTTP 404 after 1 attempt(s); no mutation inferred');
+  return original(id);
+ };
+ const result=await stagedRelease(f.api,e,()=>{},async ms=>{sleeps.push(ms);});
+ assert.equal(result.version,1);assert.equal(direct,3);
+ assert.deepEqual(sleeps,[1000,2000]);assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
+});
+test('post-create direct readback fails closed on persistent 404, access denial and concurrent changes',async()=>{
+ for(const kind of ['404','403','drift','wrong-direct']){
+  const f=fakeApi(),e=runEnv(),sleeps=[];let direct=0;
+  const original=f.api.getDeployment;
+  f.api.getDeployment=async id=>{
+   direct++;
+   if(kind==='404'||kind==='403')throw Error('GET V2 Apps Script API deployment HTTP '+kind);
+   if(kind==='drift'&&direct===1)throw Error('GET V2 Apps Script API deployment HTTP 404');
+   const dep=await original(id);
+   if(kind==='drift'){
+    const prior=f.api.getDeployments;f.api.getDeployments=async()=>[...(await prior()),{...dep,deploymentId:'CONCURRENT'}];
+   }
+   return kind==='wrong-direct'?{...dep,deploymentConfig:{...dep.deploymentConfig,versionNumber:99}}:dep;
+  };
+  await assert.rejects(stagedRelease(f.api,e,()=>{},async ms=>{sleeps.push(ms);}),{
+   message:kind==='404'?/direct readback unknown/:kind==='403'?/HTTP 403/:kind==='drift'?/inventory changed during direct deployment readback/:/deployed ID\/version readback failed/
+  });
+  assert.deepEqual(f.counts(),{puts:1,versionCreates:1});
+  assert.equal(direct,kind==='404'?5:kind==='drift'?2:1);
+  assert.deepEqual(sleeps,kind==='404'?[1000,2000,4000,8000]:kind==='drift'?[1000]:[]);
+ }
+});
 test('inventory SHA mismatch or HEAD drift blocks before version/deployment',async()=>{
  const f=fakeApi(),e=runEnv();
  await assert.rejects(d.deploy(f.api,{...e,EXPECTED_INVENTORY_SHA256:'f'.repeat(64)},()=>{}),/inventory differs/);

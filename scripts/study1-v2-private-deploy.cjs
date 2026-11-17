@@ -410,8 +410,26 @@ async function deploy(api,env,assertMain=latestMain,sleep){
  catch(e){throw Error('V2_PRIVATE_DEPLOY_POST_UNKNOWN_NO_RETRY: '+e.message);}
  assert(created?.deploymentId&&created?.deploymentConfig?.scriptId===SID&&
   created.deploymentConfig.versionNumber===number,'deployment creation response ambiguous; no retry');
- const got=await api.getDeployment(created.deploymentId);
+ // A successful POST is not repeated if Google has not yet exposed the
+ // new resource to GET. First settle the existing complete inventory, then
+ // wait only for this exact new deployment's direct readback.
  const after=await settleDeploymentInventory(api,before,created.deploymentId,sleep);
+ const pause=sleep|| (ms=>new Promise(resolve=>setTimeout(resolve,ms)));
+ let got;
+ for(let i=0;i<READBACK_DELAYS_MS.length;i++){
+  if(i)await pause(READBACK_DELAYS_MS[i]);
+  try{got=await api.getDeployment(created.deploymentId);break;}
+  catch(e){
+   // 404 is transient only in this bounded post-create readback context.
+   // Never retry a POST, permission error, or unexpected response.
+   if(!/HTTP 404\b/.test(String(e.message)))throw e;
+  }
+ }
+ assert(got,'new deployment direct readback unknown; use new audit, no repeat');
+ // If a direct GET lagged, recheck inventory after it becomes visible:
+ // a concurrent version/ACL/deployment change during the wait must stop.
+ const fresh=await inventory(api);
+ checkHead(fresh.head);assert(fresh.safe&&fresh.fp===after.fp,'inventory changed during direct deployment readback');
  assert(got?.deploymentId===created.deploymentId&&got.deploymentConfig?.scriptId===SID&&
   got.deploymentConfig.versionNumber===number,'deployed ID/version readback failed');
  checkHead(await api.getVersionContent(number));
