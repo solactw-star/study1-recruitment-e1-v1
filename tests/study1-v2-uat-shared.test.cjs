@@ -98,3 +98,46 @@ test('shared visitor rejects cross-case or unconfirmed PDF and clears old links 
  assert.equal(el('step-done').hidden,true);assert.equal(el('formalDonePdfDownload').href,undefined);assert.equal(el('caseSummary').textContent,'');assert.ok(revoked.includes('blob:verified'));
  assert.equal(queue.length,0);
 });
+
+test('GAS range transaction keeps shared capacity and full signed PDF together; refuses wrong store, lock loss and unknown writes',async()=>{
+ const vm=require('node:vm'),realm=vm.createContext({Date,Uint8Array,Utilities:{
+  DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest()),
+  formatDate:()=> '2026/11/18'
+ }});
+ for(const p of ['gas/BookingCore.js','gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js','scripts/study1-v2-uat-store-transaction.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const original=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm);
+ const t=Date.parse('2026-11-18T02:00:00.000Z'),storeId='SYNTHETIC_UNIT_TEST_ONLY';
+ realm.args=JSON.stringify({source:original.bytes,ink:Array.from(syntheticInk()),layout:original.layout,sha:original.hash,at:new Date(t).toISOString()});
+ const signed=await vm.runInContext('(async()=>{const x=JSON.parse(args);return study1PdfComposeSigned_(x.source,x.ink,x.layout,{experiment:"E1",version:"UAT-SYNTHETIC-1",sha256:x.sha},new Date(x.at));})()',realm);
+ const config={storeId,sourceSha:original.hash,slots:[['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
+ const matrix=[['STUDY1_E1_SYNTHETIC_CASES_V1',storeId,...Array(7).fill('')],...Array.from({length:12},()=>Array(9).fill(''))];
+ let held=false,deny=false,badParent=false,hasFormula=false,failFlush=false,partial=false,writes=0,opens=0,clock=t;
+ const sheet={getName:()=> 'SYNTHETIC_CASES',getParent:()=>({getId:()=>badParent?'WRONG':storeId}),getLastRow:()=>13,getLastColumn:()=>9,
+  getRange:(r,c,n,m)=>({getValues:()=>matrix.slice(r-1,r-1+n).map(x=>x.slice(c-1,c-1+m)),getFormulas:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>hasFormula&&i===1&&j===1?'=1':'')),
+   setValues:v=>{assert.equal(held,true);writes++;matrix[r-1]=v[0].slice();if(partial)matrix[r-1][1]='';}})};
+ const svc={getLock:()=>({tryLock:()=>{if(deny||held)return false;held=true;return true;},hasLock:()=>held,releaseLock:()=>{held=false;}}),getSheet:()=>{assert.equal(held,true);opens++;return sheet;},flush:()=>{if(failFlush)throw Error('unknown');},now:()=>clock,decode:s=>Array.from(Buffer.from(s,'base64')),digest:hash};
+ const tx=choose=>realm.study1UatStoreTransaction_(svc,config,choose);
+ const record=i=>({alias:'TEST_0'+(i+1),caseId:'UAT_'+String(i+1).repeat(24),tokenHash:String(i+1).repeat(64),state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''});
+ const change=(i,fields)=>tx(rows=>({index:i,record:{...rows[i],...fields}}));
+ deny=true;assert.throws(()=>tx(()=>null),/UAT_LOCK_BUSY/);assert.equal(opens,0);deny=false;
+ badParent=true;assert.throws(()=>tx(()=>null),/UAT_STORE_IDENTITY/);badParent=false;
+ hasFormula=true;assert.throws(()=>tx(()=>null),/MARKER_OR_FORMULA/);hasFormula=false;
+ assert.equal(writes,0);
+ for(let i=0;i<2;i++){tx(()=>({index:i,record:record(i)}));change(i,{state:'SLOTS'});}
+ const h={state:'HELD',slotId:'TEST_SLOT_1',holdUntil:new Date(t+600000).toISOString(),holdKey:'d'.repeat(32),sourceSha:original.hash};
+ change(0,h);
+ assert.throws(()=>change(1,h),/UAT_SLOT_UNAVAILABLE/);
+ const count=writes;change(0,h);assert.equal(writes,count);
+ assert.throws(()=>change(0,{state:'CONFIRMED'}),/UAT_PDF_SCHEMA/);
+ const receipt={state:'CONFIRMED',signedSha:signed.signedSha256,signKey:'e'.repeat(32),inkSha:hash(syntheticInk()),signedAt:signed.serverSignedAt,date:signed.taipeiDate,pdf:Buffer.from(signed.signedPdfBytes).toString('base64')};
+ failFlush=true;assert.throws(()=>change(0,receipt),/UAT_WRITE_UNKNOWN_READ_CASE/);assert.equal(held,false);failFlush=false;
+ const saved=tx(()=>null)[0];assert.equal(saved.state,'CONFIRMED');assert.equal(saved.pdf,receipt.pdf);assert.equal(hash(Buffer.from(saved.pdf,'base64')),saved.signedSha);
+ assert.equal((await PDFLib.PDFDocument.load(Buffer.from(saved.pdf,'base64'))).getPageCount(),5);
+ const after=writes;change(0,receipt);assert.equal(writes,after);
+ assert.throws(()=>change(0,{state:'CANCELLED'}),/UAT_(UNCONFIRMED_PDF|TRANSITION)/);
+ assert.throws(()=>change(1,h),/UAT_SLOT_UNAVAILABLE/);
+ // A partially changed persisted PDF is never acknowledged or used for capacity.
+ matrix[1][1]='pdf:AAAA';assert.throws(()=>tx(()=>null),/UAT_PDF_INTEGRITY/);
+ assert.equal(held,false);
+});

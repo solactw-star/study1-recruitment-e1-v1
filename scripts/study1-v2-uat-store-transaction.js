@@ -1,0 +1,110 @@
+/* Internal synthetic-case storage transaction primitive for GAS-style ranges.
+ * No public RPC, service lookup, credentials, spreadsheet selector from clients,
+ * deployment, or formal data access. The caller supplies a separately approved
+ * synthetic sheet and common script-lock factory, only after server authorization.
+ * A single range write stores the booking and its complete signed file together.
+ * LockService coordinates participating script writers, not external/manual editors.
+ */
+function study1UatStoreTransaction_(services,config,choose){
+ const need=(ok,msg)=>{if(!ok)throw Error(msg);};
+ const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+ const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
+ const width=9,count=12,chunk=40000;
+ const keys=['alias','caseId','tokenHash','state','slotId','holdUntil','holdKey','sourceSha','signedSha','signKey','inkSha','signedAt','date','pdf'];
+ const marker=['STUDY1_E1_SYNTHETIC_CASES_V1',config.storeId,...Array(7).fill('')];
+ const slots=config.slots;
+ need(typeof config.storeId==='string'&&config.storeId.length>0&&hex(config.sourceSha,64)&&
+  Array.isArray(slots)&&slots.length>0&&slots.length<=4&&slots.every(s=>Array.isArray(s)&&s.length===8&&/^TEST_SLOT_[1-4]$/.test(s[0])&&s[3]===1&&s[4]==='TEST_ONLY'),'UAT_STORE_CONFIG');
+ need(typeof choose==='function'&&typeof services.getLock==='function'&&typeof services.getSheet==='function'&&typeof services.flush==='function'&&typeof services.now==='function'&&typeof services.decode==='function'&&typeof services.digest==='function','UAT_STORE_INTERFACE');
+ const iso=s=>typeof s==='string'&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s;
+ const validate=(c,i)=>{
+  need(c&&typeof c==='object'&&!Array.isArray(c)&&equal(Object.keys(c).sort(),keys.slice().sort()),'UAT_CASE_SCHEMA');
+  need(c.alias==='TEST_'+String(i+1).padStart(2,'0')&&/^UAT_[a-f0-9]{24}$/.test(c.caseId)&&hex(c.tokenHash,64)&&
+   ['OTP','SLOTS','HELD','CANCELLED','EXPIRED','CONFIRMED'].includes(c.state),'UAT_CASE_SCHEMA');
+  const booked=c.slotId!=='';
+  need(booked?slots.some(s=>s[0]===c.slotId)&&iso(c.holdUntil)&&hex(c.holdKey,32)&&c.sourceSha===config.sourceSha:
+   c.holdUntil===''&&c.holdKey===''&&c.sourceSha===''&&!['HELD','EXPIRED','CONFIRMED'].includes(c.state),'UAT_HOLD_SCHEMA');
+  need(!booked||!['OTP','SLOTS'].includes(c.state),'UAT_HOLD_SCHEMA');
+  if(c.state==='CONFIRMED'){
+   need(hex(c.signedSha,64)&&hex(c.signKey,32)&&hex(c.inkSha,64)&&iso(c.signedAt)&&
+    /^\d{4}\/\d{2}\/\d{2}$/.test(c.date)&&typeof c.pdf==='string'&&c.pdf.length>0&&c.pdf.length<=8*chunk&&/^[A-Za-z0-9+/]+={0,2}$/.test(c.pdf),'UAT_PDF_SCHEMA');
+   const bytes=services.decode(c.pdf);
+   need(bytes.length>=100&&String.fromCharCode(...Array.from(bytes).slice(0,5))==='%PDF-'&&services.digest(bytes)===c.signedSha&&c.signedSha!==c.sourceSha,'UAT_PDF_INTEGRITY');
+  }else need(['signedSha','signKey','inkSha','signedAt','date','pdf'].every(k=>c[k]===''),'UAT_UNCONFIRMED_PDF');
+ };
+ const encode=c=>{
+  const meta={};for(const k of keys.filter(x=>x!=='pdf'))meta[k]=c[k];
+  // Prefix chunks so a base64 value cannot be interpreted as a formula.
+  return ['case:'+JSON.stringify(meta),...Array.from({length:8},(_,i)=>{const part=c.pdf.slice(i*chunk,(i+1)*chunk);return part?'pdf:'+part:'';})];
+ };
+ const decode=(row,i)=>{
+  need(Array.isArray(row)&&row.length===width&&row.every(x=>typeof x==='string'),'UAT_STORE_CELL');
+  if(row.every(x=>x===''))return null;
+  need(row[0].startsWith('case:')&&row[0].length<=4000,'UAT_CASE_SCHEMA');
+  const c=JSON.parse(row[0].slice(5));
+  let pdf='',ended=false;
+  for(const part of row.slice(1)){
+   if(part===''){ended=true;continue;}
+   need(!ended&&part.startsWith('pdf:')&&part.length>4&&part.length<=chunk+4,'UAT_PDF_CHUNKS');pdf+=part.slice(4);
+   if(part.length<chunk+4)ended=true;
+  }
+  c.pdf=pdf;validate(c,i);need(equal(encode(c),row),'UAT_STORE_NONCANONICAL');return c;
+ };
+ const lock=services.getLock();
+ need(lock&&typeof lock.tryLock==='function'&&typeof lock.hasLock==='function'&&typeof lock.releaseLock==='function','UAT_LOCK_INTERFACE');
+ need(lock.tryLock(5000)===true,'UAT_LOCK_BUSY');
+ const owned=()=>need(lock.hasLock()===true,'UAT_LOCK_LOST');
+ try{
+  owned();
+  const sheet=services.getSheet();
+  need(sheet&&sheet.getName()==='SYNTHETIC_CASES'&&sheet.getParent().getId()===config.storeId&&sheet.getLastRow()<=count+1&&sheet.getLastColumn()<=width,'UAT_STORE_IDENTITY');
+  const range=sheet.getRange(1,1,count+1,width);
+  const snapshot=()=>{
+   owned();
+   const raw=range.getValues(),formulas=range.getFormulas();
+   need(Array.isArray(raw)&&raw.length===count+1&&equal(raw[0],marker)&&Array.isArray(formulas)&&formulas.length===count+1&&formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_STORE_MARKER_OR_FORMULA');
+   const records=raw.slice(1).map(decode),live=records.filter(Boolean);
+   need(new Set(live.map(c=>c.caseId)).size===live.length&&new Set(live.map(c=>c.tokenHash)).size===live.length,'UAT_DUPLICATE_CASE');
+   owned();return {raw,records};
+  };
+  const initial=snapshot(),at=services.now();
+  need(Number.isSafeInteger(at),'UAT_CLOCK');
+  // Validate shared capacity even for read-only callers. No data return if stored records conflict.
+  const availability=records=>{
+   const atIso=new Date(at).toISOString();
+   const rows=records.filter(c=>c&&c.slotId).map(c=>[c.caseId,c.alias,c.slotId,c.state,c.holdUntil,c.holdKey,'',c.signedAt,'','']);
+   for(const slot of slots)need(rows.filter(r=>r[2]===slot[0]&&(r[3]==='CONFIRMED'||r[3]==='HELD'&&Date.parse(r[4])>at)).length<=slot[3],'UAT_CAPACITY_CONFLICT');
+   return bookingComputeAvailability_(slots,rows,atIso);
+  };
+  const available=availability(initial.records);
+  const change=choose(JSON.parse(JSON.stringify(initial.records)),available,at);
+  if(change===null)return initial.records;
+  need(change&&Object.keys(change).sort().join(',')==='index,record'&&Number.isInteger(change.index)&&change.index>=0&&change.index<count,'UAT_CHANGE_SCHEMA');
+  const i=change.index,next=change.record,old=initial.records[i];
+  validate(next,i);
+  if(old&&equal(encode(old),encode(next)))return old;
+  if(!old)need(next.state==='OTP','UAT_TRANSITION');
+  else{
+   need(['alias','caseId','tokenHash'].every(k=>next[k]===old[k]),'UAT_CASE_BINDING');
+   const allowed={OTP:['SLOTS','CANCELLED'],SLOTS:['HELD','CANCELLED'],HELD:['CONFIRMED','CANCELLED','EXPIRED'],CANCELLED:[],EXPIRED:[],CONFIRMED:[]};
+   need(allowed[old.state].includes(next.state),'UAT_TRANSITION');
+   if(old.state==='HELD'){
+    need(['slotId','holdUntil','holdKey','sourceSha'].every(k=>next[k]===old[k]),'UAT_HOLD_BINDING');
+    if(next.state==='CONFIRMED')need(Date.parse(old.holdUntil)>at&&Date.parse(next.signedAt)<=at&&Date.parse(next.signedAt)<Date.parse(old.holdUntil),'UAT_HOLD_EXPIRED');
+    if(next.state==='EXPIRED')need(Date.parse(old.holdUntil)<=at,'UAT_TRANSITION');
+   }
+   if(next.state==='HELD')need(available.some(s=>s.slotId===next.slotId)&&Date.parse(next.holdUntil)>at&&Date.parse(next.holdUntil)<=at+600000,'UAT_SLOT_UNAVAILABLE');
+  }
+  const proposed=initial.records.slice();proposed[i]=next;availability(proposed);
+  need(new Set(proposed.filter(Boolean).map(c=>c.caseId)).size===proposed.filter(Boolean).length&&new Set(proposed.filter(Boolean).map(c=>c.tokenHash)).size===proposed.filter(Boolean).length,'UAT_DUPLICATE_CASE');
+  // Detect externally changed cells; external writers still must be excluded via ACL.
+  need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+  owned();const expect=initial.raw.map(r=>r.slice());expect[i+1]=encode(next);
+  try{
+   sheet.getRange(i+2,1,1,width).setValues([expect[i+1]]);
+   services.flush();owned();
+   need(equal(snapshot().raw,expect),'UAT_READBACK_MISMATCH');
+  }catch(_){throw Error('UAT_WRITE_UNKNOWN_READ_CASE');}
+  return next;
+ }finally{lock.releaseLock();}
+}
