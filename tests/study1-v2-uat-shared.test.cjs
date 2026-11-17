@@ -320,23 +320,33 @@ test('reviewable online UAT candidate uses original apply template, owner bounda
  for(const id of ['visitorSignaturePreview','officialPdfViewer','formalDonePdfDownload','testAlias','uatGate','caseKey'])assert.ok(html.includes('id="'+id+'"'));
  assert.doesNotMatch(html,/id="(?:formalName|formalEmail|formalPhone|screenQuestions|chooseE2)"|study1ParticipantBegin|study1FormalHoldSlot|localStorage|sessionStorage/);
  assert.equal((html.match(/<script>/g)||[]).length,1);const js=html.match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(js);
- let owner=false,configs=0,requests=0,served=0;
- const ctx=vm.createContext({study1AdminOwnerRequired_:()=>{if(!owner)throw Error('owner denied');},study1UatTrustedConfig_:()=>{configs++;return {};},
+ let active='',effective='',configs=0,requests=0,served=0;
+ const ctx=vm.createContext({Session:{getActiveUser:()=>({getEmail:()=>active}),getEffectiveUser:()=>({getEmail:()=>effective})},study1UatTrustedConfig_:()=>{configs++;return {};},
   study1UatControlledRequest_:async request=>{requests++;return {ok:true,value:request.operation};},
   HtmlService:{createTemplateFromFile(name){served++;return {name,evaluate(){return {name,mode:this.flowMode,setTitle(){return this;},addMetaTag(){return this;}}}}}}});
+ vm.runInContext(get(candidate,'AdminSandbox'),ctx);
  vm.runInContext(get(candidate,'Website'),ctx);
- assert.throws(()=>ctx.doGet({parameter:{view:'apply'}}),/owner denied/);assert.equal(configs,0);assert.equal(served,0);
- assert.equal((await ctx.study1E1SyntheticUat({operation:'read'})).ok,false);assert.equal(requests,0);
- owner=true;const page=ctx.doGet({parameter:{view:'apply'}});assert.equal(page.name,'Study1Visitor');assert.equal(page.mode,'GAS_UAT');assert.equal(configs,1);
+ const owner=vm.runInContext('STUDY1_ADMIN_OWNER_',ctx);
+ for(const pair of [['',owner],['other@example.invalid',owner],[owner,''],[owner,'other@example.invalid'],['',''],['other@example.invalid','other@example.invalid']]){
+  [active,effective]=pair;
+  assert.throws(()=>ctx.doGet({parameter:{view:'apply'}}),/拒絕存取/);assert.equal(configs,0);assert.equal(served,0);
+  assert.equal((await ctx.study1E1SyntheticUat({operation:'read'})).ok,false);assert.equal(requests,0);
+ }
+ active=effective=owner;const page=ctx.doGet({parameter:{view:'apply'}});assert.equal(page.name,'Study1Visitor');assert.equal(page.mode,'GAS_UAT');assert.equal(configs,1);
  assert.equal((await ctx.study1E1SyntheticUat({operation:'read'})).value,'read');assert.equal(requests,1);
  assert.throws(()=>ctx.requestOtp(),/尚未開放/);assert.throws(()=>ctx.submitConsent(),/尚未開放/);assert.equal(ctx.getPublicConfig().open,false);
  for(const view of ['admin','team','preview','demo'])assert.throws(()=>ctx.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
 });
 test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutation and verifies complete same-case PDF',async()=>{
- const vm=require('node:vm'),{gasController}=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),calls=[],revoked=[];
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),{gasController}=adapter,nodes=new Map(),calls=[],revoked=[];
+ // Constrain the mock to the real assembled HTML rather than auto-creating arbitrary missing IDs.
+ const markup=adapter.originalVisitor().split('<script>')[0];
+ const ids=[...markup.matchAll(/<([a-z][a-z0-9]*)\b[^>]*\bid="([^"]+)"[^>]*>/gi)].map(m=>m[2]);
+ assert.equal(new Set(ids).size,ids.length,'candidate contains duplicate element IDs');
+ const actualIds=new Set(ids);
  const full=await PDFLib.PDFDocument.create();for(let i=0;i<5;i++)full.addPage();const original=Buffer.from(await full.save()),sourceSha=hash(original);
  full.getPage(4).drawText('TEST');const signed=Buffer.from(await full.save()),signedSha=hash(signed);
- const el=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false,hidden:false,disabled:false,textContent:'',children:[],classList:{toggle(){}},listeners:{},
+ const el=id=>{assert.ok(actualIds.has(id),'controller references absent candidate HTML ID: '+id);if(!nodes.has(id))nodes.set(id,{value:'',checked:false,hidden:false,disabled:false,textContent:'',children:[],classList:{toggle(){}},listeners:{},
   addEventListener(n,fn){this.listeners[n]=fn;},removeAttribute(n){delete this[n]},replaceChildren(){this.children=[];this.value='';},appendChild(n){this.children.push(n);if(!this.value)this.value=n.value;},
   getContext(){return {fillRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){}}},getBoundingClientRect(){return {left:0,top:0,width:700,height:160}},setPointerCapture(){},width:700,height:160,
   toDataURL(){return 'data:image/png;base64,'+syntheticInk().toString('base64');}});return nodes.get(id);};
