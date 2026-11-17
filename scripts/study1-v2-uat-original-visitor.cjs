@@ -49,12 +49,12 @@ function gasController(){
      if(!r||r.ok!==true||!Object.prototype.hasOwnProperty.call(r,'value')){
       reject(Error('測試操作未確認，請唯讀核對本案，勿重送'));return;
      }
-     // Only a positive server response clears the same mutation latch.
-     if(mutating.has(operation))unresolved.delete(k);
+     // Clear mutations only after the caller validates the value, not the envelope.
      resolve(r.value);
     }).study1E1SyntheticUat({operation,payload,gate,caseKey:k});
   });
  };
+ const settle=op=>{if(unresolved.get(caseKey)===op)unresolved.delete(caseKey);};
  const button=(id,fn)=>el(id).addEventListener('click',async()=>{
   if(busy)return;busy=true;
   try{await fn();}catch(e){say('測試未完成：'+e.message);}
@@ -66,9 +66,10 @@ function gasController(){
    c.stage===(c.bookingStatus==='CONFIRMED'?'DONE':c.bookingStatus),'測試案件或狀態不一致');
   current=c;txt('caseSummary',c.caseId+' · '+c.alias+' · '+c.bookingStatus);
  };
- const slots=list=>{
+ const slots=(list,operation)=>{
   need(Array.isArray(list)&&list.length<=4&&list.every(s=>s&&/^TEST_SLOT_[1-4]$/.test(s.slotId)&&s.remaining===1&&
    Number.isFinite(Date.parse(s.startAtUtc))&&Date.parse(s.endAtUtc)>Date.parse(s.startAtUtc)),'測試場次格式不一致');
+  if(operation==='verify')settle('verify');
   el('slot').replaceChildren();
   for(const s of list){const o=document.createElement('option');o.value=s.slotId;o.textContent=taipei(s.startAtUtc)+' · 剩餘 '+s.remaining;el('slot').appendChild(o);}
   el('hold').disabled=!list.length||unresolved.has(caseKey);
@@ -105,16 +106,16 @@ function gasController(){
   need(el('fictionalEligible').checked,'請確認只使用虛構身分');
   need(!caseKey,'已有本案，請使用唯讀核對，不另建案件');
   const k=random(32);el('caseKey').value=k;await bind(k);
-  const c=await call('start',{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');show('otp');say('請保存測試案件密鑰。模擬驗證碼為 12345678，不會寄信。');
+  const c=await call('start',{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');settle('start');show('otp');say('請保存測試案件密鑰。模擬驗證碼為 12345678，不會寄信。');
  });
- button('otpVerify',async()=>{need(el('otpInput').value==='12345678','測試驗證碼不符');slots(await call('verify',{code:el('otpInput').value}));});
+ button('otpVerify',async()=>{need(el('otpInput').value==='12345678','測試驗證碼不符');slots(await call('verify',{code:el('otpInput').value}),'verify');});
  button('formalSlotsRetry',async()=>slots(await call('slots')));
- button('hold',async()=>{el('hold').disabled=true;held(await call('hold',{slotId:el('slot').value,requestId:random(16)}));});
+ button('hold',async()=>{el('hold').disabled=true;held(await call('hold',{slotId:el('slot').value,requestId:random(16)}));settle('hold');});
  button('confirm',async()=>{
   need(current&&current.bookingStatus==='HELD','請先核對暫留');
   clearUrls();clearInk();const d=await call('document');
   need(d&&d.caseId===expected&&d.sha===current.sourceSha&&d.pageCount===5,'完整測試原文不一致');
-  originalUrl=await pdf(d.bytes,d.sha);source=d.sha;
+  originalUrl=await pdf(d.bytes,d.sha);source=d.sha;display(current);
   el('officialPdfDownload').href=originalUrl;el('officialPdfDownload').hidden=false;
   el('officialPdfViewer').data=originalUrl;el('officialPdfViewer').hidden=false;
   txt('officialPdfSha',source);el('finish').disabled=unresolved.has(caseKey);show('consent');say('完整閱讀五頁合成文件，只畫虛構筆跡。');
@@ -122,7 +123,7 @@ function gasController(){
  button('finish',async()=>{
   need(current&&source&&ink&&el('readPdf').checked&&el('agree').checked,'請閱讀完整測試 PDF 並畫虛構筆跡');
   el('finish').disabled=true;
-  await receipt(await call('sign',{requestId:random(16),sourceSha:source,ink:canvas.toDataURL('image/png').split(',')[1],read:true,agree:true}));
+  await receipt(await call('sign',{requestId:random(16),sourceSha:source,ink:canvas.toDataURL('image/png').split(',')[1],read:true,agree:true}));settle('sign');
  });
  const recover=async()=>{
   clearUrls();hideSteps();clearInk();current=null;
@@ -139,7 +140,7 @@ function gasController(){
   if(unresolved.has(caseKey))say('原操作未能確認；保留唯讀核對，不重送。');
  };
  button('readCase',recover);button('formalDoneRefresh',recover);
- button('cancelTest',async()=>{display(await call('cancel'));clearUrls();hideSteps();say('測試案件已結束，請唯讀核對原狀態。');});
+ button('cancelTest',async()=>{display(await call('cancel'));need(['CANCELLED','EXPIRED'].includes(current.stage),'取消結果未核實');settle('cancel');clearUrls();hideSteps();say('測試案件已結束，請唯讀核對原狀態。');});
  window.addEventListener('pagehide',()=>{clearUrls();gate='';caseKey='';expected='';el('uatGate').value='';});
  clearInk();show('choose');el('step-choose').hidden=false;el('uatOriginalMain').hidden=false;say('私人線上驗收：只使用虛構身分、合成時間與測試筆跡。');
 }
@@ -218,7 +219,8 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
 // existing public release/HEAD-only guards or called by a deploy workflow.
 function onlineCandidate(base){
  const core=require('./study1-v2-gas-head-only.cjs');
- core.canonical?core.canonical(base):core.digest(base);
+ core.digest(base);
+ if(core.closedManifest(base).webapp.access!=='ANYONE'||JSON.stringify(base.map(f=>f.name).sort())!==JSON.stringify(core.APPROVED))throw Error('UAT_BASE_INVENTORY');
  core.closedWebsite(base);core.publicRpcSurface(base);
  const files=base.map(f=>{
   if(f.name==='appsscript'){const m=JSON.parse(f.source);m.webapp.access='MYSELF';return {...f,source:JSON.stringify(m,null,2)+'\n'};}
@@ -236,6 +238,7 @@ function onlineCandidate(base){
   files.push({name,type:'SERVER_JS',source:read(p)});
  }
  core.digest(files);core.closedWebsite(files);
+ if(core.closedManifest(files).webapp.access!=='MYSELF')throw Error('UAT_PRIVATE_ACL_REQUIRED');
  let rejected=false;try{core.publicRpcSurface(files);}catch(_){rejected=true;}
  if(!rejected)throw Error('UAT_MUST_NOT_PASS_PUBLIC_RELEASE_GUARD');
  return files;
