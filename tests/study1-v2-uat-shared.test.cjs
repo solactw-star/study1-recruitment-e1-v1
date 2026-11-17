@@ -378,3 +378,31 @@ test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutat
  const formal=vm.createContext({document:{body:{dataset:{siteMode:'FORMAL'}},getElementById(){throw Error('must not touch formal DOM');}}});
  vm.runInContext('('+gasController.toString()+')();',formal);
 });
+
+test('release preflight identifies exact deterministic private candidate and synthetic source, without credentials or remote mutation',async()=>{
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,n)=>a.find(f=>f.name===n).source;
+ const candidateSha=core.digest(candidate),baselineSha=core.digest(base);
+ assert.equal(candidateSha,core.digest(adapter.onlineCandidate(base)));
+ assert.notEqual(candidateSha,baselineSha);
+ assert.equal(candidate.length,30);
+ assert.deepEqual(base.filter(f=>get(candidate,f.name)!==f.source).map(f=>f.name).sort(),['Study1Visitor','Website','appsscript']);
+ assert.deepEqual(candidate.filter(f=>!base.some(x=>x.name===f.name)).map(f=>f.name).sort(),['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction']);
+ assert.ok(base.every(f=>!f.source.includes('STUDY1_E1_SYNTHETIC_UAT_V1')));
+ const manifest=core.closedManifest(candidate);
+ assert.equal(manifest.webapp.access,'MYSELF');assert.equal(manifest.webapp.executeAs,'USER_DEPLOYING');assert.equal(manifest.timeZone,'Asia/Taipei');assert.equal(manifest.runtimeVersion,'V8');
+ for(const file of candidate.filter(f=>f.type==='SERVER_JS'))new vm.Script(file.source,{filename:file.name+'.gs'});
+ assert.throws(()=>core.publicRpcSurface(candidate),/formal visitor is not isolated|unguarded public RPC/);
+ const realm=vm.createContext({Date,Uint8Array,Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
+ for(const name of ['BookingCore','Study1PdfLib','Study1PdfStampCore','Study1UatSession','Study1UatStoreTransaction','Study1UatGasServices'])vm.runInContext(get(candidate,name),realm);
+ const doc=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm),second=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm);
+ assert.equal(doc.hash,second.hash);assert.equal(doc.hash,hash(Buffer.from(doc.bytes)));assert.deepEqual(doc.bytes,second.bytes);
+ assert.equal((await PDFLib.PDFDocument.load(Buffer.from(doc.bytes))).getPageCount(),5);
+ const at=Date.parse('2026-11-17T02:00:00.000Z'),iso=t=>new Date(t).toISOString(),fakeStore='TEST_ONLY_PREFLIGHT_BOOK_1234567890';
+ const config={profile:'E1_SYNTHETIC_UAT_V1',storeId:fakeStore,gateSha:hash('a'.repeat(64)),sourceSha:doc.hash,expiresAt:iso(at+86400000),slots:[1,2,3,4].map((n,i)=>['TEST_SLOT_'+n,iso(at+3600000*(2+i*2)),iso(at+3600000*(3+i*2)),1,'TEST_ONLY','OPEN','TEST',iso(at)])};
+ const raw=JSON.stringify(config);assert.ok(Buffer.byteLength(raw,'utf8')<=6000);
+ const approved=realm.study1UatConfigValidate_(raw,at,hash(fakeStore));
+ assert.equal(approved.sourceSha,doc.hash);assert.equal(approved.slots.length,4);
+ // Print only reproducible non-secret evidence; no real config, keys, IDs, or PDF bytes.
+ console.log('UAT_RELEASE_PREFLIGHT '+JSON.stringify({baselineSha,candidateSha,sourceSha:doc.hash,sourceBytes:doc.bytes.length,pages:5,files:candidate.length,access:manifest.webapp.access,executeAs:manifest.webapp.executeAs,configExampleBytes:Buffer.byteLength(raw,'utf8'),remoteMutations:false}));
+});
