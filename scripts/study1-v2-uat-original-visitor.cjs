@@ -235,7 +235,16 @@ function onlineCandidate(base){
  });
  for(const [name,p] of [['Study1UatSession','scripts/study1-v2-uat-session.js'],['Study1UatStoreTransaction','scripts/study1-v2-uat-store-transaction.js'],['Study1UatGasServices','scripts/study1-v2-uat-gas-services.js']]){
   if(files.some(f=>f.name===name))throw Error('UAT_SOURCE_COLLISION');
-  files.push({name,type:'SERVER_JS',source:read(p)});
+  let source=read(p);
+  if(name==='Study1UatSession'){
+   const split=source.indexOf('/* Isolated E1 usability session, no real identity, persistence, or network.');
+   if(split<=0||source.indexOf('function study1UatSession(',split)<0)throw Error('UAT_DOCUMENT_SOURCE_ANCHOR');
+   source=source.slice(0,split);
+  }
+  // None of the added server kernels may export a callable global RPC.
+  const globals=[...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]);
+  if(!globals.length||globals.some(n=>!n.endsWith('_')))throw Error('UAT_PRIVATE_KERNEL_SURFACE');
+  files.push({name,type:'SERVER_JS',source});
  }
  core.digest(files);core.closedWebsite(files);
  if(core.closedManifest(files).webapp.access!=='MYSELF')throw Error('UAT_PRIVATE_ACL_REQUIRED');
