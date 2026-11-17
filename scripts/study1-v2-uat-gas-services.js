@@ -16,20 +16,9 @@ function study1UatGasCaseTransaction_(approved,access,decide){
  const tokenHash=hashToken(access.caseKey);
  // Only this exact server-selected private test document can be opened.
  // The transaction core checks the marker and the ID again while locked.
- const config={storeId:approved.storeId,sourceSha:approved.sourceSha,slots:approved.slots};
- const services={
-  getLock:()=>LockService.getScriptLock(),
-  getSheet:()=>{
-   const book=SpreadsheetApp.openById(config.storeId);
-   need(book&&book.getId()===config.storeId&&book.getName()==='Study1 E1 SYNTHETIC UAT ONLY','UAT_STORE_IDENTITY');
-   const sheets=book.getSheets();
-   need(sheets.length===1&&sheets[0].getName()==='SYNTHETIC_CASES','UAT_STORE_IDENTITY');
-   return sheets[0];
-  },
-  flush:()=>SpreadsheetApp.flush(),now:()=>Date.now(),
-  decode:s=>Utilities.base64Decode(s).map(x=>x&255),
-  digest:b=>study1PdfDigest_(b)
- };
+ const config={storeId:approved.storeId,sourceSha:approved.sourceSha,slots:approved.slots,gateSha:approved.gateSha};
+ const services=study1UatStoreServices_(config.storeId);
+
  let value=null;
  study1UatStoreTransaction_(services,config,(rows,available,at)=>{
   const index=rows.findIndex(c=>c&&equalHash(c.tokenHash,tokenHash));
@@ -49,6 +38,33 @@ function study1UatGasCaseTransaction_(approved,access,decide){
  });
  // Only the trusted caller's projected result, after successful readback.
  return value;
+}
+
+/* Shared service adapter: only the server-selected synthetic spreadsheet. */
+function study1UatStoreServices_(storeId){
+ return {
+  getLock:()=>LockService.getScriptLock(),
+  getSheet:()=>{
+   const book=SpreadsheetApp.openById(storeId);
+   if(!book||book.getId()!==storeId||book.getName()!=='Study1 E1 SYNTHETIC UAT ONLY')throw Error('UAT_STORE_IDENTITY');
+   const sheets=book.getSheets();
+   if(sheets.length!==1||sheets[0].getName()!=='SYNTHETIC_CASES')throw Error('UAT_STORE_IDENTITY');
+   return sheets[0];
+  },
+  flush:()=>SpreadsheetApp.flush(),now:()=>Date.now(),
+  decode:s=>Utilities.base64Decode(s).map(x=>x&255),
+  digest:b=>study1PdfDigest_(b)
+ };
+}
+/* Internal OWNER-only maintenance. The next gate fingerprint must be chosen
+ * by a trusted server caller; never accept it from an untrusted browser.
+ * There is deliberately no public RPC or property mutation here. A separate
+ * authorized configuration activation is required after successful reset.
+ */
+function study1UatCleanup_(maintenance){
+ study1AdminOwnerRequired_();
+ const approved=study1UatTrustedConfig_();
+ return study1UatStoreTransaction_(study1UatStoreServices_(approved.storeId),approved,null,maintenance);
 }
 
 /* Allowlisted view of a case already read and validated by the private transaction.

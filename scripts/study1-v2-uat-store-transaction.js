@@ -5,7 +5,7 @@
  * A single range write stores the booking and its complete signed file together.
  * LockService coordinates participating script writers, not external/manual editors.
  */
-function study1UatStoreTransaction_(services,config,choose){
+function study1UatStoreTransaction_(services,config,choose,maintenance){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
@@ -13,10 +13,32 @@ function study1UatStoreTransaction_(services,config,choose){
  const keys=['alias','caseId','tokenHash','state','slotId','holdUntil','holdKey','sourceSha','signedSha','signKey','inkSha','signedAt','date','pdf'];
  const marker=['STUDY1_E1_SYNTHETIC_CASES_V1',config.storeId,...Array(7).fill('')];
  const slots=config.slots;
+ const resetting=maintenance!==undefined;
  need(typeof config.storeId==='string'&&config.storeId.length>0&&hex(config.sourceSha,64)&&
   Array.isArray(slots)&&slots.length>0&&slots.length<=4&&slots.every(s=>Array.isArray(s)&&s.length===8&&/^TEST_SLOT_[1-4]$/.test(s[0])&&s[3]===1&&s[4]==='TEST_ONLY'),'UAT_STORE_CONFIG');
- need(typeof choose==='function'&&typeof services.getLock==='function'&&typeof services.getSheet==='function'&&typeof services.flush==='function'&&typeof services.now==='function'&&typeof services.decode==='function'&&typeof services.digest==='function','UAT_STORE_INTERFACE');
+ need((resetting?choose===null:typeof choose==='function')&&typeof services.getLock==='function'&&typeof services.getSheet==='function'&&typeof services.flush==='function'&&typeof services.now==='function'&&typeof services.decode==='function'&&typeof services.digest==='function','UAT_STORE_INTERFACE');
  const iso=s=>typeof s==='string'&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s;
+ // Reset is a distinct internal maintenance operation, not a normal case transition.
+ // A rotated gate fingerprint in the header fences all pre-reset transactions,
+ // including asynchronous PDF composition that reacquires this same lock.
+ const currentMarker=row=>{
+  if(equal(row,marker))return true;
+  if(!Array.isArray(row)||row.length!==width||!hex(config.gateSha,64)||
+     row[0]!==marker[0]||row[1]!==marker[1]||row[2]!=='gate:'+config.gateSha||
+     typeof row[3]!=='string'||!row[3].startsWith('reset:')||!iso(row[3].slice(6))||row[8]!=='')return false;
+  const n=(prefix,value)=>typeof value==='string'&&new RegExp('^'+prefix+':(?:[0-9]|1[0-2])$').test(value)?Number(value.slice(prefix.length+1)):-1;
+  const cases=n('cases',row[4]),holds=n('holds',row[5]),confirmed=n('confirmed',row[6]),pdf=n('pdf',row[7]);
+  return cases>=0&&holds>=0&&confirmed>=0&&pdf===confirmed&&holds+confirmed<=cases;
+ };
+ if(resetting){
+  need(hex(config.gateSha,64)&&maintenance&&typeof maintenance==='object'&&!Array.isArray(maintenance),
+   'UAT_CLEANUP_REQUEST');
+  const k=Object.keys(maintenance).sort().join(',');
+  need((maintenance.mode==='preview'&&k==='mode')||
+   (maintenance.mode==='clear'&&k==='expectedSha,mode,nextGateSha'&&hex(maintenance.expectedSha,64)&&
+    hex(maintenance.nextGateSha,64)&&maintenance.nextGateSha!==config.gateSha&&maintenance.nextGateSha!==config.sourceSha),
+   'UAT_CLEANUP_REQUEST');
+ }
  const validate=(c,i)=>{
   need(c&&typeof c==='object'&&!Array.isArray(c)&&equal(Object.keys(c).sort(),keys.slice().sort()),'UAT_CASE_SCHEMA');
   need(c.alias==='TEST_'+String(i+1).padStart(2,'0')&&/^UAT_[a-f0-9]{24}$/.test(c.caseId)&&hex(c.tokenHash,64)&&
@@ -62,7 +84,7 @@ function study1UatStoreTransaction_(services,config,choose){
   const snapshot=()=>{
    owned();
    const raw=range.getValues(),formulas=range.getFormulas();
-   need(Array.isArray(raw)&&raw.length===count+1&&equal(raw[0],marker)&&Array.isArray(formulas)&&formulas.length===count+1&&formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_STORE_MARKER_OR_FORMULA');
+   need(Array.isArray(raw)&&raw.length===count+1&&currentMarker(raw[0])&&Array.isArray(formulas)&&formulas.length===count+1&&formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_STORE_MARKER_OR_FORMULA');
    const records=raw.slice(1).map(decode),live=records.filter(Boolean);
    need(new Set(live.map(c=>c.caseId)).size===live.length&&new Set(live.map(c=>c.tokenHash)).size===live.length,'UAT_DUPLICATE_CASE');
    owned();return {raw,records};
@@ -77,6 +99,33 @@ function study1UatStoreTransaction_(services,config,choose){
    return bookingComputeAvailability_(slots,rows,atIso);
   };
   const available=availability(initial.records);
+  if(resetting){
+   const live=initial.records.filter(Boolean),counts={
+    cases:live.length,holds:live.filter(c=>c.state==='HELD'&&Date.parse(c.holdUntil)>at).length,
+    confirmed:live.filter(c=>c.state==='CONFIRMED').length,pdfs:live.filter(c=>c.pdf!=='').length};
+   const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,initial.raw]),c=>c.charCodeAt(0)));
+   need(hex(snapshotSha,64),'UAT_CLEANUP_DIGEST');
+   if(maintenance.mode==='preview')return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY'};
+   need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
+   need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+   owned();
+   const next=[marker[0],marker[1],'gate:'+maintenance.nextGateSha,'reset:'+new Date(at).toISOString(),
+    'cases:'+counts.cases,'holds:'+counts.holds,'confirmed:'+counts.confirmed,'pdf:'+counts.pdfs,''];
+   const expected=[next,...Array.from({length:count},()=>Array(width).fill(''))];
+   // One bounded range replaces the validated test rows and rotates the gate.
+   // No formal data or settings; no whole-book or whole-sheet clear.
+   try{
+    range.setValues(expected);
+    services.flush();owned();
+    const raw=range.getValues(),formulas=range.getFormulas();
+    need(equal(raw,expected)&&Array.isArray(formulas)&&formulas.length===count+1&&
+     formulas.every(r=>Array.isArray(r)&&r.length===width&&r.every(x=>x==='')),'UAT_CLEANUP_READBACK');
+    owned();
+   }catch(_){throw Error('UAT_CLEANUP_UNKNOWN_READBACK');}
+   return {formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,at:new Date(at).toISOString(),
+    remainingCases:0,remainingPdfCopies:0,gateRotationRequired:true,
+    availability:availability(Array(count).fill(null))};
+  }
   const change=choose(JSON.parse(JSON.stringify(initial.records)),available,at);
   if(change===null)return initial.records;
   need(change&&Object.keys(change).sort().join(',')==='index,record'&&Number.isInteger(change.index)&&change.index>=0&&change.index<count,'UAT_CHANGE_SCHEMA');

@@ -115,7 +115,7 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  let held=false,deny=false,lose=false,badParent=false,hasFormula=false,failFlush=false,partial=false,writes=0,opens=0,clock=t;
  const sheet={getName:()=> 'SYNTHETIC_CASES',getParent:()=>({getId:()=>badParent?'WRONG':storeId}),getLastRow:()=>13,getLastColumn:()=>9,
   getRange:(r,c,n,m)=>({getValues:()=>matrix.slice(r-1,r-1+n).map(x=>x.slice(c-1,c-1+m)),getFormulas:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>hasFormula&&i===1&&j===1?'=1':'')),
-   setValues:v=>{assert.equal(held,true);writes++;matrix[r-1]=v[0].slice();if(partial)matrix[r-1][1]='';}})};
+   setValues:v=>{assert.equal(held,true);writes++;v.forEach((row,i)=>{matrix[r-1+i]=row.slice();});if(partial)matrix[r-1][1]='';}})};
  const svc={getLock:()=>({tryLock:()=>{if(deny||held)return false;held=true;return true;},hasLock:()=>held&&!lose,releaseLock:()=>{held=false;}}),getSheet:()=>{assert.equal(held,true);opens++;return sheet;},flush:()=>{if(failFlush)throw Error('unknown');},now:()=>clock,decode:s=>Array.from(Buffer.from(s,'base64')),digest:b=>hash(Buffer.from(b))};
  const tx=choose=>realm.study1UatStoreTransaction_(svc,config,choose);
  const record=i=>({alias:'TEST_0'+(i+1),caseId:'UAT_'+String(i+1).repeat(24),tokenHash:String(i+1).repeat(64),state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''});
@@ -147,8 +147,37 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  change(2,nextHold);change(2,{state:'CANCELLED'});
  tx((rows,avail)=>{assert.equal(avail.some(x=>x.slotId==='TEST_SLOT_2'),true);assert.equal(avail.some(x=>x.slotId==='TEST_SLOT_1'),false);return null;});
  // A partially changed persisted PDF is never acknowledged or used for capacity.
+ const originalChunk=matrix[1][1];
  matrix[1][1]='pdf:AAAA';assert.throws(()=>tx(()=>null),/UAT_PDF_INTEGRITY/);
- assert.equal(held,false);
+ const oldGate='a'.repeat(64),newGate='b'.repeat(64),newerGate='c'.repeat(64),approved={...config,gateSha:oldGate};
+ const maintain=m=>realm.study1UatStoreTransaction_(svc,approved,null,m);
+ assert.throws(()=>maintain({mode:'preview'}),/UAT_PDF_INTEGRITY/);
+ matrix[1][1]=originalChunk;
+ const fixed=JSON.stringify(matrix),beforeReset=writes;
+ const p=maintain({mode:'preview'});
+ assert.equal(p.counts.cases,3);assert.equal(p.counts.confirmed,1);assert.equal(p.counts.pdfs,1);
+ assert.equal(writes,beforeReset);assert.equal(JSON.stringify(matrix),fixed);
+ assert.throws(()=>maintain({mode:'clear',expectedSha:'0'.repeat(64),nextGateSha:newGate}),/STALE_PREVIEW/);
+ assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:oldGate}),/CLEANUP_REQUEST/);
+ assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:newGate,storeId:'OTHER'}),/CLEANUP_REQUEST/);
+ hasFormula=true;assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:newGate}),/MARKER_OR_FORMULA/);hasFormula=false;
+ matrix[4][0]='FORMAL_OR_UNKNOWN';assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:newGate}),/CASE_SCHEMA/);matrix[4][0]='';
+ tx(()=>({index:3,record:record(3)}));
+ assert.throws(()=>maintain({mode:'clear',expectedSha:p.snapshotSha,nextGateSha:newGate}),/STALE_PREVIEW/);
+ const current=maintain({mode:'preview'});const beforeClear=writes;
+ const cleared=maintain({mode:'clear',expectedSha:current.snapshotSha,nextGateSha:newGate});
+ assert.equal(writes,beforeClear+1);assert.equal(cleared.cleared.cases,4);assert.equal(cleared.remainingCases,0);
+ assert.equal(cleared.remainingPdfCopies,0);assert.equal(cleared.gateRotationRequired,true);
+ assert.equal(cleared.availability.length,2);assert.ok(matrix.slice(1).every(r=>r.every(x=>x==='')));
+ assert.equal(matrix[0][0],'STUDY1_E1_SYNTHETIC_CASES_V1');assert.equal(matrix[0][1],storeId);assert.equal(matrix[0][2],'gate:'+newGate);
+ assert.throws(()=>maintain({mode:'preview'}),/MARKER_OR_FORMULA/);
+ assert.throws(()=>tx(()=>({index:0,record:record(0)})),/MARKER_OR_FORMULA/);
+ const fresh={...approved,gateSha:newGate},runNew=(fn,m)=>realm.study1UatStoreTransaction_(svc,fresh,fn,m);
+ runNew(()=>({index:0,record:record(0)}));const freshPreview=runNew(null,{mode:'preview'});
+ failFlush=true;assert.throws(()=>runNew(null,{mode:'clear',expectedSha:freshPreview.snapshotSha,nextGateSha:newerGate}),/UAT_CLEANUP_UNKNOWN_READBACK/);failFlush=false;
+ assert.throws(()=>runNew(null,{mode:'preview'}),/MARKER_OR_FORMULA/);
+ const audit=realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},null,{mode:'preview'});
+ assert.equal(audit.counts.cases,0);assert.equal(held,false);
 });
 
 test('internal GAS service binding authorizes only own case with explicit gate, real service method contract and no full snapshot return',()=>{
@@ -181,6 +210,9 @@ test('internal GAS service binding authorizes only own case with explicit gate, 
  assert.throws(()=>tx(keyA,()=>({record:b,value:null})),/UAT_CASE_BINDING/);
  assert.equal(writes,2);assert.equal(flushes,2);assert.equal(locked,false);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));assert.ok(!JSON.stringify(matrix).includes(keyB));
+ const beforeOwner=opens;realm.study1AdminOwnerRequired_=()=>{throw Error('OWNER_DENIED');};
+ realm.study1UatTrustedConfig_=()=>{throw Error('must not read config before owner');};
+ assert.throws(()=>realm.study1UatCleanup_({mode:'preview'}),/OWNER_DENIED/);assert.equal(opens,beforeOwner);
 });
 
 test('GAS authorized case projection excludes stored credentials and only returns a verified complete PDF copy',async()=>{
