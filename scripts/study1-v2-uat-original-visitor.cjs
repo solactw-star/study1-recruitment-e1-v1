@@ -289,8 +289,8 @@ function sameSiteCleanupController(){
  if(!preview||!clear||!summary||!gateOut)return;
  gateOut.value='';gateOut.hidden=true;
  window.addEventListener('pagehide',()=>{gateOut.value='';gateOut.hidden=true;});
- const casesOut=el('siteTestCases'),slotsOut=el('siteTestSlots');
- if(!casesOut||!slotsOut)return;
+ const casesOut=el('siteTestCases'),slotsOut=el('siteTestSlots'),recover=el('siteTestRecoverGate');
+ if(!casesOut||!slotsOut||!recover)return;
  let current=null,busy=false,unknown=false,cleared=false;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
@@ -321,7 +321,8 @@ function sameSiteCleanupController(){
  };
  const emptyLists=()=>{casesOut.textContent='尚未核實測試案件';slotsOut.textContent='尚未核實測試場次';};
  const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。此流程不寄信、不寫正式研究資料。';
- const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;};
+ const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;
+  recover.disabled=busy||unknown||cleared||!current||current.counts.cases!==0;};
  const call=request=>new Promise((resolve,reject)=>{
   if(!window.google||!google.script||!google.script.run){reject(Error('GAS_UNAVAILABLE'));return;}
   google.script.run.withFailureHandler(()=>reject(Error('GAS_UNKNOWN')))
@@ -344,7 +345,7 @@ function sameSiteCleanupController(){
    if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||!hex(p.snapshotSha)||!valid(p.counts)||!validLists(p))throw Error('BAD_PREVIEW');
    showLists(p);
    if(!unknown&&!cleared)current=p;
-   say(describe(p.counts)+(unknown?' 前次清除結果仍待管理者核對；本頁不會重送。':' 請確認後清空。'));
+   say(describe(p.counts)+(p.counts.cases===0?' 若遺失測試通行碼，可確認後重新產生，不清除資料。':' 請確認後清空。'));
   }catch(_){say('無法取得可信預覽：測試設定、管理權限或前次清除狀態尚待核對。未送出刪除。');}
   finally{busy=false;buttons();}
  });
@@ -370,6 +371,23 @@ function sameSiteCleanupController(){
    unknown=true;say('清除未獲完整確認；請先唯讀查核，不重送清除。');
   }finally{busy=false;buttons();}
  });
+ recover.addEventListener('click',async()=>{
+  if(busy||unknown||cleared||!current||current.counts.cases!==0)return;
+  if(!window.confirm('確認目前沒有測試案件，重新產生測試通行碼？只更新測試設定及資料表標記，不刪除案件。'))return;
+  let entropy;
+  try{entropy=Array.from(window.crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');}
+  catch(_){say('瀏覽器安全亂數不可用，未送出更新。');return;}
+  const p=current;current=null;busy=true;buttons();
+  try{
+   const result=await call({mode:'recover_gate',expectedSha:p.snapshotSha,confirmation:'RECOVER_EMPTY_TEST_GATE',entropy});
+   if(!exact(result,['formal','scope','gateRecovered','remainingCases','gateRotationRequired','replacementGate'])||
+    result.formal!==false||result.scope!=='SYNTHETIC_CASES_ONLY'||result.gateRecovered!==true||
+    result.remainingCases!==0||result.gateRotationRequired!==false||!hex(result.replacementGate))throw Error('BAD_GATE_RECEIPT');
+   cleared=true;gateOut.value=result.replacementGate;gateOut.hidden=false;
+   say('已核實更新測試通行碼；沒有刪除案件。請安全複製新碼。');
+  }catch(_){unknown=true;emptyLists();say('通行碼更新結果未確認；請先唯讀查核，不重送。');}
+  finally{busy=false;buttons();}
+ });
  buttons();
 }
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
@@ -377,7 +395,7 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // The same-site test management view does not initialize formal/sandbox RPCs.
  const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
  if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
- const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
+ const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><button id="siteTestRecoverGate" type="button" disabled>遺失通行碼：重新產生（僅空表）</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
  return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
 }
 function sameSiteCandidate(){

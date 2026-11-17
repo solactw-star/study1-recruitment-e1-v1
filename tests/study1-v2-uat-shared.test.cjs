@@ -200,6 +200,26 @@ test('GAS range transaction keeps shared capacity and full signed PDF together; 
  assert.equal(writes,auditBefore);assert.equal(held,false);
  realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},()=>({index:0,record:record(0)}));
  assert.equal(reconcile(newerGate).state,'MATCHED_NONEMPTY');
+ const nonempty=realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},null,{mode:'preview'});
+ const recoverySvc={...svc,beforeCleanup:()=>assert.equal(held,true),afterCleanup:()=>true};
+ const recovery={mode:'recover_gate',expectedSha:nonempty.snapshotSha,nextGateSha:'f'.repeat(64)};
+ const before=writes;
+ assert.throws(()=>realm.study1UatStoreTransaction_(recoverySvc,{...approved,gateSha:newerGate},null,recovery),/REQUIRES_EMPTY/);
+ assert.equal(writes,before);
+ // Independent empty-store fixture, preserving header and all case cells.
+ matrix[1]=Array(9).fill('');
+ const empty=realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},null,{mode:'preview'});
+ const req={...recovery,expectedSha:empty.snapshotSha};
+ assert.throws(()=>realm.study1UatStoreTransaction_(svc,{...approved,gateSha:newerGate},null,req),/LIFECYCLE/);
+ assert.throws(()=>realm.study1UatStoreTransaction_(recoverySvc,{...approved,gateSha:newGate},null,req),/MARKER_OR_FORMULA/);
+ assert.equal(writes,before);
+ const headerSvc={...recoverySvc,getSheet:()=>({...sheet,getRange:(r,c,n,m)=>{
+  const rr=sheet.getRange(r,c,n,m);return {...rr,setValues:v=>{assert.deepEqual([r,c,n,m],[1,1,1,9]);rr.setValues(v);}};
+ }})};
+ const restored=realm.study1UatStoreTransaction_(headerSvc,{...approved,gateSha:newerGate},null,req);
+ assert.equal(restored.gateRecovered,true);assert.equal(restored.remainingCases,0);
+ assert.equal(matrix[0][2],'gate:'+req.nextGateSha);assert.ok(matrix.slice(1).every(r=>r.every(x=>x==='')));
+ assert.equal(writes,before+1);assert.equal(held,false);
 });
 
 test('internal GAS service binding authorizes only own case with explicit gate, real service method contract and no full snapshot return',()=>{
@@ -558,6 +578,7 @@ test('same official site source routes preserve formal closure and require real 
   assert.equal((await c.study1E1SyntheticUat({operation:'start'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
+  assert.equal(c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:'a'.repeat(64),confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'b'.repeat(64)}).ok,false);
  }
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
  active=owner;effective=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
@@ -575,21 +596,24 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(cleared.ok,true);assert.match(cleared.value.replacementGate,/^[a-f0-9]{64}$/);
  assert.equal(maintenance.length,2);assert.equal(maintenance[1].expectedSha,sha);assert.match(maintenance[1].nextGateSha,/^[a-f0-9]{64}$/);
  assert.equal(propWrites,1);assert.equal(JSON.parse(raw).gateSha,hash(cleared.value.replacementGate));assert.equal(JSON.parse(raw).otherTestSetting,'preserve');
+ assert.equal(c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'b'.repeat(64)}).ok,false);
+ const restored=c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:sha,confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'b'.repeat(64)});
+ assert.equal(restored.ok,true);assert.equal(maintenance.at(-1).mode,'recover_gate');assert.equal(propWrites,2);assert.equal(JSON.parse(raw).gateSha,hash(restored.value.replacementGate));
  assert.throws(()=>c.requestOtp(),/尚未開放/);assert.throws(()=>c.submitConsent(),/尚未開放/);assert.equal(c.getPublicConfig().open,false);
  for(const view of ['team','preview','demo'])assert.throws(()=>c.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
 });
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
  let confirmed=false,fail=false;
- for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary','siteTestNewGate','siteTestCases','siteTestSlots'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
+ for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary','siteTestNewGate','siteTestCases','siteTestSlots','siteTestRecoverGate'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
  const counts={cases:2,holds:1,confirmed:1,pdfs:1},sha='b'.repeat(64);
  const cases=[{alias:'TEST_01',state:'HELD',slotId:'TEST_SLOT_1',pdfSaved:false},{alias:'TEST_02',state:'CONFIRMED',slotId:'TEST_SLOT_2',pdfSaved:true}];
  const slots=[1,2].map(n=>({slotId:'TEST_SLOT_'+n,startAtUtc:'2099-01-01T02:00:00.000Z',endAtUtc:'2099-01-01T03:00:00.000Z',capacity:1,occupied:1,remaining:0,bookable:false}));
- let badPreview=false;
+ let badPreview=false,emptyPreview=false;
  const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(r){
-  requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts,cases:badPreview?[{...cases[0],tokenHash:'secret'},cases[1]]:cases,slots}});
+  requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts:emptyPreview?{cases:0,holds:0,confirmed:0,pdfs:0}:counts,cases:emptyPreview?[]:badPreview?[{...cases[0],tokenHash:'secret'},cases[1]]:cases,slots:emptyPreview?slots.map(x=>({...x,occupied:0,remaining:1,bookable:true})):slots}});
   else if(r.mode==='reconcile')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',state:'CONFIG_MISMATCH_EMPTY',readOnly:true}});
-  else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:false,replacementGate:'c'.repeat(64)}});
+  else if(fail)f(Error('UNKNOWN'));else if(r.mode==='recover_gate')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',gateRecovered:true,remainingCases:0,gateRotationRequired:false,replacementGate:'d'.repeat(64)}});else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:false,replacementGate:'c'.repeat(64)}});
  }};}};}}}};
  const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed,crypto:{getRandomValues:a=>a.fill(1)},addEventListener(){}},google});
  run();const p=nodes.get('siteTestPreview'),c=nodes.get('siteTestClear'),s=nodes.get('siteTestCleanupSummary');
@@ -601,6 +625,9 @@ test('same-site admin preview and confirm button block unknown destructive retri
  assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',entropy:'01'.repeat(32)});
  assert.equal(nodes.get('siteTestNewGate').value,'c'.repeat(64));assert.match(nodes.get('siteTestCases').textContent,/無測試案件/);
  badPreview=true;run();await p.click();assert.equal(c.disabled,true);assert.match(nodes.get('siteTestCases').textContent,/尚未核實/);assert.doesNotMatch(nodes.get('siteTestCases').textContent,/secret/);
+ badPreview=false;emptyPreview=true;run();await p.click();const recover=nodes.get('siteTestRecoverGate');assert.equal(c.disabled,true);assert.equal(recover.disabled,false);
+ await recover.click();assert.equal(recover.disabled,true);assert.match(s.textContent,/沒有刪除案件/);assert.equal(nodes.get('siteTestNewGate').value,'d'.repeat(64));
+ assert.deepEqual(requests.at(-1),{mode:'recover_gate',expectedSha:sha,confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'01'.repeat(32)});
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{

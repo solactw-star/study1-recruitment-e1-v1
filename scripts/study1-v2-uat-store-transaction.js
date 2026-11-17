@@ -36,7 +36,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
   const k=Object.keys(maintenance).sort().join(',');
   need((maintenance.mode==='preview'&&k==='mode')||
    (maintenance.mode==='reconcile'&&k==='mode'&&typeof services.checkReconcileConfig==='function')||
-   (maintenance.mode==='clear'&&k==='expectedSha,mode,nextGateSha'&&hex(maintenance.expectedSha,64)&&
+   (['clear','recover_gate'].includes(maintenance.mode)&&k==='expectedSha,mode,nextGateSha'&&hex(maintenance.expectedSha,64)&&
     hex(maintenance.nextGateSha,64)&&maintenance.nextGateSha!==config.gateSha&&maintenance.nextGateSha!==config.sourceSha),
    'UAT_CLEANUP_REQUEST');
  }
@@ -144,12 +144,16 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY',cases,slots:slotSummary};
    }
    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
+   const recovering=maintenance.mode==='recover_gate';
+   // Lost gate recovery is not another cleanup. It is allowed only when
+   // the current configuration and header already match and every case is empty.
+   if(recovering)need(counts.cases===0,'UAT_GATE_RECOVERY_REQUIRES_EMPTY');
    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
    // Optional paired callbacks are trusted server services, never browser input.
    // Compare the exact test configuration before clearing, and rotate only
    // after the bounded sheet write is directly verified under this same lock.
    const activate=typeof services.afterCleanup==='function';
-   need(activate===(typeof services.beforeCleanup==='function'),'UAT_CLEANUP_LIFECYCLE');
+   need(activate===(typeof services.beforeCleanup==='function')&&(!recovering||activate),'UAT_CLEANUP_LIFECYCLE');
    if(activate)services.beforeCleanup();
    owned();
    const next=[marker[0],marker[1],'gate:'+maintenance.nextGateSha,'reset:'+new Date(at).toISOString(),
@@ -158,7 +162,8 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    // One bounded range replaces the validated test rows and rotates the gate.
    // No formal data or settings; no whole-book or whole-sheet clear.
    try{
-    range.setValues(expected);
+    if(recovering)sheet.getRange(1,1,1,width).setValues([next]);
+    else range.setValues(expected);
     services.flush();owned();
     const raw=range.getValues(),formulas=range.getFormulas();
     need(equal(raw,expected)&&Array.isArray(formulas)&&formulas.length===count+1&&
@@ -166,6 +171,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     owned();
     if(activate){need(services.afterCleanup()===true,'UAT_CLEANUP_CONFIG_READBACK');owned();}
    }catch(_){throw Error('UAT_CLEANUP_UNKNOWN_READBACK');}
+   if(recovering)return {formal:false,scope:'SYNTHETIC_CASES_ONLY',gateRecovered:true,remainingCases:0,gateRotationRequired:false};
    return {formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,at:new Date(at).toISOString(),
     remainingCases:0,remainingPdfCopies:0,gateRotationRequired:!activate,
     availability:availability(Array(count).fill(null))};

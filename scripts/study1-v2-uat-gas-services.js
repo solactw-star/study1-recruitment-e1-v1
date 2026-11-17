@@ -283,11 +283,13 @@ function study1SiteTestCleanupRequest_(request){
    return {ok:true,value:study1UatStoreTransaction_(services,approved,null,{mode:'reconcile'})};
   }
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
-  if(request.mode!=='clear'||keys!=='confirmation,entropy,expectedSha,mode'||request.confirmation!=='CLEAR_TEST_ONLY'||
+  const recovering=request.mode==='recover_gate';
+  if(!['clear','recover_gate'].includes(request.mode)||keys!=='confirmation,entropy,expectedSha,mode'||
+   request.confirmation!==(recovering?'RECOVER_EMPTY_TEST_GATE':'CLEAR_TEST_ONLY')||
    !hex(request.expectedSha)||!hex(request.entropy))return deny();
   const {props,raw,approved}=study1UatTrustedConfigSnapshot_(),key='STUDY1_E1_SYNTHETIC_UAT_V1';
   const sha=value=>study1PdfDigest_(Array.from(value,c=>c.charCodeAt(0)));
-  const replacementGate=sha('STUDY1_TEST_RESET_V1:'+request.entropy+':'+request.expectedSha+':'+approved.gateSha);
+  const replacementGate=sha((recovering?'STUDY1_TEST_GATE_RECOVERY_V1:':'STUDY1_TEST_RESET_V1:')+request.entropy+':'+request.expectedSha+':'+approved.gateSha);
   const nextGateSha=sha(replacementGate);
   const cfg=JSON.parse(raw),nextRaw=JSON.stringify({...cfg,gateSha:nextGateSha});
   const validateCurrent=()=>{
@@ -302,7 +304,7 @@ function study1SiteTestCleanupRequest_(request){
    props.setProperty(key,nextRaw);
    return props.getProperty(key)===nextRaw;
   };
-  const cleared=study1UatStoreTransaction_(services,approved,null,{mode:'clear',expectedSha:request.expectedSha,nextGateSha});
+  const cleared=study1UatStoreTransaction_(services,approved,null,{mode:request.mode,expectedSha:request.expectedSha,nextGateSha});
   if(!cleared||cleared.gateRotationRequired!==false)throw Error('UAT_CLEANUP_UNKNOWN_READBACK');
   return {ok:true,value:{...cleared,replacementGate}};
  }catch(e){return {ok:false,error:e&&e.message==='UAT_CLEANUP_UNKNOWN_READBACK'?'UAT_CLEANUP_UNKNOWN_READBACK':'UAT_REQUEST_REJECTED'};}
