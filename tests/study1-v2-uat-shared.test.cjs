@@ -299,3 +299,75 @@ test('trusted UAT configuration and narrow request envelope fail closed without 
  realm.study1UatGasOperation_=async()=>{throw Error('UAT_WRITE_UNKNOWN_READ_CASE');};
  assert.equal((await realm.study1UatControlledRequest_(req)).error,'UAT_WRITE_UNKNOWN_READ_CASE');
 });
+
+test('reviewable online UAT candidate uses original apply template, owner boundary and only the isolated RPC',async()=>{
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const base=core.localSources(),candidate=adapter.onlineCandidate(base),get=(a,id)=>a.find(f=>f.name===id).source;
+ assert.equal(core.closedManifest(candidate).webapp.access,'MYSELF');assert.equal(candidate.length,base.length+3);
+ assert.equal(core.closedManifest(base).webapp.access,'ANYONE');assert.ok(core.publicRpcSurface(base)>=35);
+ assert.throws(()=>core.publicRpcSurface(candidate),/formal visitor is not isolated|unguarded public RPC/);
+ for(const f of base.filter(f=>!['Website','Study1Visitor','appsscript'].includes(f.name)))assert.equal(get(candidate,f.name),f.source);
+ const html=get(candidate,'Study1Visitor'),original=get(base,'Study1Visitor');
+ assert.ok(original.includes('data-site-mode="FORMAL"'));assert.ok(html.includes('data-site-mode="GAS_UAT"'));
+ for(const id of ['choose','screen','otp','slots','confirm','consent','done'])assert.ok(html.includes('id="step-'+id+'"'));
+ for(const id of ['visitorSignaturePreview','officialPdfViewer','formalDonePdfDownload','testAlias','uatGate','caseKey'])assert.ok(html.includes('id="'+id+'"'));
+ assert.doesNotMatch(html,/id="(?:formalName|formalEmail|formalPhone|screenQuestions|chooseE2)"|study1ParticipantBegin|study1FormalHoldSlot|localStorage|sessionStorage/);
+ assert.equal((html.match(/<script>/g)||[]).length,1);const js=html.match(/<script>([\s\S]*?)<\/script>/)[1];new vm.Script(js);
+ let owner=false,configs=0,requests=0,served=0;
+ const ctx=vm.createContext({study1AdminOwnerRequired_:()=>{if(!owner)throw Error('owner denied');},study1UatTrustedConfig_:()=>{configs++;return {};},
+  study1UatControlledRequest_:async request=>{requests++;return {ok:true,value:request.operation};},
+  HtmlService:{createTemplateFromFile(name){served++;return {name,evaluate(){return {name,mode:this.flowMode,setTitle(){return this;},addMetaTag(){return this;}}}}}}});
+ vm.runInContext(get(candidate,'Website'),ctx);
+ assert.throws(()=>ctx.doGet({parameter:{view:'apply'}}),/owner denied/);assert.equal(configs,0);assert.equal(served,0);
+ assert.equal((await ctx.study1E1SyntheticUat({operation:'read'})).ok,false);assert.equal(requests,0);
+ owner=true;const page=ctx.doGet({parameter:{view:'apply'}});assert.equal(page.name,'Study1Visitor');assert.equal(page.mode,'GAS_UAT');assert.equal(configs,1);
+ assert.equal((await ctx.study1E1SyntheticUat({operation:'read'})).value,'read');assert.equal(requests,1);
+ assert.throws(()=>ctx.requestOtp(),/尚未開放/);assert.throws(()=>ctx.submitConsent(),/尚未開放/);assert.equal(ctx.getPublicConfig().open,false);
+ for(const view of ['admin','team','preview','demo'])assert.throws(()=>ctx.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
+});
+test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutation and verifies complete same-case PDF',async()=>{
+ const vm=require('node:vm'),{gasController}=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),calls=[],revoked=[];
+ const full=await PDFLib.PDFDocument.create();for(let i=0;i<5;i++)full.addPage();const original=Buffer.from(await full.save()),sourceSha=hash(original);
+ full.getPage(4).drawText('TEST');const signed=Buffer.from(await full.save()),signedSha=hash(signed);
+ const el=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false,hidden:false,disabled:false,textContent:'',children:[],classList:{toggle(){}},listeners:{},
+  addEventListener(n,fn){this.listeners[n]=fn;},removeAttribute(n){delete this[n]},replaceChildren(){this.children=[];this.value='';},appendChild(n){this.children.push(n);if(!this.value)this.value=n.value;},
+  getContext(){return {fillRect(){},beginPath(){},moveTo(){},lineTo(){},stroke(){}}},getBoundingClientRect(){return {left:0,top:0,width:700,height:160}},setPointerCapture(){},width:700,height:160,
+  toDataURL(){return 'data:image/png;base64,'+syntheticInk().toString('base64');}});return nodes.get(id);};
+ const doc={body:{dataset:{siteMode:'GAS_UAT'}},getElementById:el,createElement:()=>({value:'',textContent:''})};
+ let state='OTP',wrongOriginal=false,loseHold=true,loseSign=true;
+ const request=r=>{
+  calls.push(r.operation);assert.deepEqual(Object.keys(r).sort(),['caseKey','gate','operation','payload']);assert.equal(r.gate,'a'.repeat(64));
+  const caseId='UAT_'+hash(r.caseKey).slice(0,24),summary=()=>({caseId,alias:'TEST_01',formal:false,persisted:true,stage:state==='CONFIRMED'?'DONE':state,bookingStatus:state,
+   slotId:'TEST_SLOT_1',startAtUtc:'2026-11-19T02:00:00.000Z',endAtUtc:'2026-11-19T03:00:00.000Z',holdUntil:'2026-11-19T02:10:00.000Z',sourceSha,signedSha:state==='CONFIRMED'?signedSha:null}),
+   available=[{slotId:'TEST_SLOT_1',startAtUtc:'2026-11-19T02:00:00.000Z',endAtUtc:'2026-11-19T03:00:00.000Z',remaining:1}];
+  if(r.operation==='start')return summary();
+  if(r.operation==='verify'){state='SLOTS';return available;}
+  if(r.operation==='slots')return available;
+  if(r.operation==='hold'){state='HELD';if(loseHold){loseHold=false;throw Error('unknown committed');}return summary();}
+  if(r.operation==='read')return summary();
+  if(r.operation==='document')return {caseId:wrongOriginal?'UAT_wrong':caseId,sha:sourceSha,pageCount:5,bytes:original.toString('base64')};
+  if(r.operation==='sign'){state='CONFIRMED';if(loseSign){loseSign=false;throw Error('unknown committed');}}
+  if(r.operation==='copy'||r.operation==='sign')return {...summary(),sha:signedSha,bytes:signed.toString('base64'),pageCount:5,date:'2026/11/19'};
+  throw Error('unexpected request');
+ };
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1E1SyntheticUat(r){try{s({ok:true,value:request(r)});}catch(e){f(e);}}};}};}}}};
+ const ctx=vm.createContext({document:doc,window:{google,addEventListener(){}},google,crypto:crypto.webcrypto,TextEncoder,Uint8Array,Intl,Date,Blob,atob,
+  URL:{createObjectURL:()=> 'blob:verified-'+calls.length,revokeObjectURL:u=>revoked.push(u)}});
+ vm.runInContext('('+gasController.toString()+')();',ctx);
+ const click=id=>el(id).listeners.click();
+ el('uatGate').value='a'.repeat(64);el('testAlias').value='TEST_01';el('fictionalEligible').checked=true;
+ await click('chooseE1');await click('screenNext');assert.equal(el('step-otp').hidden,false);
+ el('otpInput').value='bad';await click('otpVerify');assert.deepEqual(calls,['start']);
+ el('otpInput').value='12345678';await click('otpVerify');assert.equal(el('step-slots').hidden,false);
+ await click('hold');await click('hold');assert.equal(calls.filter(x=>x==='hold').length,1);
+ await click('readCase');assert.equal(el('step-confirm').hidden,false);
+ wrongOriginal=true;await click('confirm');assert.equal(el('step-consent').hidden,true);assert.equal(el('officialPdfDownload').href,undefined);
+ wrongOriginal=false;await click('confirm');assert.equal(el('step-consent').hidden,false);assert.match(el('officialPdfDownload').href,/blob:verified/);
+ const event=(x,y)=>({clientX:x,clientY:y,pointerId:1,preventDefault(){}});
+ el('visitorSignaturePreview').listeners.pointerdown(event(0,0));el('visitorSignaturePreview').listeners.pointermove(event(40,40));
+ el('readPdf').checked=true;el('agree').checked=true;await click('finish');await click('finish');assert.equal(calls.filter(x=>x==='sign').length,1);
+ assert.equal(el('step-done').hidden,true);await click('readCase');assert.equal(el('step-done').hidden,false);assert.equal(el('formalDonePages').textContent,'5');assert.equal(el('formalDonePdfSha').textContent,signedSha);assert.ok(revoked.length>0);
+ assert.equal(calls.at(-1),'copy');
+ const formal=vm.createContext({document:{body:{dataset:{siteMode:'FORMAL'}},getElementById(){throw Error('must not touch formal DOM');}}});
+ vm.runInContext('('+gasController.toString()+')();',formal);
+});
