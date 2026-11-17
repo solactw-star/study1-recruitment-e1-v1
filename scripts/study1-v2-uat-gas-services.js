@@ -257,3 +257,22 @@ async function study1UatControlledRequest_(request){
   return {ok:false,error:e&&e.message==='UAT_WRITE_UNKNOWN_READ_CASE'?'UAT_WRITE_UNKNOWN_READ_CASE':'UAT_REQUEST_REJECTED'};
  }
 }
+
+/* Same-site cleanup request: OWNER required before reading config or store.
+ * The server-generated digest is a revocation fence, not a new usable
+ * credential. Activation of a replacement credential remains separate.
+ * Never accept a browser-chosen store, gate hash, or arbitrary deletion scope.
+ */
+function study1SiteTestCleanupRequest_(request){
+ const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ try{
+  study1AdminOwnerRequired_();
+  if(!request||typeof request!=='object'||Array.isArray(request))return deny();
+  const keys=Object.keys(request).sort().join(',');
+  if(request.mode==='preview'&&keys==='mode')return {ok:true,value:study1UatCleanup_({mode:'preview'})};
+  if(request.mode!=='clear'||keys!=='confirmation,expectedSha,mode'||request.confirmation!=='CLEAR_TEST_ONLY'||
+   typeof request.expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedSha))return deny();
+  const nextGateSha=study1PdfDigest_(Array.from('RESET_FENCE:'+Utilities.getUuid()+':'+Utilities.getUuid(),c=>c.charCodeAt(0)));
+  return {ok:true,value:study1UatCleanup_({mode:'clear',expectedSha:request.expectedSha,nextGateSha})};
+ }catch(e){return {ok:false,error:e&&e.message==='UAT_CLEANUP_UNKNOWN_READBACK'?'UAT_CLEANUP_UNKNOWN_READBACK':'UAT_REQUEST_REJECTED'};}
+}

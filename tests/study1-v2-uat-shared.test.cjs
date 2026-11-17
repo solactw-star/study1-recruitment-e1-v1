@@ -476,3 +476,67 @@ test('release preflight identifies exact deterministic private candidate and syn
  // Print only reproducible non-secret evidence; no real config, keys, IDs, or PDF bytes.
  console.log('UAT_RELEASE_PREFLIGHT '+JSON.stringify({baselineSha,candidateSha,sourceSha:doc.hash,sourceBytes:doc.bytes.length,pages:5,files:candidate.length,access:manifest.webapp.access,executeAs:manifest.webapp.executeAs,configExampleBytes:Buffer.byteLength(raw,'utf8'),remoteMutations:false}));
 });
+
+test('same official site source routes preserve formal closure and require real OWNER for test and cleanup',async()=>{
+ const vm=require('node:vm'),core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ assert.equal(JSON.parse(get('appsscript')).webapp.access,'ANYONE_ANONYMOUS');
+ assert.throws(()=>core.publicRpcSurface(files));
+ assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ const html=get('Study1Visitor'),admin=get('AdminConsole');
+ assert.match(html,/<\? if \(flowMode === 'GAS_UAT'\) \{ \?>/);
+ assert.match(html,/data-site-mode="FORMAL"/);assert.match(html,/data-site-mode="GAS_UAT"/);
+ assert.match(html,/view=apply&test=1/);assert.match(admin,/siteTestClear/);
+ assert.doesNotMatch(admin,/adminSaveSandboxConfig|study1ConsentVersionUpload|adminRunSandboxSelfTest/);
+ for(const f of files.filter(x=>x.type==='SERVER_JS'))new vm.Script(f.source,{filename:f.name});
+ for(const text of [html,admin])for(const m of text.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
+ let active='',effective='',config=0,requests=0,maintenance=[],opened=[];
+ const c=vm.createContext({Session:{getActiveUser:()=>({getEmail:()=>active}),getEffectiveUser:()=>({getEmail:()=>effective})},
+  HtmlService:{createTemplateFromFile(name){opened.push(name);return {evaluate(){return {name,mode:this.flowMode,siteOwner:this.siteOwner,setTitle(){return this;},addMetaTag(){return this;}};}}}},
+  Utilities:{getUuid:()=> 'mock-only-uuid',DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
+ for(const n of ['AdminSandbox','Study1PdfStampCore','Study1UatGasServices','Website'])vm.runInContext(get(n),c);
+ const owner=vm.runInContext('STUDY1_ADMIN_OWNER_',c);
+ c.study1UatTrustedConfig_=()=>{config++;return {};};
+ c.study1UatControlledRequest_=async r=>{requests++;return {ok:true,value:r.operation};};
+ c.study1UatCleanup_=m=>{maintenance.push(JSON.parse(JSON.stringify(m)));return {scope:'SYNTHETIC_CASES_ONLY'};};
+ effective=owner;
+ for(const user of ['', 'other@example.invalid']){
+  active=user;
+  const form=c.doGet({parameter:{view:'apply'}});assert.equal(form.mode,'FORMAL');assert.equal(form.siteOwner,false);
+  assert.throws(()=>c.doGet({parameter:{view:'apply',test:'1'}}),/拒絕存取/);
+  assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
+  assert.equal((await c.study1E1SyntheticUat({operation:'start'})).ok,false);
+  assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
+ }
+ assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
+ active=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
+ assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
+ assert.equal((await c.study1E1SyntheticUat({operation:'read'})).value,'read');
+ assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,true);
+ const sha='a'.repeat(64);
+ for(const input of [{mode:'clear',expectedSha:sha},{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',storeId:'OTHER'},
+   {mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY',nextGateSha:sha}])
+  assert.equal(c.study1SiteTestCleanup(input).ok,false);
+ assert.equal(maintenance.length,1);
+ assert.equal(c.study1SiteTestCleanup({mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY'}).ok,true);
+ assert.equal(maintenance.length,2);assert.equal(maintenance[1].expectedSha,sha);assert.match(maintenance[1].nextGateSha,/^[a-f0-9]{64}$/);
+ assert.throws(()=>c.requestOtp(),/尚未開放/);assert.throws(()=>c.submitConsent(),/尚未開放/);assert.equal(c.getPublicConfig().open,false);
+ for(const view of ['team','preview','demo'])assert.throws(()=>c.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
+});
+test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
+ let confirmed=false,fail=false;
+ for(const id of ['siteTestPreview','siteTestClear','siteTestCleanupSummary'])nodes.set(id,{disabled:false,textContent:'',addEventListener(n,fn){this[n]=fn;}});
+ const counts={cases:2,holds:1,confirmed:1,pdfs:1},sha='b'.repeat(64);
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(r){
+  requests.push(JSON.parse(JSON.stringify(r)));if(r.mode==='preview')s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:sha,counts}});
+  else if(fail)f(Error('UNKNOWN'));else s({ok:true,value:{formal:false,scope:'SYNTHETIC_CASES_ONLY',cleared:counts,remainingCases:0,remainingPdfCopies:0,gateRotationRequired:true}});
+ }}};}};}}}};
+ const run=()=>vm.runInNewContext('('+adapter.sameSiteCleanupController.toString()+')();',{document:{getElementById:id=>nodes.get(id)},window:{google,confirm:()=>confirmed},google});
+ run();const p=nodes.get('siteTestPreview'),c=nodes.get('siteTestClear'),s=nodes.get('siteTestCleanupSummary');
+ assert.equal(c.disabled,true);await c.click();assert.equal(requests.length,0);await p.click();assert.equal(c.disabled,false);
+ await c.click();assert.equal(requests.length,1);confirmed=true;fail=true;await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/不重送/);
+ await p.click();assert.equal(c.disabled,true);await c.click();assert.equal(requests.filter(r=>r.mode==='clear').length,1);
+ fail=false;run();await p.click();await c.click();assert.equal(c.disabled,true);assert.match(s.textContent,/已核實清除/);
+ assert.deepEqual(requests.filter(r=>r.mode==='clear').at(-1),{mode:'clear',expectedSha:sha,confirmation:'CLEAR_TEST_ONLY'});
+});

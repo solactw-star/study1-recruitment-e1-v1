@@ -265,4 +265,113 @@ function onlineCandidate(input){
  if(!rejected)throw Error('UAT_MUST_NOT_PASS_PUBLIC_RELEASE_GUARD');
  return files;
 }
-module.exports={originalVisitor,gasController,onlineCandidate};
+
+/* Same official site, same original template. This is local integration
+ * source only; it is NOT an approved deploy profile or a workflow entry.
+ * The currently deployed public read-only contract remains unchanged.
+ */
+function sameSiteVisitor(source=read('gas/Study1Visitor.html')){
+ const start=source.indexOf('<body data-site-mode="FORMAL">'),end=source.lastIndexOf('</body>');
+ if(start<0||end<=start)throw Error('SAME_SITE_VISITOR_ANCHOR');
+ let test=originalVisitor(source);
+ const b=test.indexOf('<body data-site-mode="GAS_UAT">'),e=test.lastIndexOf('</body>');
+ if(b<0||e<=b)throw Error('SAME_SITE_VISITOR_ANCHOR');
+ test=test.slice(b,e+7).replace('私人 E1 線上隔離驗收｜非正式招募','正式網站 · E1 測試模式｜非正式招募')
+  .replace('私人線上驗收：只使用虛構身分','同站測試：只使用虛構身分');
+ const formal=once(source.slice(start,end+7),'</nav>',
+  '<? if (siteOwner) { ?><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">研究團隊測試</a><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">測試資料管理</a><? } ?></nav>');
+ return source.slice(0,start)+"<? if (flowMode === 'GAS_UAT') { ?>\n"+test+"\n<? } else { ?>\n"+formal+"\n<? } ?>"+source.slice(end+7);
+}
+function sameSiteCleanupController(){
+ 'use strict';
+ const el=id=>document.getElementById(id);
+ const preview=el('siteTestPreview'),clear=el('siteTestClear'),summary=el('siteTestCleanupSummary');
+ if(!preview||!clear||!summary)return;
+ let current=null,busy=false,unknown=false,cleared=false;
+ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+ const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
+ const say=s=>{summary.textContent=s;};
+ const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。此流程不寄信、不寫正式研究資料。';
+ const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;};
+ const call=request=>new Promise((resolve,reject)=>{
+  if(!window.google||!google.script||!google.script.run){reject(Error('GAS_UNAVAILABLE'));return;}
+  google.script.run.withFailureHandler(()=>reject(Error('GAS_UNKNOWN')))
+   .withSuccessHandler(x=>{if(x&&x.ok===true)resolve(x.value);else reject(Error(x&&x.error==='UAT_CLEANUP_UNKNOWN_READBACK'?'GAS_UNKNOWN':'DENIED'));})
+   .study1SiteTestCleanup(request);
+ });
+ preview.addEventListener('click',async()=>{
+  if(busy)return;busy=true;current=null;buttons();
+  try{
+   const p=await call({mode:'preview'});
+   if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||!hex(p.snapshotSha)||!valid(p.counts))throw Error('BAD_PREVIEW');
+   if(!unknown&&!cleared)current=p;
+   say(describe(p.counts)+(unknown?' 前次清除結果仍待管理者核對；本頁不會重送。':' 請確認後清空。'));
+  }catch(_){say('無法取得可信預覽：測試設定、管理權限或前次清除狀態尚待核對。未送出刪除。');}
+  finally{busy=false;buttons();}
+ });
+ clear.addEventListener('click',async()=>{
+  if(busy||unknown||cleared||!current||current.counts.cases===0)return;
+  if(!window.confirm(describe(current.counts)+'\n確定只清空這些測試紀錄？清除後舊測試通行設定失效，須重新啟用測試。'))return;
+  const p=current;current=null;busy=true;buttons();
+  try{
+   const result=await call({mode:'clear',expectedSha:p.snapshotSha,confirmation:'CLEAR_TEST_ONLY'});
+   if(!result||result.formal!==false||result.scope!=='SYNTHETIC_CASES_ONLY'||!valid(result.cleared)||
+    ['cases','holds','confirmed','pdfs'].some(k=>result.cleared[k]!==p.counts[k])||
+    result.remainingCases!==0||result.remainingPdfCopies!==0||result.gateRotationRequired!==true)throw Error('BAD_RECEIPT');
+   cleared=true;say('已核實清除。'+describe(result.cleared)+' 測試名額已釋放；舊測試通行設定失效，重新啟用後才能再測。');
+  }catch(e){
+   // A denied or malformed clear response may not establish whether a
+   // mutation occurred. Freeze destructive action on this page.
+   unknown=true;say('清除未獲完整確認；請先唯讀查核，不重送清除。');
+  }finally{busy=false;buttons();}
+ });
+ buttons();
+}
+function sameSiteAdmin(source=read('gas/AdminConsole.html')){
+ // Preserve the original admin shell, style and controls in the repository.
+ // The same-site test management view does not initialize formal/sandbox RPCs.
+ const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
+ if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
+ const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">預覽測試資料</button><button id="siteTestClear" type="button" disabled>清空測試資料</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p></section></main>';
+ return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
+}
+function sameSiteCandidate(){
+ const core=require('./study1-v2-gas-head-only.cjs'),base=core.localSources();
+ const prior=onlineCandidate(base),anonymous=core.anonymousReadOnlyCandidate(base);
+ const get=(files,name)=>files.find(f=>f.name===name);
+ const result=prior.map(f=>{
+  if(f.name==='appsscript')return {...get(anonymous,f.name)};
+  if(f.name==='Study1Visitor')return {...f,source:sameSiteVisitor(get(base,f.name).source)};
+  if(f.name==='AdminConsole')return {...f,source:sameSiteAdmin(get(base,f.name).source)};
+  if(f.name!=='Website')return f;
+  let source=get(base,'Website').source;
+  source=once(source,'function doGet(e){',`function doGet(e){
+ if(e&&e.parameter&&e.parameter.view==='admin'){
+  study1AdminOwnerRequired_();
+  study1UatTrustedConfig_();
+  const t=HtmlService.createTemplateFromFile('AdminConsole');
+  t.siteAppUrl=study1V2SelfWebUrl_();
+  return t.evaluate().setTitle('Study 1｜測試資料管理').addMetaTag('viewport','width=device-width, initial-scale=1');
+ }`);
+  source=once(source,"  t.flowMode='FORMAL';",`  t.flowMode='FORMAL';
+  t.siteOwner=false;
+  try{study1AdminOwnerRequired_();t.siteOwner=true;}catch(_){}
+  if(e.parameter.test==='1'){
+   study1AdminOwnerRequired_();
+   study1UatTrustedConfig_();
+   t.flowMode='GAS_UAT';
+  }`);
+  source+='\nasync function study1E1SyntheticUat(request){\n try{study1AdminOwnerRequired_();}catch(_){return {ok:false,error:"UAT_REQUEST_REJECTED"};}\n return study1UatControlledRequest_(request);\n}\n';
+  source+='\nfunction study1SiteTestCleanup(request){\n return study1SiteTestCleanupRequest_(request);\n}\n';
+  return {...f,source};
+ });
+ core.digest(result);core.closedWebsite(result);
+ if(JSON.parse(get(result,'appsscript').source).webapp.access!=='ANYONE_ANONYMOUS')throw Error('SAME_SITE_MANIFEST');
+ // Do not relax or opt out of the existing deployment guard; this new
+ // product integration is intentionally not a valid release target yet.
+ let rejected=false;try{core.publicRpcSurface(result);}catch(_){rejected=true;}
+ if(!rejected)throw Error('SAME_SITE_REQUIRES_RELEASE_REVIEW');
+ return result;
+}
+
+module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate};
