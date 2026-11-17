@@ -398,6 +398,39 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><button id="siteTestRecoverGate" type="button" disabled>遺失通行碼：重新產生（僅空表）</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
  return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
 }
+// Enforce the existing same-site CI source delta in the actual assembler,
+// not just its test/report. This is a local source contract only: the
+// public release guard and releaseFiles allowlist still reject this profile.
+function requireSameSiteSourceDelta(anonymous,result){
+ const core=require('./study1-v2-gas-head-only.cjs');
+ const sha=core.digest(result);
+ core.digest(anonymous);
+ const need=(ok,reason)=>{if(!ok)throw Error('SAME_SITE_SOURCE_DELTA: '+reason);};
+ const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+ const modified=['AdminConsole','Study1Visitor','Website'];
+ const added=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
+ const baseNames=anonymous.map(f=>f.name).sort();
+ need(eq(baseNames,core.APPROVED),'baseline inventory');
+ need(eq(result.map(f=>f.name).sort(),[...baseNames,...added].sort()),'candidate inventory');
+ const base=new Map(anonymous.map(f=>[f.name,f])),candidate=new Map(result.map(f=>[f.name,f]));
+ const changed=[];
+ for(const file of anonymous){
+  const next=candidate.get(file.name);
+  need(next.type===file.type,'file type changed: '+file.name);
+  if(next.source!==file.source)changed.push(file.name);
+ }
+ need(eq(changed.sort(),modified),'unexpected source changes');
+ // The existing anonymous manifest must remain byte-for-byte unchanged.
+ // The inherited public RPCs remain closed; only these two OWNER-gated
+ // entry points may be added for the same-site TEST product.
+ const globals=source=>[...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]).filter(n=>!n.endsWith('_')).sort();
+ need(eq(globals(candidate.get('Website').source),[...globals(base.get('Website').source),'study1E1SyntheticUat','study1SiteTestCleanup'].sort()),'unexpected Website RPC change');
+ for(const name of added){
+  const f=candidate.get(name);
+  need(f.type==='SERVER_JS'&&globals(f.source).length===0,'unexpected kernel surface: '+name);
+ }
+ return sha;
+}
 function sameSiteCandidate(){
  const core=require('./study1-v2-gas-head-only.cjs'),base=core.localSources();
  const prior=onlineCandidate(base),anonymous=core.anonymousReadOnlyCandidate(base);
@@ -428,7 +461,7 @@ function sameSiteCandidate(){
   source+='\nfunction study1SiteTestCleanup(request){\n return study1SiteTestCleanupRequest_(request);\n}\n';
   return {...f,source};
  });
- core.digest(result);core.closedWebsite(result);
+ requireSameSiteSourceDelta(anonymous,result);core.closedWebsite(result);
  if(JSON.parse(get(result,'appsscript').source).webapp.access!=='ANYONE_ANONYMOUS')throw Error('SAME_SITE_MANIFEST');
  // Do not relax or opt out of the existing deployment guard; this new
  // product integration is intentionally not a valid release target yet.
@@ -490,4 +523,4 @@ function verifySameSiteReadback({before,after,priorDirect,currentDirect,newConte
   version:current.version,sourceSha256:target};
 }
 
-module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate,verifySameSiteReadback};
+module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate,requireSameSiteSourceDelta,verifySameSiteReadback};

@@ -602,6 +602,27 @@ test('same official site source routes preserve formal closure and require real 
  assert.throws(()=>c.requestOtp(),/尚未開放/);assert.throws(()=>c.submitConsent(),/尚未開放/);assert.equal(c.getPublicConfig().open,false);
  for(const view of ['team','preview','demo'])assert.throws(()=>c.doGet({parameter:{view}}),/PUBLIC_READ_ONLY/);
 });
+test('same-site assembler source contract rejects unreviewed inventory, bytes, types and RPC deltas',()=>{
+ const core=require('../scripts/study1-v2-gas-head-only.cjs'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const baseline=core.anonymousReadOnlyCandidate(),target=adapter.sameSiteCandidate();
+ const prove=files=>adapter.requireSameSiteSourceDelta(baseline,files);
+ assert.equal(prove(target),core.digest(target));
+ const change=(name,fn)=>target.map(f=>f.name===name?fn({...f}):f);
+ const restore=name=>change(name,f=>({...f,source:baseline.find(b=>b.name===name).source}));
+ for(const [files,reason] of [
+  [[...target,{name:'Unreviewed',type:'SERVER_JS',source:'function extra_(){}'}],/candidate inventory/],
+  [target.filter(f=>f.name!=='Study1UatSession'),/candidate inventory/],
+  [change('BookingCore',f=>({...f,source:f.source+'\n// unreviewed change'})),/unexpected source changes/],
+  [change('appsscript',f=>({...f,source:f.source+' '})),/unexpected source changes/],
+  [change('AdminConsole',f=>({...f,type:'SERVER_JS'})),/file type changed/],
+  [restore('Website'),/unexpected source changes/],
+  [change('Website',f=>({...f,source:f.source+'\nfunction unreviewedRpc(){}'})),/unexpected Website RPC change/],
+  [change('Study1UatSession',f=>({...f,type:'HTML'})),/unexpected kernel surface/],
+  [change('Study1UatStoreTransaction',f=>({...f,source:f.source+'\nfunction unreviewedRpc(){}'})),/unexpected kernel surface/]
+ ])assert.throws(()=>prove(files),reason);
+ assert.throws(()=>core.releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>core.publicRpcSurface(target));
+});
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
  let confirmed=false,fail=false;
