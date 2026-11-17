@@ -1,0 +1,243 @@
+'use strict';
+// Original participant template adapter, offline source assembly only.
+// This file is NOT part of any existing deployment workflow. Do not deploy
+// without independent review, exact source/ACL readback and runtime tests.
+const fs=require('node:fs'),path=require('node:path');
+const read=p=>fs.readFileSync(path.join(__dirname,'..',p),'utf8');
+function once(s,a,b){
+ if(s.split(a).length!==2)throw Error('UAT_ORIGINAL_VISITOR_ANCHOR');
+ return s.replace(a,()=>b);
+}
+function gasController(){
+ 'use strict';
+ if(typeof document==='undefined'||!document.body||document.body.dataset.siteMode!=='GAS_UAT')return;
+ const el=id=>document.getElementById(id),txt=(id,s)=>{el(id).textContent=s;},say=s=>txt('status',s);
+ const steps=['choose','screen','otp','slots','confirm','consent','done'];
+ const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
+ const random=n=>Array.from(crypto.getRandomValues(new Uint8Array(n)),b=>b.toString(16).padStart(2,'0')).join('');
+ const digest=async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),x=>x.toString(16).padStart(2,'0')).join('');
+ const bytes=b=>Uint8Array.from(atob(b),x=>x.charCodeAt(0));
+ const taipei=s=>new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',dateStyle:'full',timeStyle:'short'}).format(new Date(s));
+ const mutating=new Set(['start','verify','hold','sign','cancel']);
+ const unresolved=new Map();
+ let gate='',caseKey='',expected='',current=null,busy=false,ink=false,previous=null,originalUrl=null,signedUrl=null,source=null;
+ const need=(ok,msg)=>{if(!ok)throw Error(msg);};
+ const show=step=>{for(const name of steps)el('step-'+name).hidden=name!==step;
+  el('step-ineligible').hidden=true;txt('progressText','隔離線上驗收 · '+(steps.indexOf(step)+1)+' / 7');
+  [...el('progress').children].forEach((n,i)=>n.classList.toggle('current',i<=steps.indexOf(step)));};
+ const hideSteps=()=>{for(const name of steps)el('step-'+name).hidden=true;};
+ const clearUrls=()=>{for(const u of [originalUrl,signedUrl])if(u)URL.revokeObjectURL(u);
+  originalUrl=null;signedUrl=null;source=null;
+  for(const id of ['officialPdfDownload','formalDonePdfDownload']){el(id).hidden=true;el(id).removeAttribute('href');}
+  el('officialPdfViewer').hidden=true;el('officialPdfViewer').removeAttribute('data');el('formalDoneResult').hidden=true;
+  el('readPdf').checked=false;el('agree').checked=false;
+  el('finish').disabled=true;
+  for(const id of ['officialPdfSha','formalDonePdfSha','formalDonePdfDate','formalDoneBooking','formalDoneReservation','formalDonePages','caseSummary'])txt(id,'');
+ };
+ const bind=async k=>{const access=el('uatGate').value.trim();
+  need(hex(access,64)&&hex(k,64)&&access!==k,'請輸入私人測試通行碼與案件密鑰');
+  gate=access;caseKey=k;expected='UAT_'+(await digest(new TextEncoder().encode(k))).slice(0,24);
+ };
+ const call=(operation,payload={})=>{
+  need(hex(gate,64)&&hex(caseKey,64),'請先核對測試通行碼');
+  need(window.google&&google.script&&google.script.run,'GAS 連線尚未可用');
+  const k=caseKey;
+  if(mutating.has(operation)){need(!unresolved.has(k),'上次操作未確認，請先唯讀核對原案件');unresolved.set(k,operation);}
+  return new Promise((resolve,reject)=>{
+   google.script.run.withFailureHandler(()=>reject(Error('線上回應不明，請唯讀核對本案，勿重送')))
+    .withSuccessHandler(r=>{
+     if(!r||r.ok!==true||!Object.prototype.hasOwnProperty.call(r,'value')){
+      reject(Error('測試操作未確認，請唯讀核對本案，勿重送'));return;
+     }
+     // Only a positive server response clears the same mutation latch.
+     if(mutating.has(operation))unresolved.delete(k);
+     resolve(r.value);
+    }).study1E1SyntheticUat({operation,payload,gate,caseKey:k});
+  });
+ };
+ const button=(id,fn)=>el(id).addEventListener('click',async()=>{
+  if(busy)return;busy=true;
+  try{await fn();}catch(e){say('測試未完成：'+e.message);}
+  finally{busy=false;}
+ });
+ const display=c=>{
+  need(c&&c.caseId===expected&&/^TEST_(0[1-9]|1[0-2])$/.test(c.alias)&&c.formal===false&&c.persisted===true&&
+   ['OTP','SLOTS','HELD','CANCELLED','EXPIRED','CONFIRMED'].includes(c.bookingStatus)&&
+   c.stage===(c.bookingStatus==='CONFIRMED'?'DONE':c.bookingStatus),'測試案件或狀態不一致');
+  current=c;txt('caseSummary',c.caseId+' · '+c.alias+' · '+c.bookingStatus);
+ };
+ const slots=list=>{
+  need(Array.isArray(list)&&list.length<=4&&list.every(s=>s&&/^TEST_SLOT_[1-4]$/.test(s.slotId)&&s.remaining===1&&
+   Number.isFinite(Date.parse(s.startAtUtc))&&Date.parse(s.endAtUtc)>Date.parse(s.startAtUtc)),'測試場次格式不一致');
+  el('slot').replaceChildren();
+  for(const s of list){const o=document.createElement('option');o.value=s.slotId;o.textContent=taipei(s.startAtUtc)+' · 剩餘 '+s.remaining;el('slot').appendChild(o);}
+  el('hold').disabled=!list.length||unresolved.has(caseKey);
+  show('slots');say(list.length?'請選擇合成測試場次。':'合成場次額滿或已過期。');
+ };
+ const held=c=>{display(c);need(c.bookingStatus==='HELD'&&hex(c.sourceSha,64)&&Number.isFinite(Date.parse(c.holdUntil)),'暫留尚未核實');
+  txt('v06Study','實驗一 E1（虛構）');txt('v06Date',taipei(c.startAtUtc));txt('v06Time',taipei(c.startAtUtc)+' – '+taipei(c.endAtUtc));
+  txt('v06Place','合成測試場次');txt('v06Email','模擬 OTP 完成');txt('v06Consent','尚未完成測試簽署');txt('holdUntil',taipei(c.holdUntil));
+  txt('v06Status','測試暫留已回讀，尚未成立預約。');el('confirm').disabled=false;show('confirm');say('核對後閱讀完整五頁測試 PDF。');};
+ const pdf=async (encoded,expectedSha)=>{need(typeof encoded==='string'&&encoded.length<=320000&&hex(expectedSha,64),'測試 PDF 格式不一致');
+  const b=bytes(encoded);need(String.fromCharCode(...b.slice(0,5))==='%PDF-'&&await digest(b)===expectedSha,'測試 PDF SHA 不一致');
+  return URL.createObjectURL(new Blob([b],{type:'application/pdf'}));};
+ const receipt=async c=>{
+  need(current&&c&&c.caseId===expected&&c.caseId===current.caseId&&c.sourceSha===current.sourceSha&&
+   (!current.signedSha||c.signedSha===current.signedSha)&&c.bookingStatus==='CONFIRMED'&&c.stage==='DONE'&&
+   c.persisted===true&&c.formal===false&&c.pageCount===5&&c.sha===c.signedSha&&c.sha!==c.sourceSha&&
+   /^\d{4}\/\d{2}\/\d{2}$/.test(c.date),'預約或完整 PDF 未核實');
+  const u=await pdf(c.bytes,c.sha);if(signedUrl)URL.revokeObjectURL(signedUrl);signedUrl=u;display(c);
+  el('formalDonePdfDownload').href=u;el('formalDonePdfDownload').hidden=false;
+  txt('formalDoneBooking','CONFIRMED（測試）');txt('formalDoneReservation',c.caseId);txt('formalDonePdfSha',c.sha);
+  txt('formalDonePdfDate',c.date);txt('formalDonePages','5');el('formalDoneResult').hidden=false;show('done');
+  say('同案測試預約、完整 PDF 與 SHA 已核實；非正式研究同意。');
+ };
+ const canvas=el('visitorSignaturePreview'),ctx=canvas.getContext('2d');
+ const clearInk=()=>{ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='#173341';ctx.lineWidth=3;ctx.lineCap='round';ink=false;previous=null;};
+ const pos=e=>{const r=canvas.getBoundingClientRect();return[(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height];};
+ canvas.addEventListener('pointerdown',e=>{if(busy||unresolved.has(caseKey))return;e.preventDefault();canvas.setPointerCapture(e.pointerId);previous=pos(e);});
+ canvas.addEventListener('pointermove',e=>{if(!previous||busy||unresolved.has(caseKey))return;e.preventDefault();const n=pos(e);
+  if(Math.hypot(n[0]-previous[0],n[1]-previous[1])>1){ctx.beginPath();ctx.moveTo(...previous);ctx.lineTo(...n);ctx.stroke();ink=true;previous=n;}});
+ for(const e of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(e,()=>previous=null);
+ button('visitorSignatureClear',()=>{if(!unresolved.has(caseKey))clearInk();});
+ button('chooseE1',()=>show('screen'));
+ button('screenNext',async()=>{
+  need(el('fictionalEligible').checked,'請確認只使用虛構身分');
+  need(!caseKey,'已有本案，請使用唯讀核對，不另建案件');
+  const k=random(32);el('caseKey').value=k;await bind(k);
+  const c=await call('start',{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');show('otp');say('請保存測試案件密鑰。模擬驗證碼為 12345678，不會寄信。');
+ });
+ button('otpVerify',async()=>{need(el('otpInput').value==='12345678','測試驗證碼不符');slots(await call('verify',{code:el('otpInput').value}));});
+ button('formalSlotsRetry',async()=>slots(await call('slots')));
+ button('hold',async()=>{el('hold').disabled=true;held(await call('hold',{slotId:el('slot').value,requestId:random(16)}));});
+ button('confirm',async()=>{
+  need(current&&current.bookingStatus==='HELD','請先核對暫留');
+  clearUrls();clearInk();const d=await call('document');
+  need(d&&d.caseId===expected&&d.sha===current.sourceSha&&d.pageCount===5,'完整測試原文不一致');
+  originalUrl=await pdf(d.bytes,d.sha);source=d.sha;
+  el('officialPdfDownload').href=originalUrl;el('officialPdfDownload').hidden=false;
+  el('officialPdfViewer').data=originalUrl;el('officialPdfViewer').hidden=false;
+  txt('officialPdfSha',source);el('finish').disabled=unresolved.has(caseKey);show('consent');say('完整閱讀五頁合成文件，只畫虛構筆跡。');
+ });
+ button('finish',async()=>{
+  need(current&&source&&ink&&el('readPdf').checked&&el('agree').checked,'請閱讀完整測試 PDF 並畫虛構筆跡');
+  el('finish').disabled=true;
+  await receipt(await call('sign',{requestId:random(16),sourceSha:source,ink:canvas.toDataURL('image/png').split(',')[1],read:true,agree:true}));
+ });
+ const recover=async()=>{
+  clearUrls();hideSteps();clearInk();current=null;
+  await bind(el('caseKey').value.trim());const c=await call('read');display(c);
+  const pending=unresolved.get(caseKey);
+  if((pending==='start'&&c.stage==='OTP')||(pending==='verify'&&c.stage==='SLOTS')||
+    (pending==='hold'&&c.stage==='HELD')||(pending==='sign'&&c.stage==='DONE')||
+    (pending==='cancel'&&['CANCELLED','EXPIRED'].includes(c.stage)))unresolved.delete(caseKey);
+  if(c.stage==='DONE')await receipt(await call('copy'));
+  else if(c.stage==='HELD')held(c);
+  else if(c.stage==='SLOTS')slots(await call('slots'));
+  else if(c.stage==='OTP')show('otp');
+  else say('本測試案件已結束：'+c.stage);
+  if(unresolved.has(caseKey))say('原操作未能確認；保留唯讀核對，不重送。');
+ };
+ button('readCase',recover);button('formalDoneRefresh',recover);
+ button('cancelTest',async()=>{display(await call('cancel'));clearUrls();hideSteps();say('測試案件已結束，請唯讀核對原狀態。');});
+ window.addEventListener('pagehide',()=>{clearUrls();gate='';caseKey='';expected='';el('uatGate').value='';});
+ clearInk();show('choose');el('step-choose').hidden=false;el('uatOriginalMain').hidden=false;say('私人線上驗收：只使用虛構身分、合成時間與測試筆跡。');
+}
+function originalVisitor(source=read('gas/Study1Visitor.html')){
+ let s=source;
+ s=once(s,'<body data-site-mode="FORMAL">','<body data-site-mode="GAS_UAT">');
+ s=once(s,'<main class="shell">','<main class="shell" id="uatOriginalMain" hidden>');
+ const notice=/<div class="noticebar"[^>]*>[\s\S]*?<\/div>/;
+ if(!notice.test(s))throw Error('UAT_ORIGINAL_NOTICE');
+ s=s.replace(notice,'<div class="noticebar" role="status">私人 E1 線上隔離驗收｜非正式招募，禁止真實個資及簽名，不寄信</div>');
+ const hero=/<div class="hero">[\s\S]*?<\/div><\/header>/;
+ if(!hero.test(s))throw Error('UAT_ORIGINAL_HERO');
+ s=s.replace(hero,'<div class="hero"><div class="eyebrow">Study1 E1 · 私人線上隔離驗收</div><h1>測試原報名流程</h1><p>只使用虛構身分、合成時段與五頁測試文件；不是正式研究同意。</p></div></header>');
+ const edit=(name,fn)=>{
+  const re=new RegExp('(<section class="step" id="step-'+name+'"[^>]*>)([\\s\\S]*?)(<\\/section>)');
+  if(!re.test(s))throw Error('UAT_ORIGINAL_STEP_'+name);
+  s=s.replace(re,(_,a,b,c)=>a+fn(b)+c);
+ };
+ // Retain original step containers, styling, navigation, PDF object, canvas,
+ // scheduling select, final receipt and original control IDs. Remove real
+ // contact/health inputs, waitlist controls, and formal-only copy in this mode.
+ edit('choose',b=>{
+  b=once(b,'id="chooseE1" disabled','id="chooseE1"');
+  b=b.replace(/<button[^>]*id="chooseE2"[\s\S]*?<\/button>/,'');
+  return b.replace(/<p class="lead">[\s\S]*?<\/p>/,'<p class="lead">僅使用實驗一虛構案件。</p>')
+   .replace(/<small id="payE1">[\s\S]*?<\/small>/,'')
+   .replace(/<small id="stateE1">[\s\S]*?<\/small>/,'<small id="stateE1">線上隔離測試</small>')
+   .replace(/<div class="box">[\s\S]*?<\/div>/,'<div class="box">無正式招募、報酬、個資或真實簽署。</div>');
+ });
+ edit('screen',b=>b.slice(0,b.indexOf('<p class="lead">'))+
+  '<p class="lead">使用固定虛構人物，不填真實姓名、信箱、電話或健康資訊。</p><div class="box"><label for="testAlias" class="field">虛構身分</label><select id="testAlias">'+Array.from({length:12},(_,i)=>'<option>TEST_'+String(i+1).padStart(2,'0')+'</option>').join('')+'</select><label class="check"><input id="fictionalEligible" type="checkbox">僅以虛構身分執行測試</label></div><button id="screenNext" type="button">確認虛構資格並繼續</button>');
+ edit('otp',b=>b.slice(0,b.indexOf('<p class="lead">'))+
+  '<p class="lead">模擬驗證，不寄信。測試碼 12345678。</p><label class="field" for="otpInput">八位測試碼</label><input id="otpInput" inputmode="numeric" maxlength="8" autocomplete="off"><button id="otpVerify" type="button">驗證並選擇時段</button>');
+ edit('slots',b=>b.slice(0,b.indexOf('<p class="lead">'))+
+  '<p class="lead">合成場次與共用剩餘名額；送出時伺服器重新核對。</p><label class="field" for="slot">合成時段（臺灣時間）</label><select id="slot"></select><div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost">重新載入測試時段</button></div>');
+ edit('confirm',b=>b.replace(/<p>[\s\S]*?<\/p>/,'<p>核對虛構案件及測試暫留；完整測試 PDF 簽署後才確認。</p>').replace('</dl>','<dt>暫留有效至</dt><dd id="holdUntil"></dd></dl>'));
+ edit('consent',b=>{
+  b=once(b,'id="officialPdfDownload" class="pdf" hidden download="Study1_Consent_Original.pdf"','id="officialPdfDownload" class="pdf" hidden download="UAT_NOT_CONSENT_original.pdf"');
+  let a=b.indexOf('<div id="officialSignedPdfResult"'),z=b.indexOf('</div>\n</div>',a);
+  if(a<0||z<a)throw Error('UAT_ORIGINAL_PDF_RESULT');
+  b=b.slice(0,a)+b.slice(z+6);
+  b=b.replace(/<p class="lead" id="consentStudyTitle">[\s\S]*?<\/p>/,'<p class="lead" id="consentStudyTitle">閱讀完整五頁合成測試 PDF 並畫虛構筆跡。</p>')
+    .replace(/<div class="box warn">[\s\S]*?<\/div>/,'<div class="box warn">本文件不是正式知情同意書，請勿寫真名。</div>')
+    .replace(/<strong>實驗一／實驗二[^<]*<\/strong>/,'<strong>完整五頁測試原文 PDF</strong>')
+    .replace(/<p id="officialPdfStatus"[^>]*>[\s\S]*?<\/p>/,'<p id="officialPdfStatus" class="help">原文已由伺服器及瀏覽器 SHA 核對後才顯示。</p>')
+    .replace(/<dd id="officialPdfTitle">[^<]*<\/dd>/,'<dd id="officialPdfTitle">合成測試原文</dd>')
+    .replace(/<dd id="officialPdfVersion">[^<]*<\/dd>/,'<dd id="officialPdfVersion">UAT-SYNTHETIC-1</dd>')
+    .replace(/<p class="help">原始PDF[^<]*<\/p>/,'<p class="help">不存正式研究資料；只保存測試文件。</p>')
+    .replace(/<a id="pdf"[^>]*>[\s\S]*?<\/a>/,'')
+    .replace(/<div class="actionrow"><button id="review"[\s\S]*?<\/div>/,'')
+    .replace('我已閱讀並理解核准版本的完整知情同意書','已閱讀完整合成測試文件')
+    .replace(/<strong>本人手寫簽名[^<]*<\/strong>/,'<strong>僅畫虛構測試筆跡</strong>')
+    .replace(/<p class="help">請使用滑鼠[^<]*<\/p>/,'<p class="help">請畫測試記號，不要簽真名。</p>')
+    .replace(/<p class="help" id="visitorSignatureStatus"[^>]*>[\s\S]*?<\/p>/,'')
+    .replace('我已閱讀完整知情同意書且自願簽署（目前未開放）','同意執行合成簽署測試（非研究同意）')
+    .replace('確認簽署（目前未開放）','合成完整測試 PDF 並確認預約')
+    .replace(/<p class="help" id="consentStatus">[\s\S]*?<\/p>/,'');
+  return b;
+ });
+ edit('done',b=>b.replace('E1 正式報名狀態｜獨立來源核對','E1 測試狀態｜同案回讀')
+  .replace('預約結果尚未核實','隔離測試預約已確認')
+  .replace('必須先驗證完整簽署PDF及原Reservations的本人預約結果。','已核對隔離測試預約與完整五頁 PDF。')
+  .replace('<dt>郵件通知狀態</dt><dd>未由此頁驗證寄送；請以正式通知來源為準</dd>','<dt>完整 PDF 頁數</dt><dd id="formalDonePages"></dd><dt>郵件通知</dt><dd>測試不寄信</dd>')
+  .replace('Study1_E1_Signed_Consent.pdf','UAT_NOT_CONSENT_signed.pdf').replace('唯讀重新查核本人原 Reservations 狀態','唯讀重新核對測試案件')
+  .replace(/<button type="button" id="formalDoneBack"[^>]*>[\s\S]*?<\/button>/,''));
+ s=once(s,'<div id="status" role="status" aria-live="polite">','<div class="box"><label for="uatGate" class="field">私人測試通行碼</label><input id="uatGate" type="password" maxlength="64" autocomplete="off"><label for="caseKey" class="field">本案測試密鑰（建立時自動產生，請安全保存）</label><input id="caseKey" type="password" maxlength="64" autocomplete="off"><button id="readCase" type="button" class="ghost">唯讀重新核對原測試案件</button><p id="caseSummary" class="help"></p><button id="cancelTest" type="button" class="ghost">取消尚未完成的測試</button></div><div id="status" role="status" aria-live="polite">');
+ s=once(s,'<footer>Study1 · NSTC 115-2410-H-033-015｜正式報名以核准程序與公告為準</footer>','<footer>Study1 · 私人隔離驗收｜不是研究同意</footer>');
+ const start=s.indexOf('<script>\n'),end=s.lastIndexOf('</script>');
+ if(start<0||end<=start||s.indexOf('<script>',start+1)>=0)throw Error('UAT_ORIGINAL_CONTROLLER_ANCHOR');
+ s=s.slice(0,start)+'<script>\n('+gasController.toString()+')();\n</script>'+s.slice(end+9);
+ if(/id="(?:formalContact|formalName|formalEmail|formalPhone|screenQuestions|chooseE2)"|study1FormalHoldSlot|study1ParticipantBegin/.test(s))throw Error('UAT_ORIGINAL_FORMAL_INPUT_REMAINS');
+ return s;
+}
+// Source candidate only: a separate MYSELF owner-controlled profile of the
+// existing V2 project, same original apply view. Never accepted by the
+// existing public release/HEAD-only guards or called by a deploy workflow.
+function onlineCandidate(base){
+ const core=require('./study1-v2-gas-head-only.cjs');
+ core.canonical?core.canonical(base):core.digest(base);
+ core.closedWebsite(base);core.publicRpcSurface(base);
+ const files=base.map(f=>{
+  if(f.name==='appsscript'){const m=JSON.parse(f.source);m.webapp.access='MYSELF';return {...f,source:JSON.stringify(m,null,2)+'\n'};}
+  if(f.name==='Study1Visitor')return {...f,source:originalVisitor(f.source)};
+  if(f.name==='Website'){
+   let source=once(f.source,"  const t=HtmlService.createTemplateFromFile('Study1Visitor');","  study1AdminOwnerRequired_();\n  study1UatTrustedConfig_();\n  const t=HtmlService.createTemplateFromFile('Study1Visitor');");
+   source=once(source,"t.flowMode='FORMAL';","t.flowMode='GAS_UAT';");
+   source+='\nasync function study1E1SyntheticUat(request){\n try{study1AdminOwnerRequired_();}catch(_){return {ok:false,error:"UAT_REQUEST_REJECTED"};}\n return study1UatControlledRequest_(request);\n}\n';
+   return {...f,source};
+  }
+  return {...f};
+ });
+ for(const [name,p] of [['Study1UatSession','scripts/study1-v2-uat-session.js'],['Study1UatStoreTransaction','scripts/study1-v2-uat-store-transaction.js'],['Study1UatGasServices','scripts/study1-v2-uat-gas-services.js']]){
+  if(files.some(f=>f.name===name))throw Error('UAT_SOURCE_COLLISION');
+  files.push({name,type:'SERVER_JS',source:read(p)});
+ }
+ core.digest(files);core.closedWebsite(files);
+ let rejected=false;try{core.publicRpcSurface(files);}catch(_){rejected=true;}
+ if(!rejected)throw Error('UAT_MUST_NOT_PASS_PUBLIC_RELEASE_GUARD');
+ return files;
+}
+module.exports={originalVisitor,gasController,onlineCandidate};
