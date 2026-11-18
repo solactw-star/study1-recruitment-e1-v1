@@ -448,6 +448,8 @@ function joinedHarness(opts={}){
  if(opts.noticeUnknown){
   noticeRows=[row('UNKNOWN')];
  }
+ if(opts.dispatching)noticeRows=[row('DISPATCHING')];
+ if(opts.wrongParty)noticeRows[0][1]='APP_OTHER_12345678';
  const deep=x=>JSON.parse(JSON.stringify(x));
  const ctx={
   study1AdminOwnerRequired_:()=>{ownerChecks++;if(opts.denied)throw Error('OWNER_REQUIRED');},
@@ -523,6 +525,71 @@ function joinedHarness(opts={}){
    noticeMetadata,locks,unlocks,privateOpens,writes,mailCalls,abaTransitions})};
 }
 
+// Load the exact assembled candidate, keeping the original isolated source
+// adapters, not the real Sheets/Drive/Mail services.
+function formalJoined(opts={}){
+ const h=joinedHarness(opts),s=h.scope,adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ const snapshot=s.study1FormalSnapshot_,validate=s.study1FormalValidateSnapshot_;
+ // Avoid redeclaring the original top-level constants in the existing VM.
+ // Extract only the original, candidate-transformed public operations audit.
+ const src=get('Study1FormalBooking'),a=src.indexOf('function study1OwnerE1OperationsAudit(){'),b=src.indexOf('\n/** No writes: OWNER verifies',a);
+ assert.ok(a>=0&&b>a);vm.runInContext(src.slice(a,b),s);
+ s.study1FormalSnapshot_=snapshot;s.study1FormalValidateSnapshot_=validate;
+ vm.runInContext(get('Study1UatGasServices'),s);
+ const props=new Map([['STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true'],['DATA_APPROVED','true']]);
+ s.PropertiesService={getScriptProperties:()=>({getProperty:k=>props.get(k)??null})};
+ s.study1OwnerE1WorkspaceGate_=()=>{if(props.get('DATA_APPROVED')!=='true')throw Error('DATA_NOT_APPROVED');};
+ s.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ return {...h,props,html:get('AdminConsole')};
+}
+test('same-site formal B08 reuses original joined outbox audit, rejects wrong source and revoked authority without mutation',()=>{
+ for(const [opts,expected] of [[{},'PROVIDER_ACCEPTED_NOT_DELIVERED'],[{noticeAbsent:true},'NOT_QUEUED'],[{noticeUnknown:true},'UNKNOWN_REQUIRES_STAFF_REVIEW'],[{dispatching:true},'UNKNOWN_REQUIRES_STAFF_REVIEW'],[{wrongParty:true},'SOURCE_MISMATCH']]){
+  const h=formalJoined(opts),s=h.scope,result=s.study1OwnerE1OperationsAudit();
+  assert.equal(result.readOnly,true);assert.equal(result.actionAuthority,'NONE');assert.equal(result.booking.records[0].id,result.notice.records[0].id);assert.equal(result.notice.records[0].noticeStatus,expected);
+  assert.doesNotMatch(JSON.stringify(result),/APP_ORIGINAL|RSV_ORIGINAL|example.org|MAIL_PROVIDER_OUTCOME_UNKNOWN|SIGNED_PDF/);
+  assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+ }
+ const h=formalJoined(),s=h.scope;
+ h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');
+ assert.throws(()=>s.study1OwnerE1OperationsAudit(),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);assert.equal(h.stats().privateOpens,0);
+ h.props.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');h.props.delete('DATA_APPROVED');
+ assert.throws(()=>s.study1OwnerE1OperationsAudit(),/DATA_NOT_APPROVED/);assert.equal(h.stats().privateOpens,0);
+ h.props.set('DATA_APPROVED','true');
+ assert.throws(()=>s.study1OwnerE1OperationsAudit({mode:'TEST'}),/E1_OPERATIONS_INPUT_INVALID/);assert.equal(h.stats().privateOpens,0);
+ const original=s.study1OwnerE1NoticeProject_;
+ s.study1OwnerE1NoticeProject_=(...args)=>{const r=original(...args);h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');return r;};
+ assert.throws(()=>s.study1OwnerE1OperationsAudit(),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);
+ assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);assert.equal(h.stats().locks,h.stats().unlocks);
+ const denied=formalJoined({denied:true});assert.throws(()=>denied.scope.study1OwnerE1OperationsAudit(),/OWNER_REQUIRED/);assert.equal(denied.stats().privateOpens,0);
+ for(const [opts,error] of [[{bookingDrift:true},/OPERATIONS_RESERVATIONS_DRIFT/],[{noticeDrift:true},/OPERATIONS_NOTIFICATIONS_DRIFT/],[{registryContentDrift:true},/OPERATIONS_CONSENT_DRIFT/]]){
+  const drift=formalJoined(opts);assert.throws(()=>drift.scope.study1OwnerE1OperationsAudit(),error);assert.equal(drift.stats().writes,0);assert.equal(drift.stats().mailCalls,0);
+ }
+});
+test('same-site assembled formal B08 renders original audit only and clears stale, denied or malformed results',()=>{
+ const h=formalJoined({noticeUnknown:true}),html=h.html,nodes=new Map(),calls=[],pagehide=[];
+ const start=html.indexOf('<? if (siteFormalWorkspace) { ?>'),end=html.indexOf('<? } else { ?>',start);
+ assert.ok(start>=0&&end>start);
+ const panel=html.slice(start,end),make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},addEventListener(n,f){const old=this[n];this[n]=(...args)=>{old?.(...args);return f(...args);};}});
+ // Render the exact B08 section, while other panels remain outside this
+ // focused DOM harness; no TEST or repair control should be in formal markup.
+ const a=panel.indexOf('<section id="e1FormalOperations"'),b=panel.indexOf('</section>',a);
+ assert.ok(a>=0&&b>a);
+ assert.doesNotMatch(panel,/id="(siteTestClear|siteNoticeSend|e1RepairPreflight|e1RepairCommit|e1RecoveryRead|e1OpsRead)"/);
+ for(const m of panel.slice(a,b).matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ let fail,success,tamper=false,defer=false,late;
+ const google={script:{run:new Proxy({}, {get(_t,p){
+  if(p==='withSuccessHandler')return f=>{success=f;return google.script.run;};if(p==='withFailureHandler')return f=>{fail=f;return google.script.run;};
+  return (...args)=>{calls.push(p);const done=success,failed=fail;const reply=()=>{try{let v=h.scope[p](...args);if(tamper)v={...v,notice:{...v.notice,records:[]}};done(v);}catch(e){failed(e);}};if(defer)late=reply;else reply();};
+ }})}};
+ for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:{getElementById:id=>nodes.get(id),createElement:make},google,window:{google,addEventListener(n,f){if(n==='pagehide')pagehide.push(f);}}});
+ const read=nodes.get('e1FormalOpsRead'),out=nodes.get('e1FormalOpsResults'),status=nodes.get('e1FormalOpsStatus');
+ read.click();assert.match(out.textContent,/寄送結果 UNKNOWN；禁止重寄/);assert.match(status.textContent,/需人工查核 1 筆/);
+ tamper=true;read.click();assert.equal(out.textContent,'');assert.match(status.textContent,/未能完整核對/);
+ tamper=false;read.click();assert.match(out.textContent,/禁止重寄/);
+ defer=true;read.click();assert.equal(out.textContent,'');for(const f of pagehide)f();late();assert.equal(out.textContent,'');
+ defer=false;h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');read.click();assert.equal(out.textContent,'');assert.match(status.textContent,/未能完整核對/);
+ assert.deepEqual([...new Set(calls)],['study1OwnerE1OperationsAudit']);assert.equal(h.stats().writes,0);assert.equal(h.stats().mailCalls,0);
+});
 test('joined OWNER audit returns one coherent read under one lock and same consent revision',()=>{
  const h=joinedHarness(),result=h.scope.study1OwnerE1OperationsAudit(),s=h.stats();
  assert.equal(result.readOnly,true);

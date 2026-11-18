@@ -635,6 +635,12 @@ function sameSiteFormalBooking(source,restore=false){
   const head='function '+name+'(input){';
   source=once(source,head+(restore?gate:deny),head+(restore?deny:gate));
  }
+ const auditHead='function study1OwnerE1OperationsAudit(){';
+ const auditGate=gate+"if(arguments.length!==0)throw Error('E1_OPERATIONS_INPUT_INVALID');";
+ source=once(source,auditHead+(restore?auditGate:deny),auditHead+(restore?deny:auditGate));
+ const auditReturn="  return {readOnly:true,source:'ORIGINAL_E1_OPERATIONS',";
+ source=once(source,restore?'  '+gate+'\n  if(lock.hasLock()!==true)throw Error(\'OWNER_E1_OPERATIONS_LOCK_LOST\');\n'+auditReturn:auditReturn,
+  restore?auditReturn:'  '+gate+'\n  if(lock.hasLock()!==true)throw Error(\'OWNER_E1_OPERATIONS_LOCK_LOST\');\n'+auditReturn);
  const workspaceReturn="  return {mode:'OWNER_E1_WORKSPACE',experiment:'E1',revision:x.revision,asOfUtc:x.now,";
  const previewReturn="  return {...project,canCommit:commitBlocker===null,commitBlocker,\n   approvalRef:approval?approval.approvalRef:null,approvalReason:approval?approval.reason:null};";
  const readOnlyReturn="  return {...project,canCommit:false,commitBlocker:'FORMAL_WORKSPACE_READ_ONLY',approvalRef:null,approvalReason:null};";
@@ -850,11 +856,24 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
   .replace("resetProfilePdf();profileStatus('私人 PDF 未核實；請重新查詢個案，不提供下載。');","clear();text(status,'私人 PDF 未核實；請重新查詢個案，不提供下載。');");
  const formalController=once(sameSiteFormalWorkspaceController.toString(),'/* FORMAL_PROFILE_CONTROLLER */',
   "const pel=id=>document.getElementById(id);const clearNode=n=>{n.textContent='';};let profile=null,profileEpoch=0,profileUrl=null;\n"+profileScript);
- const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+formalDocuments+'</main>';
- section=once(section,'<main>','<main><p><a href="<?= siteAppUrl + \'?view=admin&workspace=formal\' ?>" target="_top">正式 B02/B03/B04/B10 唯讀工作區（須獨立資料授權）</a></p>');
+ // Reuse original B08 observation markup and joined controller only.
+ // Exclude repair/recovery controls; no additional source selector or writes.
+ const formalOps=slice('<section id="e1OwnerOperations"','<h3>跨工作階段原案件核對（唯讀）</h3>')
+  .replace(/e1Ops/g,'e1FormalOps').replace(/e1OwnerOperations/g,'e1FormalOperations')+
+  '<p><small>僅核對原 E1 同意索引所關聯的通知；未綁定的 outbox 紀錄不在本清單。此頁不提供補寄或修復操作。</small></p></section>';
+ let formalOpsScript=slice('function e1OwnerOperationsSetup_(){','\n/** A joined audit is an observation')
+  .replace(/e1Ops/g,'e1FormalOps')
+  .replace("function clear(){while(out.firstChild)out.removeChild(out.firstChild);}","function clear(){out.textContent='';}")
+  .replace("'正式營運狀態未能完整核對，禁止推定完成：'+\n   String(message&&message.message||message);","'正式營運狀態未能完整核對，禁止推定完成；請重新查詢原來源與權限。';")
+  .replace(" button.addEventListener('click',()=>{\n  const current=++request;"," window.addEventListener('pagehide',()=>{request++;clear();statusNode.textContent='';button.disabled=true;});\n button.addEventListener('click',()=>{\n  const current=++request;");
+ // Keep the original renderer's source, exact joined ID/revision, status and
+ // non-delivery semantics. Scope its DOM IDs to the formal template.
+ formalOpsScript="(function(){const $=id=>document.getElementById(id);\n"+formalOpsScript+"\n})();";
+ const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+formalDocuments+formalOps+'</main>';
+ section=once(section,'<main>','<main><p><a href="<?= siteAppUrl + \'?view=admin&workspace=formal\' ?>" target="_top">正式 B02/B03/B04/B08/B10 唯讀工作區（須獨立資料授權）</a></p>');
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
  return source.slice(0,start)+"<? if (siteFormalWorkspace) { ?>"+formalMarkup+"<? } else { ?>"+section.replace('</main>',turnstile+'</main>')+"<? } ?>"+
-  '<script>\n('+formalController+')();\n('+sameSiteFormalDocumentsController.toString()+')();\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+  '<script>\n('+formalController+')();\n('+sameSiteFormalDocumentsController.toString()+')();\n'+formalOpsScript+'\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the
