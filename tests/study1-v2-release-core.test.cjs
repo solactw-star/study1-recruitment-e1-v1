@@ -328,7 +328,9 @@ test('anonymous candidate changes only manifest and passes original closed publi
 test('immutable verified v4 remains known after GAS source changes; tampered or wrong ACL still refused',async()=>{
  const fs=require('node:fs'),path=require('node:path');
  const historical=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-pdf-stamp-core.txt'),'utf8');
- const current=candidate(),old=current.map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f);
+ // Exact historical B03/B02 source from 1a50790f; it must not track current product edits.
+ const historicalBooking=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-formal-booking.txt'),'utf8');
+ const current=candidate(),old=current.map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f.name==='Study1FormalBooking'?{...f,source:historicalBooking}:f);
  const historicalSha='ab5906a7e733cd2ea3520bc01e4ed137e3bd87c04f496da1ad06bf0c961c56c3';
  assert.equal(core.digest(old),historicalSha,'exact historical immutable source');
  assert.notEqual(core.digest(current),historicalSha);
@@ -369,7 +371,8 @@ test('historical immutable proof and module import do not depend on an unfinishe
   assert.throws(()=>devCore.reviewedPrivateTarget(),/allowlist/);
   assert.throws(()=>devCore.requireReviewedInventory(devCore.readDevelopmentSources()),/allowlist/);
   const historical=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-pdf-stamp-core.txt'),'utf8');
-  const old=candidate().map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f);
+  const historicalBooking=fs.readFileSync(path.join(__dirname,'fixtures','study1-v2-v4-formal-booking.txt'),'utf8');
+  const old=candidate().map(f=>f.name==='Study1PdfStampCore'?{...f,source:historical}:f.name==='Study1FormalBooking'?{...f,source:historicalBooking}:f);
   const proof=devDeploy.sourceProof({scriptId:devCore.SID,files:old},true);
   assert.equal(proof.known,true);
   assert.equal(devDeploy.sourceProof({scriptId:devCore.SID,files:old},false).known,false);
