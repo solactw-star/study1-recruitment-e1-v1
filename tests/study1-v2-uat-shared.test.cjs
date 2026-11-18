@@ -306,6 +306,14 @@ test('private GAS operation contract completes booking and real five-page PDF th
   ['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z'],
   ['TEST_SLOT_2','2026-11-19T04:00:00.000Z','2026-11-19T05:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
  const run=(key,op,p={},g=gate)=>realm.study1UatGasOperation_(config,{gate:g,caseKey:key},op,p);
+ const emailKey='f'.repeat(64),emails=[];
+ realm.STUDY1_ADMIN_OWNER_='owner@example.invalid';
+ realm.study1AdminOwnerRequired_=()=>{throw Error('OWNER_REQUIRED');};
+ realm.Utilities.getUuid=()=> '23456789-0000-4000-8000-000000000000';
+ realm.Utilities.computeHmacSha256Signature=(value,key)=>Array.from(crypto.createHmac('sha256',key).update(value).digest());
+ realm.otpConstantTimeHexEquals_=(a,b)=>crypto.timingSafeEqual(Buffer.from(a),Buffer.from(b));
+ realm.MailApp={sendEmail:message=>{assert.equal(locked,false);assert.match(matrix[4][0],/"state":"OTP"/);emails.push(message);}};
+ await assert.rejects(run(emailKey,'emailStart',{alias:'TEST_04',eligible:true}),/OWNER_REQUIRED/);
  await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true},'e'.repeat(64)),/UAT_ACCESS_DENIED/);assert.equal(opens,0);
  await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true,email:'not allowed'}),/UAT_REQUEST/);
  await assert.rejects(run(keyA,'start',{alias:'REAL_PERSON',eligible:true}),/UAT_SYNTHETIC_IDENTITY_REQUIRED/);
@@ -339,6 +347,19 @@ test('private GAS operation contract completes booking and real five-page PDF th
  await assert.rejects(run(keyB,'sign',sign),/UAT_HOLD_REQUIRED/);
  await run(keyC,'start',{alias:'TEST_03',eligible:true});await run(keyC,'verify',{code:'12345678'});
  await run(keyC,'hold',{slotId:'TEST_SLOT_2',requestId:'5'.repeat(32)});assert.equal((await run(keyC,'cancel')).bookingStatus,'CANCELLED');
+ realm.study1AdminOwnerRequired_=()=>{};
+ const issued=await run(emailKey,'emailStart',{alias:'TEST_04',eligible:true});
+ assert.equal(emails.length,1);assert.equal(emails[0].to,'owner@example.invalid');assert.ok(emails[0].subject.includes(issued.caseId));
+ const mailCode=emails[0].body.match(/測試驗證碼：(\d{8})/)[1];
+ assert.ok(!matrix[4][0].includes('"'+mailCode+'"'));
+ await assert.rejects(run(emailKey,'emailStart',{alias:'TEST_04',eligible:true}),/UAT_EMAIL_OTP_ALREADY_ISSUED/);
+ assert.equal(emails.length,1);
+ await assert.rejects(run(emailKey,'verify',{code:'12345678'}),/UAT_EMAIL_OTP_INVALID/);
+ await run(emailKey,'verify',{code:mailCode});
+ assert.equal((await run(emailKey,'read')).stage,'SLOTS');
+ const afterVerify=writes;
+ await assert.rejects(run(emailKey,'verify',{code:mailCode}),/UAT_EMAIL_OTP_USED/);
+ assert.equal(writes,afterVerify);
  // A cleanup between PDF parsing and its return invalidates the old request.
  const reopen=realm.study1UatCaseCopy_;
  realm.study1UatCaseCopy_=async(...args)=>{
@@ -346,7 +367,7 @@ test('private GAS operation contract completes booking and real five-page PDF th
   const nextGate=hash('e'.repeat(64));
   // Simulate the atomic header rotation actually verified in the range test.
   matrix[0]=['STUDY1_E1_SYNTHETIC_CASES_V1',id,'gate:'+nextGate,
-   'reset:'+new Date(clock).toISOString(),'cases:3','holds:0','confirmed:1','pdf:1',''];
+   'reset:'+new Date(clock).toISOString(),'cases:4','holds:0','confirmed:1','pdf:1',''];
   for(let i=1;i<matrix.length;i++)matrix[i]=Array(9).fill('');
   return result;
  };
