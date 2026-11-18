@@ -1139,3 +1139,11 @@
 - OWNER 同站隔離 TEST：在只登入研究室 OWNER 的無痕工作階段確認原專案缺少 STUDY1_E1_SYNTHETIC_UAT_V1，僅補入此隔離 TEST 設定，資料儲存指向既有專用測試表。後台與同站 TEST 正常開啟。使用虛構 TEST_01 完成模擬驗證、合成場次暫留、五頁合成 PDF 簽署與預約，唯讀重查核實同案為 CONFIRMED，完整 PDF 與 SHA 一致。
 - 清除回讀：測前預覽為 0 筆，清除前預覽僅含本次 TEST_01（1 筆案件、1 筆已確認預約、1 份測試 PDF、0 筆有效暫留）。後台顯示清除成功後重新載入並僅執行唯讀預覽，回讀案件 0、有效暫留 0、已確認預約 0、測試 PDF 0，TEST_SLOT_1 已占 0/1、剩餘 1；未重送清除。
 - COMPLETED=V5_RELEASE_VERIFIED_AND_SAME_SITE_TEST_PASSED_AND_CLEANED；SYNC_STATUS=V2_ORIGINAL_DEPLOYMENT_V5_VERIFIED；NEXT_ACTION=依正式規格接續 E1 真人流程與營運所需的獨立核准；本次未啟用真人收件、未更動正式資料、V1 或 OAuth。
+
+### 2026-11-18｜V2 原部署第 6 版隔離 Email OTP 與同案驗收完成
+
+- 發布：以 V2 main `cd7233480ab123859518f28eb4309533d648bc90` 更新原 GAS 部署，由第 5 版指向第 6 版。發布工作流回讀原部署、GAS HEAD 與第 6 版來源一致。[發布與回讀 44257383801](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44257383801)
+- 隔離 Email OTP：OWNER 用虛構身分 TEST_01 寄出一次，於研究室測試信箱唯讀確認收到同一案件的信件。首次驗證進入時段選擇；同案同碼再次提交回傳 `UAT_EMAIL_OTP_USED`。
+- 同案完成暫留、五頁合成 PDF 簽署與預約。唯讀重查確認預約為 `CONFIRMED`，完整 PDF 與 SHA 核實一致。
+- 清除前預覽僅有本次 TEST_01（案件 1、有效暫留 0、已確認預約 1、測試 PDF 1）。清除後重新載入 OWNER 後台，只執行唯讀預覽，確認案件 0、有效暫留 0、已確認預約 0、測試 PDF 0，TEST_SLOT_1 已占 0/1、剩餘 1。未重送清除。
+- COMPLETED=V6_ISOLATED_EMAIL_OTP_AND_SAME_CASE_UAT_CLEANUP_VERIFIED；本次驗收未開啟真人收件、未寫正式資料、未碰 V1。
