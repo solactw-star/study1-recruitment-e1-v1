@@ -209,10 +209,10 @@ test('Google automatic HEAD deployment parses omitted or zero version independen
  // a missing API field is NOT evidence of either private or public access.
  const privateHead=head(undefined);
  const omitted={...head(4,'V2-versioned-id'),entryPoints:[{entryPointType:'WEB_APP',webApp:{url:'https://script.google.com/macros/s/private/versioned'}}]};
- const evidence=evidence.readOnlyAclEvidence({deps:[privateHead,omitted],headProof:{access:'ANYONE_ANONYMOUS'},proofs:[{version:4,access:'ANYONE_ANONYMOUS'}]},true);
- assert.deepEqual(evidence.find(x=>x.kind==='HEAD'),{kind:'HEAD',version:null,manifestAccess:'ANYONE_ANONYMOUS',webEntryPoints:[{access:'MYSELF',executeAs:'USER_DEPLOYING'}]});
- assert.deepEqual(evidence.find(x=>x.version===4),{kind:'VERSIONED',version:4,manifestAccess:'ANYONE_ANONYMOUS',webEntryPoints:[{access:'omitted',executeAs:'omitted'}]});
- assert.doesNotMatch(JSON.stringify(evidence),/V2-opaque-development-id|V2-versioned-id|https:\/\//);
+ const aclEvidence=evidence.readOnlyAclEvidence({deps:[privateHead,omitted],headProof:{access:'ANYONE_ANONYMOUS'},proofs:[{version:4,access:'ANYONE_ANONYMOUS'}]},true);
+ assert.deepEqual(aclEvidence.find(x=>x.kind==='HEAD'),{kind:'HEAD',version:null,manifestAccess:'ANYONE_ANONYMOUS',webEntryPoints:[{access:'MYSELF',executeAs:'USER_DEPLOYING'}]});
+ assert.deepEqual(aclEvidence.find(x=>x.version===4),{kind:'VERSIONED',version:4,manifestAccess:'ANYONE_ANONYMOUS',webEntryPoints:[{access:'omitted',executeAs:'omitted'}]});
+ assert.doesNotMatch(JSON.stringify(aclEvidence),/V2-opaque-development-id|V2-versioned-id|https:\/\//);
  assert.deepEqual(evidence.readOnlyAclEvidence({deps:[{...privateHead,entryPoints:[]}],headProof:{access:'ANYONE_ANONYMOUS'},proofs:[]},true)[0].webEntryPoints,[]);
  const positive=evidence.normalizedDeployments([head(2,'V2-versioned-id')])[0];
  assert.equal(positive.kind,'VERSIONED');assert.equal(positive.version,2);
