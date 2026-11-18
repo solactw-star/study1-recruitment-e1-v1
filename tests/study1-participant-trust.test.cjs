@@ -115,6 +115,29 @@ test('Wrong hostname or action, stale challenge, failed success are rejected',()
   assert.equal(x.calls,1);
  }
 });
+test('OWNER Turnstile TEST exposes only public widget config and preserves Siteverify error codes',async()=>{
+ const x=harness();
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-uat-gas-services.js'),'utf8'),x.scope);
+ x.scope.study1UatTrustedConfig_=()=>({});
+ x.scope.study1AdminOwnerRequired_=()=>{throw Error('OWNER_REQUIRED');};
+ const request={operation:'turnstileVerify',token:x.request.humanToken};
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).error,'UAT_REQUEST_REJECTED');
+ assert.equal(x.calls,0);
+ x.scope.study1AdminOwnerRequired_=()=>{};
+ const cfg=await x.scope.study1UatControlledRequest_({operation:'turnstileConfig'});
+ assert.deepEqual(Object.keys(cfg.value).sort(),['action','siteKey']);
+ assert.equal(cfg.value.action,'study1_e1_owner_test');
+ const valid={success:true,hostname:'script.google.com',action:cfg.value.action,challenge_ts:new Date().toISOString()};
+ x.replies.push(valid,{success:false,'error-codes':['timeout-or-duplicate']},
+  {...valid,challenge_ts:new Date(Date.now()-301000).toISOString()});
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).value.verified,true);
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).error,'timeout-or-duplicate');
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).error,'BOT_PROTECTION_REJECTED');
+ x.props.delete('STUDY1_E1_TURNSTILE_SECRET');
+ assert.equal((await x.scope.study1UatControlledRequest_({operation:'turnstileConfig'})).error,'BOT_PROTECTION_PROVIDER_NOT_READY');
+ assert.equal(x.calls,3);
+ assert.deepEqual(x.reads,[]);
+});
 test('Bogus, absent and overlength human tokens fail before Siteverify',()=>{
  const x=harness();
  for(const token of ['',undefined,'a'.repeat(2049),'<script>alert(1)</script>']){
