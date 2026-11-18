@@ -1465,3 +1465,157 @@ function study1ConsentRecordsReconcile_(first,second,lock){
   formalSyncApproved:false,formalReady:false,sourceReadbackVerified:false,
   written:false,counts:stats,fieldMismatches:mismatches};
 }
+
+
+/** Isolated OWNER preflight candidate, no RPC or production call site.
+ * The dedicated gate must remain unset until separate approval. Never use
+ * a caller-supplied workbook, identity, evidence, flags or source adapter.
+ * All errors crossing this boundary are fixed codes, never provider payloads.
+ */
+function study1ConsentRecordsPreflightGate_(){
+ study1AdminOwnerRequired_();
+ const p=PropertiesService.getScriptProperties();
+ if(['STUDY1_PARTICIPANT_DATA_USE_APPROVED','STUDY1_ECONSENT_LIVE_SHEETS_APPROVED',
+     'STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','STUDY1_E1_CONSENT_RECORDS_PREFLIGHT_READ_APPROVED']
+    .some(k=>p.getProperty(k)!=='true'))
+  throw Error('CONSENT_PREFLIGHT_NOT_APPROVED');
+}
+function study1ConsentRecordsPreflightAcl_(file,id,mime,parentId){
+ const email=user=>user&&typeof user.getEmail==='function'?
+  String(user.getEmail()||'').trim().toLowerCase():'';
+ if(!file||file.getId()!==id||file.isTrashed()!==false||
+    file.getSharingAccess()!==DriveApp.Access.PRIVATE||
+    email(file.getOwner())!==STUDY1_ADMIN_OWNER_)
+  throw Error('CONSENT_PREFLIGHT_ACL');
+ const editors=file.getEditors(),viewers=file.getViewers();
+ if(!Array.isArray(editors)||!Array.isArray(viewers)||
+    editors.concat(viewers).some(u=>email(u)!==STUDY1_ADMIN_OWNER_))
+  throw Error('CONSENT_PREFLIGHT_ACL');
+ if(mime&&file.getMimeType()!==mime)throw Error('CONSENT_PREFLIGHT_ACL');
+ if(parentId){
+  const parents=file.getParents();let count=0,inside=false;
+  while(parents.hasNext()){
+   const parent=parents.next();count++;
+   if(parent.getId()===parentId)inside=true;
+  }
+  if(!inside||count!==1)throw Error('CONSENT_PREFLIGHT_ACL');
+ }
+}
+function study1ConsentRecordsPreflightFile_(id,mime,parentId){
+ if(typeof id!=='string'||!/^[A-Za-z0-9_-]{15,150}$/.test(id))
+  throw Error('CONSENT_PREFLIGHT_ACL');
+ study1ConsentRecordsPreflightAcl_(DriveApp.getFileById(id),id,mime,parentId);
+}
+function study1ConsentRecordsPreflightPass_(lock){
+ const guard=()=>{
+  study1ConsentRecordsPreflightGate_();
+  if(lock.hasLock()!==true)throw Error('CONSENT_PREFLIGHT_LOCK_LOST');
+ };
+ guard();
+ const personalId=study1BindingSheetId_('applicants');
+ if(personalId!=='1gpgWN-mbSF7AuEEeepD4qt4cycpLwT4S60SgixB4SDI')
+  throw Error('CONSENT_PREFLIGHT_WORKBOOK');
+ const mime='application/vnd.google-apps.spreadsheet';
+ const workbookAcl=()=>study1ConsentRecordsPreflightFile_(personalId,mime,null);
+ const folderAcl=()=>study1ConsentRecordsPreflightAcl_(DriveApp.getFolderById(STUDY1_CONSENT_DOC_FOLDER_),
+  STUDY1_CONSENT_DOC_FOLDER_,null,null);
+ workbookAcl();guard();
+ const book=SpreadsheetApp.openById(personalId);
+ if(!book||book.getId()!==personalId)throw Error('CONSENT_PREFLIGHT_WORKBOOK');
+ const sheet=bookingReadOnlyTab_(book,'ConsentRecords',STUDY1_CONSENT_RECORDS_HEADERS_);
+ workbookAcl();guard();
+ const props=PropertiesService.getScriptProperties();
+ const raw=props.getProperty(STUDY1_ECONSENT_POINTER_V2_);
+ // This preflight is explicitly V2, never an implicit legacy fallback.
+ if(typeof raw!=='string'||!raw)throw Error('CONSENT_PREFLIGHT_V2_REQUIRED');
+ const legacy=props.getProperty(STUDY1_ECONSENT_REGISTRY_);
+ const ptr=study1EConsentPointerV2_(raw,legacy);
+ const snapshotAcl=()=>study1ConsentRecordsPreflightFile_(ptr.fileId,'application/json',STUDY1_CONSENT_DOC_FOLDER_);
+ folderAcl();snapshotAcl();guard();
+ const registry=study1EConsentReadV2_(ptr);
+ snapshotAcl();folderAcl();guard();
+ const catalog=study1ConsentVersionRead_();
+ const catalogRaw=JSON.stringify(catalog);
+ const proofs=[];
+ for(const x of registry.records){
+  if(x.channel!=='FORMAL_E1'||x.experiment!=='E1'||!['CONFIRMED','WITHDRAWN'].includes(x.state))continue;
+  guard();
+  // No speculative proof when evidence is absent or corrupt. All evidence
+  // failures stop the preflight (including raw provider errors).
+  if(!x.binding||study1BindingDigest_(x.binding)!==x.binding.digest||
+     x.binding.documentSha!==x.documentSha||x.binding.documentVersion!==x.documentVersion)
+   throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+  const found=catalog.documents.filter(v=>v.experiment==='E1'&&
+   v.version===x.documentVersion&&v.sha256===x.documentSha&&v.researcherPresigned===true);
+  if(found.length!==1)throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+  const doc=found[0];
+  const refs=[[doc,'application/pdf'],[x.signedPdf,'application/pdf'],
+   [x.signature,'application/json'],[x.confirmation,'application/json']];
+  if(x.state==='WITHDRAWN')refs.push([x.withdrawal,'application/json']);
+  const evidenceAcl=()=>{
+   folderAcl();
+   for(const [ref,type] of refs){
+    if(!ref)throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+    study1ConsentRecordsPreflightFile_(ref.id,type,STUDY1_CONSENT_DOC_FOLDER_);
+   }
+  };
+  evidenceAcl();guard();
+  study1ConsentDocumentBytes_(doc);
+  const v=study1OwnerE1SignedPdfVerified_(x);
+  if(v.recordId!==x.id||v.version!==x.documentVersion||
+     v.sourceSha256!==x.documentSha||v.signedPdfSha256!==x.signedPdf.sha)
+   throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+  study1BindingUtc_(v.signedAtUtc);
+  if(!v.confirmedAtUtc||study1BindingUtc_(v.confirmedAtUtc)<study1BindingUtc_(v.signedAtUtc))
+   throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+  let withdrawalSha=null;
+  if(x.state==='WITHDRAWN'){
+   const w=study1EConsentEvent_(x.withdrawal,x,'WITHDRAWAL');
+   if(w.data.signatureHash!==x.signature.sha||w.data.confirmationHash!==x.confirmation.sha||
+      study1BindingUtc_(w.recordedAt)<study1BindingUtc_(v.confirmedAtUtc))
+    throw Error('CONSENT_PREFLIGHT_EVIDENCE');
+   withdrawalSha=x.withdrawal.sha;
+  }
+  evidenceAcl();guard();
+  // Do not retain v.base64 or the original event bodies in the snapshot.
+  proofs.push({consentId:x.id,bindingDigest:x.binding.digest,documentSha:x.documentSha,
+   signatureSha:x.signature.sha,confirmationSha:x.confirmation.sha,signedPdfSha:x.signedPdf.sha,
+   signedAtUtc:v.signedAtUtc,verified:true,withdrawalSha});
+ }
+ workbookAcl();snapshotAcl();folderAcl();guard();
+ if(props.getProperty(STUDY1_ECONSENT_POINTER_V2_)!==raw||
+    props.getProperty(STUDY1_ECONSENT_REGISTRY_)!==legacy||
+    JSON.stringify(study1ConsentVersionRead_())!==catalogRaw)
+  throw Error('CONSENT_PREFLIGHT_SOURCE_CHANGED');
+ return {registry,sheet,proofs:{revision:registry.revision,records:proofs},pointerRaw:raw,catalogRaw};
+}
+function study1OwnerConsentRecordsPreflight_(){
+ let lock=null,held=false;
+ const safe=new Set(['CONSENT_PREFLIGHT_NOT_APPROVED','CONSENT_PREFLIGHT_LOCK_BUSY',
+  'CONSENT_PREFLIGHT_LOCK_LOST','CONSENT_PREFLIGHT_ACL','CONSENT_PREFLIGHT_WORKBOOK',
+  'CONSENT_PREFLIGHT_V2_REQUIRED','CONSENT_PREFLIGHT_EVIDENCE','CONSENT_PREFLIGHT_SOURCE_CHANGED',
+  'CONSENT_RECORDS_SOURCE_CHANGED']);
+ try{
+  if(arguments.length!==0)throw Error('CONSENT_PREFLIGHT_NOT_APPROVED');
+  study1ConsentRecordsPreflightGate_();
+  lock=LockService.getScriptLock();
+  if(!lock||typeof lock.tryLock!=='function'||typeof lock.hasLock!=='function'||
+     typeof lock.releaseLock!=='function'||lock.tryLock(10000)!==true)
+   throw Error('CONSENT_PREFLIGHT_LOCK_BUSY');
+  held=true;
+  const first=study1ConsentRecordsPreflightPass_(lock);
+  const second=study1ConsentRecordsPreflightPass_(lock);
+  if(first.pointerRaw!==second.pointerRaw||first.catalogRaw!==second.catalogRaw)
+   throw Error('CONSENT_PREFLIGHT_SOURCE_CHANGED');
+  const result=study1ConsentRecordsReconcile_(first,second,lock);
+  study1ConsentRecordsPreflightGate_();
+  if(lock.hasLock()!==true)throw Error('CONSENT_PREFLIGHT_LOCK_LOST');
+  return {...result,preflightMode:'ISOLATED_OWNER_CANDIDATE',
+   boundedDoubleRead:true,historyAnchorVerified:false,formalReadAuthorized:false};
+ }catch(e){
+  // Only fixed, allowlisted classification codes; never echo provider errors.
+  throw Error(e&&safe.has(e.message)?e.message:'CONSENT_PREFLIGHT_REJECTED');
+ }finally{
+  if(held){try{lock.releaseLock();}catch(_){throw Error('CONSENT_PREFLIGHT_LOCK_LOST');}}
+ }
+}

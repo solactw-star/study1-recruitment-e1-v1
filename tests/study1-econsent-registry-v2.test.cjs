@@ -695,7 +695,175 @@ test('RECONCILE 3000 synthetic completed records and 10000 row guard, tail misma
 });
 test('RECONCILE candidate is private internal helper with no RPC or automatic call site',()=>{
  const matches=source.match(/study1ConsentRecordsReconcile_\s*\(/g)||[];
- assert.equal(matches.length,1);
+ assert.equal(matches.length,2); // definition plus internal preflight only
+ assert.match(source,/const result=study1ConsentRecordsReconcile_\(first,second,lock\);/);
  assert.match(source,/function study1ConsentRecordsReconcile_\(/);
  assert.doesNotMatch(source,/function study1ConsentRecordsReconcile\(/);
+});
+
+
+// Actual original read-only tab, registry pointer, ACL and PDF/event readers
+// execute against fake services. No credentials/network/real document.
+function preflightFixture(){
+ const h=reconciliationFixture(),f=h.f,c=f.scope;
+ for(const n of ['BookingCore.js','Study1PdfStampCore.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas',n),'utf8'),c);
+ c.Utilities.formatDate=(d)=>new Date(d.getTime()+8*3600000).toISOString().slice(0,10).replace(/-/g,'/');
+ c.Utilities.base64Encode=bytes=>Buffer.from(bytes).toString('base64');
+ const owner='solac.tw@gmail.com',personal='1gpgWN-mbSF7AuEEeepD4qt4cycpLwT4S60SgixB4SDI',folder='1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU';
+ c.SITE_RESOURCES_={personal,operations:'1o8BtIgwnBpPjUi89dgWKwh5NK9tq0RDrfYAValGYbnQ'};
+ const a=h.make(1,'WITHDRAWN'),pdf=Buffer.from('%PDF-1.7\n'+'SYNTHETIC ONLY '.repeat(20)+'\n%%EOF');
+ const sourceId='PRIVATE_SOURCE_PDF_001',at=a.row[7],confirmed='2026-11-18T02:00:01.000Z',withdrawn='2026-11-18T02:00:02.000Z';
+ const doc={experiment:'E1',id:sourceId,title:'synthetic',version:a.x.documentVersion,sha256:sha(pdf),
+  bytes:pdf.length,url:'https://drive.google.com/file/d/'+sourceId+'/view',researcherPresigned:true,at};
+ a.x.documentSha=doc.sha256;a.x.binding.documentSha=doc.sha256;
+ a.x.binding.digest=c.study1BindingDigest_(a.x.binding);
+ a.x.signedPdf.sha=sha(pdf);a.x.participantSignedPdf.sha=sha(pdf);
+ const metadata=(id,mime,bytes)=>({id,mime,bytes,access:'PRIVATE',parentId:folder,owner,editors:[],viewers:[],trashed:false});
+ const envelope=(ref,kind,data,time)=>{
+  const bytes=Buffer.from(JSON.stringify({schemaVersion:1,kind,recordId:a.x.id,experiment:'E1',documentSha:doc.sha256,recordedAt:time,data}));
+  ref.sha=sha(bytes);f.files.set(ref.id,metadata(ref.id,'application/json',bytes));
+ };
+ envelope(a.x.signature,'SIGNATURE',{serverSignedAt:at,taipeiDate:'2026/11/18',signedPdfSha256:sha(pdf),name:'PRIVATE_TEST_SENTINEL'},at);
+ envelope(a.x.confirmation,'CONFIRMATION',{mode:'RESEARCHER_PRESIGNED_SOURCE',researcherSignedSourceSha256:doc.sha256,
+  signatureHash:a.x.signature.sha,participantSignedPdfSha256:sha(pdf),researcherSignedPdfSha256:sha(pdf)},confirmed);
+ envelope(a.x.withdrawal,'WITHDRAWAL',{signatureHash:a.x.signature.sha,confirmationHash:a.x.confirmation.sha,reason:'PRIVATE_REASON_SENTINEL'},withdrawn);
+ f.files.set(sourceId,metadata(sourceId,'application/pdf',pdf));
+ f.files.set(a.x.signedPdf.id,metadata(a.x.signedPdf.id,'application/pdf',pdf));
+ f.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify({schemaVersion:1,revision:1,documents:[doc],current:{E1:sourceId,E2:null},published:{E1:sourceId,E2:null}}));
+ a.row=[a.x.id,a.x.binding.applicantId,a.x.binding.reservationId,a.x.documentVersion,a.x.documentSha,a.x.signedPdf.id,a.x.signedPdf.sha,at,'WITHDRAWN'];
+ f.enable();c.study1EConsentWrite_(f.legacy,{schemaVersion:1,revision:2,records:[a.x]});
+ const pointer=JSON.parse(f.values.get('STUDY1_ECONSENT_POINTER_V2'));
+ Object.assign(f.files.get(pointer.fileId),{owner,editors:[],viewers:[],trashed:false});
+ const wb=metadata(personal,'application/vnd.google-apps.spreadsheet',Buffer.alloc(0));
+ const fd=metadata(folder,null,Buffer.alloc(0));
+ const controls={active:owner,effective:owner,busy:false,lost:false,bookId:personal,missingTab:false,formula:null,rows:[a.row],
+  headers:h.header.slice(),onOpen:null,onValues:null,onAcl:null,onBlob:null,onRelease:null,throwOpen:false};
+ const calls={locks:0,releases:0,opens:0,drive:0,values:0,formulas:0,blobs:0,writes:0};
+ const approvals=['STUDY1_PARTICIPANT_DATA_USE_APPROVED','STUDY1_ECONSENT_LIVE_SHEETS_APPROVED',
+  'STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','STUDY1_E1_CONSENT_RECORDS_PREFLIGHT_READ_APPROVED'];
+ for(const k of approvals)f.values.set(k,'true');
+ f.values.set('OPEN','false');f.values.set('CONSENT_READY','false');
+ f.onPropertyWrite(()=>{calls.writes++;throw Error('FORBIDDEN_PROPERTY_WRITE');});
+ let locked=false;
+ c.Session={getActiveUser:()=>({getEmail:()=>controls.active}),getEffectiveUser:()=>({getEmail:()=>controls.effective})};
+ c.LockService={getScriptLock:()=>({tryLock:()=>{calls.locks++;locked=!controls.busy;return locked;},
+  hasLock:()=>locked&&!controls.lost,releaseLock:()=>{calls.releases++;locked=false;if(controls.onRelease)controls.onRelease();}})};
+ const user=email=>({getEmail:()=>email});
+ const proxy=data=>({
+  getId:()=>data.id,isTrashed:()=>data.trashed,getSharingAccess:()=>{if(controls.onAcl)controls.onAcl(data);return data.access;},
+  getOwner:()=>data.owner?user(data.owner):null,getEditors:()=>data.editors?.map(user),getViewers:()=>data.viewers?.map(user),
+  getMimeType:()=>data.mime,getSize:()=>data.bytes.length,
+  getParents:()=>{let n=0;return {hasNext:()=>n<(data.parentIds||[data.parentId]).length,next:()=>({getId:()=> (data.parentIds||[data.parentId])[n++]})};},
+  getBlob:()=>{calls.blobs++;if(controls.onBlob)controls.onBlob(data);return {getBytes:()=>[...data.bytes],getDataAsString:()=>data.bytes.toString('utf8')};},
+  setTrashed:()=>{calls.writes++;throw Error('FORBIDDEN_DRIVE_WRITE');},setSharing:()=>{calls.writes++;throw Error('FORBIDDEN_ACL_WRITE');}
+ });
+ // getParents iterator increments on next, not on getId (capture id).
+ function fileProxy(data){
+  const p=proxy(data);
+  p.getParents=()=>{let n=0;const ids=data.parentIds||[data.parentId];return {hasNext:()=>n<ids.length,next:()=>{const id=ids[n++];return {getId:()=>id};}};};
+  return p;
+ }
+ c.DriveApp={Access:{PRIVATE:'PRIVATE'},getFileById:id=>{calls.drive++;const data=id===personal?wb:f.files.get(id);
+  if(!data)throw Error('PRIVATE_PROVIDER_ERROR '+id);return fileProxy(data);},
+  getFolderById:id=>{calls.drive++;assert.equal(id,folder);return fileProxy(fd);}};
+ const tab={getLastRow:()=>controls.rows.length+1,getLastColumn:()=>controls.headers.length,
+  getRange:(start,col,n,width)=>{assert.equal(col,1);assert.equal(width,9);
+   return {getFormulas:()=>{calls.formulas++;return Array.from({length:n},(_,i)=>Array.from({length:width},(_,j)=>
+    controls.formula&&controls.formula(start+i,j,calls.formulas)?'=SECRET_FORMULA':''));
+   },getValues:()=>{calls.values++;if(controls.onValues)controls.onValues(start);
+    return start===1?[controls.headers]:controls.rows.slice(start-2,start-2+n);
+   },setValues:()=>{calls.writes++;throw Error('FORBIDDEN_SHEET_WRITE');}};
+  }};
+ c.SpreadsheetApp={openById:id=>{calls.opens++;assert.equal(id,personal);
+  if(controls.onOpen)controls.onOpen(calls.opens);
+  if(controls.throwOpen)throw Error('PRIVATE_PROVIDER_ERROR '+personal);
+  return {getId:()=>controls.bookId,getSheetByName:name=>{assert.equal(name,'ConsentRecords');return controls.missingTab?null:tab;}};
+ }};
+ const check=(...args)=>c.study1OwnerConsentRecordsPreflight_(...args);
+ return {h,f,c,a,doc,wb,fd,controls,calls,approvals,pointer,personal,check,owner};
+}
+test('PREFLIGHT OWNER two actual synthetic source passes yield aggregate-only result with zero writes',()=>{
+ const x=preflightFixture(),before=JSON.stringify([...x.f.values]),files=x.f.files.size;
+ const result=x.check();
+ assert.equal(result.result,'CANDIDATE_FIELDS_MATCH');assert.equal(result.counts.matchedCompletedRows,1);
+ assert.equal(result.preflightMode,'ISOLATED_OWNER_CANDIDATE');assert.equal(result.boundedDoubleRead,true);
+ for(const k of ['formalSyncApproved','formalReady','sourceReadbackVerified','written','historyAnchorVerified','formalReadAuthorized'])assert.equal(result[k],false);
+ assert.equal(x.calls.opens,2);assert.equal(x.calls.values,4);assert.ok(x.calls.formulas>=8);assert.ok(x.calls.blobs>0);
+ assert.equal(x.calls.locks,1);assert.equal(x.calls.releases,1);assert.equal(x.calls.writes,0);
+ assert.equal(JSON.stringify([...x.f.values]),before);assert.equal(x.f.files.size,files);
+ assert.doesNotMatch(JSON.stringify(result),/PRIVATE_|abcdef|aaaaaaaa|base64|signedAtUtc|solac.tw|serverSignedAt/);
+});
+test('PREFLIGHT missing dedicated or inherited approval and wrong OWNER stop before any source or lock access',()=>{
+ for(const key of ['STUDY1_PARTICIPANT_DATA_USE_APPROVED','STUDY1_ECONSENT_LIVE_SHEETS_APPROVED',
+  'STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','STUDY1_E1_CONSENT_RECORDS_PREFLIGHT_READ_APPROVED']){
+  const x=preflightFixture();x.f.values.delete(key);
+  assert.throws(()=>x.check(),/NOT_APPROVED/);assert.equal(x.calls.opens+x.calls.drive+x.calls.locks,0);
+ }
+ for(const which of ['active','effective']){
+  const x=preflightFixture();x.controls[which]='';
+  assert.throws(()=>x.check(),/PREFLIGHT_REJECTED/);assert.equal(x.calls.opens+x.calls.drive+x.calls.locks,0);
+ }
+ const x=preflightFixture();assert.throws(()=>x.check({workbookId:'other'}),/NOT_APPROVED/);
+ assert.equal(x.calls.opens+x.calls.drive+x.calls.locks,0);
+});
+test('PREFLIGHT workbook ID, missing tab and exact nine headers reject before data/evidence access',()=>{
+ for(const change of [x=>{x.c.SITE_RESOURCES_.personal='OTHER';},
+  x=>{x.controls.bookId='OTHER';},x=>{x.controls.missingTab=true;},
+  x=>{x.controls.headers[3]='OTHER';},x=>{x.controls.headers.push('EXTRA');}]){
+  const x=preflightFixture();change(x);assert.throws(()=>x.check(),/CONSENT_PREFLIGHT_/);
+  assert.equal(x.calls.blobs,0);assert.equal(x.calls.releases,1);assert.equal(x.calls.writes,0);
+ }
+});
+test('PREFLIGHT rejects workbook sharing, wrong owner, editors/viewers, trash, wrong MIME and missing ACL methods',()=>{
+ for(const change of [x=>x.wb.access='PUBLIC',x=>x.wb.owner='OTHER',x=>x.wb.editors=['OTHER'],
+  x=>x.wb.viewers=['OTHER'],x=>x.wb.trashed=true,x=>x.wb.mime='application/pdf',x=>x.wb.editors=null]){
+  const x=preflightFixture();change(x);assert.throws(()=>x.check(),/PREFLIGHT_ACL/);
+  assert.equal(x.calls.opens,0);assert.equal(x.calls.values,0);assert.equal(x.calls.releases,1);
+ }
+});
+test('PREFLIGHT formulas in headers, values and inserted after read fail closed before PDF read',()=>{
+ for(const formula of [(row,j)=>row===1&&j===0,(row,j)=>row===2&&j===5,
+  (row,j,n)=>row===2&&j===5&&n>=4]){
+  const x=preflightFixture();x.controls.formula=formula;
+  assert.throws(()=>x.check(),/PREFLIGHT_REJECTED/);assert.equal(x.calls.blobs,0);assert.equal(x.calls.writes,0);
+ }
+});
+test('PREFLIGHT changed sheet rows, catalog, pointer or same-revision snapshot rejected; no V1 fallback',()=>{
+ const x=preflightFixture();x.controls.onOpen=n=>{if(n===2)x.controls.rows[0][8]='CONFIRMED';};
+ assert.throws(()=>x.check(),/CONSENT_RECORDS_SOURCE_CHANGED/);
+ const y=preflightFixture();y.controls.onOpen=n=>{if(n===2){
+  const key='STUDY1_CONSENT_DOCUMENT_INDEX_V1',cat=JSON.parse(y.f.values.get(key));cat.revision++;y.f.values.set(key,JSON.stringify(cat));}};
+ assert.throws(()=>y.check(),/PREFLIGHT_SOURCE_CHANGED/);
+ const z=preflightFixture();z.f.values.delete('STUDY1_ECONSENT_POINTER_V2');
+ assert.throws(()=>z.check(),/PREFLIGHT_V2_REQUIRED/);assert.equal(z.calls.blobs,0);
+ const tampered=preflightFixture();tampered.f.files.get(tampered.pointer.fileId).bytes[0]^=1;
+ assert.throws(()=>tampered.check(),/PREFLIGHT_REJECTED/);
+});
+test('PREFLIGHT evidence and registry strict private ACL, folder membership and source integrity reject',()=>{
+ for(const change of [x=>x.fd.viewers=['OTHER'],x=>x.f.files.get(x.pointer.fileId).editors=['OTHER'],
+  x=>x.f.files.get(x.a.x.signature.id).parentIds=['OTHER'],x=>x.f.files.get(x.a.x.withdrawal.id).viewers=['OTHER'],
+  x=>x.f.files.get(x.a.x.signedPdf.id).bytes[15]^=1,
+  x=>x.f.files.get(x.doc.id).bytes[15]^=1,
+  x=>x.f.files.get(x.a.x.confirmation.id).bytes[15]^=1]){
+  const x=preflightFixture();change(x);assert.throws(()=>x.check(),/CONSENT_PREFLIGHT_/);
+  assert.equal(x.calls.writes,0);assert.equal(x.calls.releases,1);
+ }
+});
+test('PREFLIGHT lock busy, lost mid-read, revoked gate or owner and post-read ACL drift never release data',()=>{
+ const busy=preflightFixture();busy.controls.busy=true;assert.throws(()=>busy.check(),/LOCK_BUSY/);
+ assert.equal(busy.calls.opens+busy.calls.drive+busy.calls.releases,0);
+ for(const change of [x=>{x.controls.lost=true;},x=>{x.f.values.delete(x.approvals[3]);},
+  x=>{x.controls.active='OTHER';},x=>{x.wb.viewers=['OTHER'];}]){
+  const x=preflightFixture();x.controls.onValues=start=>{if(start===2)change(x);};
+  assert.throws(()=>x.check(),/CONSENT_PREFLIGHT_/);assert.equal(x.calls.blobs,0);assert.equal(x.calls.releases,1);
+ }
+});
+test('PREFLIGHT original provider errors and release errors are redacted; no arbitrary rows or public RPC',()=>{
+ const x=preflightFixture();x.controls.throwOpen=true;
+ assert.throws(()=>x.check(),e=>e.message==='CONSENT_PREFLIGHT_REJECTED');assert.equal(x.calls.releases,1);
+ const y=preflightFixture();y.controls.onRelease=()=>{throw Error('PRIVATE_RELEASE_SECRET');};
+ assert.throws(()=>y.check(),e=>e.message==='CONSENT_PREFLIGHT_LOCK_LOST');
+ assert.equal((source.match(/study1OwnerConsentRecordsPreflight_\s*\(/g)||[]).length,1);
+ assert.doesNotMatch(source,/function study1OwnerConsentRecordsPreflight\(/);
 });
