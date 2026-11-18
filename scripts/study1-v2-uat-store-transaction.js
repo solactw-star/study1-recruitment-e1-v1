@@ -140,8 +140,11 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     // Owner maintenance projection: only validated synthetic aliases and
     // booking status, never hashes, keys, PDF bytes or stored raw rows.
     const effective=c=>c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state;
+    // Derive verification status only; presence of emailOtp never proves delivery.
+    const otpStatus=c=> (c.emailOtp?'EMAIL_':'SIMULATED_')+(c.state==='CANCELLED'?'CANCELLED':
+     c.state!=='OTP'?'VERIFIED':c.emailOtp&&Date.parse(c.emailOtp.expiresAt)<=at?'EXPIRED':'PENDING');
     const cases=live.map(c=>({alias:c.alias,state:effective(c),slotId:c.slotId||null,
-     pdfSaved:c.state==='CONFIRMED'}));
+     pdfSaved:c.state==='CONFIRMED',otpStatus:otpStatus(c)}));
     const slotSummary=slots.map(s=>{
      const occupied=cases.filter(c=>c.slotId===s[0]&&['HELD','CONFIRMED'].includes(c.state)).length;
      const free=available.find(v=>v.slotId===s[0]);

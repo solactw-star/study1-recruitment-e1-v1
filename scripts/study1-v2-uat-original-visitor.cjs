@@ -305,6 +305,11 @@ function sameSiteCleanupController(){
  const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
  const say=s=>{summary.textContent=s;};
  const labels={OTP:'待驗證',SLOTS:'待選時段',HELD:'暫留',CONFIRMED:'已確認',CANCELLED:'已取消',EXPIRED:'已逾期'};
+ const otpLabels={SIMULATED_PENDING:'模擬 OTP 待驗證',SIMULATED_VERIFIED:'模擬 OTP 已驗證',SIMULATED_CANCELLED:'模擬 OTP 案件已取消',EMAIL_PENDING:'Email OTP 待驗證（寄達未確認）',EMAIL_EXPIRED:'Email OTP 已過期（寄達未確認）',EMAIL_VERIFIED:'Email OTP 已驗證',EMAIL_CANCELLED:'Email OTP 案件已取消'};
+ const otpMatches=c=>Object.prototype.hasOwnProperty.call(otpLabels,c.otpStatus)&&
+  (c.state==='OTP'?['SIMULATED_PENDING','EMAIL_PENDING','EMAIL_EXPIRED'].includes(c.otpStatus):
+   c.state==='CANCELLED'?['SIMULATED_CANCELLED','EMAIL_CANCELLED'].includes(c.otpStatus):
+    ['SIMULATED_VERIFIED','EMAIL_VERIFIED'].includes(c.otpStatus));
  const exact=(obj,keys)=>obj&&Object.keys(obj).sort().join(',')===keys.slice().sort().join(',');
  const iso=s=>typeof s==='string'&&Number.isFinite(Date.parse(s))&&new Date(s).toISOString()===s;
  const validLists=p=>{
@@ -314,7 +319,7 @@ function sameSiteCleanupController(){
    s.capacity===1&&[0,1].includes(s.occupied)&&s.remaining===1-s.occupied&&
    typeof s.bookable==='boolean'&&(!s.bookable||s.remaining===1)))return false;
   if(new Set(p.slots.map(s=>s.slotId)).size!==p.slots.length)return false;
-  if(!p.cases.every(c=>exact(c,['alias','state','slotId','pdfSaved'])&&/^TEST_(0[1-9]|1[0-2])$/.test(c.alias)&&
+  if(!p.cases.every(c=>exact(c,['alias','state','slotId','pdfSaved','otpStatus'])&&otpMatches(c)&&/^TEST_(0[1-9]|1[0-2])$/.test(c.alias)&&
    Object.prototype.hasOwnProperty.call(labels,c.state)&&(c.slotId===null||p.slots.some(s=>s.slotId===c.slotId))&&
    (!['HELD','CONFIRMED','EXPIRED'].includes(c.state)||c.slotId!==null)&&
    (!['OTP','SLOTS'].includes(c.state)||c.slotId===null)&&c.pdfSaved===(c.state==='CONFIRMED')))return false;
@@ -324,7 +329,7 @@ function sameSiteCleanupController(){
    p.slots.every(s=>s.occupied===p.cases.filter(c=>c.slotId===s.slotId&&['HELD','CONFIRMED'].includes(c.state)).length);
  };
  const showLists=p=>{
-  casesOut.textContent=p.cases.length?p.cases.map(c=>c.alias+'｜'+labels[c.state]+'｜'+(c.slotId||'未選時段')+'｜'+(c.pdfSaved?'已保存測試 PDF':'無簽署 PDF')).join('\n'):'目前無測試案件';
+  casesOut.textContent=p.cases.length?p.cases.map(c=>c.alias+'｜'+labels[c.state]+'｜'+(c.slotId||'未選時段')+'｜'+(c.pdfSaved?'已保存測試 PDF':'無簽署 PDF')+'｜'+otpLabels[c.otpStatus]).join('\n'):'目前無測試案件';
   const local=s=>new Date(s).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
   slotsOut.textContent=p.slots.map(s=>s.slotId+'｜'+local(s.startAtUtc)+' – '+local(s.endAtUtc)+'｜已占 '+s.occupied+'/'+s.capacity+'｜剩餘 '+s.remaining+'｜'+(s.bookable?'可預約':'不可預約')).join('\n');
  };
