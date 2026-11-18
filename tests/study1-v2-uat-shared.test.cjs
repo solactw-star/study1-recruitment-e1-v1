@@ -494,7 +494,7 @@ test('release preflight identifies exact deterministic private candidate and syn
   assert.throws(()=>adapter.onlineCandidate(changed),/UAT_BASE_INVENTORY/);
  }
  assert.throws(()=>adapter.onlineCandidate(candidate),/UAT_BASE_INVENTORY/);
- assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseProfile({SOURCE_PROFILE:'private_e1_uat'}),/invalid V2 source profile/);
+ assert.throws(()=>core.requireReviewedInventory(candidate),/allowlist/);
 
  assert.notEqual(candidateSha,baselineSha);
  assert.equal(candidate.length,30);
@@ -542,7 +542,7 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(candidateSha,core.digest(adapter.sameSiteCandidate()));
  console.log('SAME_SITE_REVIEW_ONLY '+JSON.stringify({candidateSha256:candidateSha,fileCount:files.length,modified,added:extra,access:'ANYONE_ANONYMOUS',executeAs:'USER_DEPLOYING',releaseAuthorized:false}));
  assert.throws(()=>core.publicRpcSurface(files));
- assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>core.requireReviewedInventory(files),/allowlist/);
  const html=get('Study1Visitor'),admin=get('AdminConsole');
  assert.match(html,/<\? if \(flowMode === 'GAS_UAT'\) \{ \?>/);
  assert.match(html,/data-site-mode="FORMAL"/);assert.match(html,/data-site-mode="GAS_UAT"/);
@@ -620,7 +620,7 @@ test('same-site assembler source contract rejects unreviewed inventory, bytes, t
   [change('Study1UatSession',f=>({...f,type:'HTML'})),/unexpected kernel surface/],
   [change('Study1UatStoreTransaction',f=>({...f,source:f.source+'\nfunction unreviewedRpc(){}'})),/unexpected kernel surface/]
  ])assert.throws(()=>prove(files),reason);
- assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>core.requireReviewedInventory(target),/allowlist/);
  assert.throws(()=>core.publicRpcSurface(target));
 });
 test('same-site admin preview and confirm button block unknown destructive retries',async()=>{
@@ -687,7 +687,7 @@ test('same-site post-release evidence checks original URL, immutable content and
   x=>{x.after.headSha=core.digest(baseline);},
   x=>{x.newContent.scriptId='OTHER';}
  ])assert.throws(()=>verify(mutate(bad)));
- assert.throws(()=>require('../scripts/study1-v2-gas-head-only.cjs').releaseFiles({SOURCE_PROFILE:'same_site_test'}),/invalid V2 source profile/);
+ assert.throws(()=>core.requireReviewedInventory(target),/allowlist/);
  assert.throws(()=>core.publicRpcSurface(target));
 });
 
