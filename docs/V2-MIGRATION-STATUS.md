@@ -1147,3 +1147,10 @@
 - 同案完成暫留、五頁合成 PDF 簽署與預約。唯讀重查確認預約為 `CONFIRMED`，完整 PDF 與 SHA 核實一致。
 - 清除前預覽僅有本次 TEST_01（案件 1、有效暫留 0、已確認預約 1、測試 PDF 1）。清除後重新載入 OWNER 後台，只執行唯讀預覽，確認案件 0、有效暫留 0、已確認預約 0、測試 PDF 0，TEST_SLOT_1 已占 0/1、剩餘 1。未重送清除。
 - COMPLETED=V6_ISOLATED_EMAIL_OTP_AND_SAME_CASE_UAT_CLEANUP_VERIFIED；本次驗收未開啟真人收件、未寫正式資料、未碰 V1。
+
+### 2026-11-18｜V2 原部署第 7 版隔離 Turnstile 與線上阻塞
+
+- 原 V2 OWNER 後台已新增隔離 Turnstile 面板，使用獨立 action 呼叫 Cloudflare Siteverify，檢查 hostname、action 與時效。面板只核驗 token，無報名建立、正式資料讀寫或真人收件。49 項本機測試通過，包含模擬有效、過期、重用、非 OWNER 與缺設定。
+- [發布執行 44267337377](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44267337377) 在最終回讀回報 V2_FINAL_READBACK_MISMATCH，未重送寫入。[獨立唯讀查核 44267624017](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44267624017) 成功，確認原部署指向第 7 版，GAS HEAD 與部署版本來源摘要皆為 b93cf55bca68b95d014f9460e2d675976fbf472cea3f90d999d22327b2d38f9f。
+- OWNER 線上開啟原部署後台，面板已載入，點「載入 Turnstile 挑戰」後回傳 BOT_PROTECTION_PROVIDER_NOT_READY。卡在 GAS 的 provider 設定檢查，尚未產生 token 或呼叫 Cloudflare。有效、過期、重用三項線上驗收待完成。由有權管理者配置原 V2 的有效 Turnstile sitekey、secret 與允許 hostname 後，在同一面板驗收；不把離線結果當成線上通過。
+- SYNC_STATUS=V7_DEPLOYMENT_VERIFIED；BLOCKER=BOT_PROTECTION_PROVIDER_NOT_READY。真人收件未啟用，正式資料與 V1 均未變更。
