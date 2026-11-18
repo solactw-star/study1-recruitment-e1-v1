@@ -273,6 +273,10 @@ function study1UatTrustedConfig_(){return study1UatTrustedConfigSnapshot_().appr
  */
 async function study1UatControlledRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ if(request?.operation==='recruitmentDraft'){
+  if(Object.keys(request).join(',')!=='operation'||Array.isArray(request))return deny();
+  try{study1AdminOwnerRequired_();return {ok:true,value:study1OwnerE1RecruitmentDraftRead_(true)};}catch(_){return deny();}
+ }
  if(request?.operation==='turnstileConfig'||request?.operation==='turnstileVerify')
   return study1UatTurnstileRequest_(request);
  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys;

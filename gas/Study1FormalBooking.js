@@ -1472,6 +1472,12 @@ function study1OwnerE1SlotChangeCommit(input){if(typeof study1V2PublicRpcDeny_==
  * No writes / no HTML submitted by the owner / no publication authority. */
 function study1OwnerE1RecruitmentDraft(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();
  study1AdminOwnerRequired_();
+ return study1OwnerE1RecruitmentDraftRead_(false);
+}
+// Same-site copy drafting uses only public Index bytes, not formal consent data.
+// The source digest is the GitHub draft concurrency check, not authorization.
+function study1OwnerE1RecruitmentDraftRead_(contentRevision){
+ study1AdminOwnerRequired_();
  const html=HtmlService.createHtmlOutputFromFile('Index').getContent();
  const hero=html.match(/<section id="home" class="hero">([\s\S]*?)<div class="actions">/g);
  if(!hero||hero.length!==1)throw Error('E1_RECRUITMENT_ORIGINAL_SOURCE_MISMATCH');
@@ -1483,7 +1489,7 @@ function study1OwnerE1RecruitmentDraft(){if(typeof study1V2PublicRpcDeny_==='fun
   return text;
  };
  return {mode:'OWNER_RECRUITMENT_DRAFT',source:'gas/Index.html',
-  revision:study1BindingHmac_(['E1_RECRUITMENT_INDEX_V1',html]),
+  revision:contentRevision===true?study1EConsentHash_('E1_RECRUITMENT_INDEX_V1:'+html):study1BindingHmac_(['E1_RECRUITMENT_INDEX_V1',html]),
   baseSha256:study1EConsentHash_(html),
   title:plain(parts[1]),intro:plain(parts[2]),open:false,
   actionAuthority:'DRAFT_ONLY'};

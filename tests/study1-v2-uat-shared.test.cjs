@@ -589,6 +589,8 @@ test('same official site source routes preserve formal closure and require real 
  assert.match(html,/<\? if \(flowMode === 'GAS_UAT'\) \{ \?>/);
  assert.match(html,/data-site-mode="FORMAL"/);assert.match(html,/data-site-mode="GAS_UAT"/);
  assert.match(html,/view=apply&test=1/);assert.match(admin,/siteTestClear/);
+ for(const id of ['e1CopyLoad','e1CopyPreview','e1CopyExport','e1WsQuery','e1WsStatus','e1WsSlotFilter','e1WsRows','e1WsDate','e1WsSlots'])assert.match(admin,new RegExp('id="'+id+'"'));
+ assert.doesNotMatch(admin,/id="e1WsCommit"|\.study1OwnerE1RecruitmentDraft\(\)/);
  assert.doesNotMatch(admin,/adminSaveSandboxConfig|study1ConsentVersionUpload|adminRunSandboxSelfTest/);
  for(const f of files.filter(x=>x.type==='SERVER_JS'))new vm.Script(f.source,{filename:f.name});
  for(const text of [html,admin])for(const m of text.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
@@ -624,6 +626,7 @@ test('same official site source routes preserve formal closure and require real 
   assert.throws(()=>c.doGet({parameter:{view:'apply',test:'1'}}),/拒絕存取/);
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
   assert.equal((await c.study1E1SyntheticUat(testRequest)).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:'a'.repeat(64),confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'b'.repeat(64)}).ok,false);
@@ -636,6 +639,17 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(requests,0);
  assert.equal((await c.study1E1SyntheticUat(testRequest)).value,'read');
  assert.equal(requests,1);
+ // Real bundled source parser; no formal sheet, property, HMAC configuration or write.
+ vm.runInContext(get('Study1FormalBooking'),c);
+ const index=get('Index');
+ c.HtmlService.createHtmlOutputFromFile=name=>{assert.equal(name,'Index');return {getContent:()=>index};};
+ c.study1EConsentHash_=value=>hash(value);
+ c.study1BindingHmac_=()=>{throw Error('formal secret must not be used for public copy draft');};
+ const draft=await c.study1E1SyntheticUat({operation:'recruitmentDraft'});
+ assert.equal(draft.ok,true);assert.equal(draft.value.open,false);assert.equal(draft.value.baseSha256,hash(index));
+ assert.equal(draft.value.actionAuthority,'DRAFT_ONLY');
+ assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft',title:'injected'})).ok,false);
+ assert.throws(()=>c.study1OwnerE1RecruitmentDraft(),/PUBLIC_READ_ONLY/);
  assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,true);
  assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).value.state,'MATCHED_EMPTY');
  assert.equal(c.study1SiteTestCleanup({mode:'reconcile',storeId:'OTHER'}).ok,false);assert.equal(propWrites,0);
@@ -702,6 +716,49 @@ test('same-site admin preview and confirm button block unknown destructive retri
  badOtp=false;emptyPreview=true;run();await p.click();const recover=nodes.get('siteTestRecoverGate');assert.equal(c.disabled,true);assert.equal(recover.disabled,false);
  await recover.click();assert.equal(recover.disabled,true);assert.match(s.textContent,/沒有刪除案件/);assert.equal(nodes.get('siteTestNewGate').value,'d'.repeat(64));
  assert.deepEqual(requests.at(-1),{mode:'recover_gate',expectedSha:sha,confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'01'.repeat(32)});
+});
+
+test('same-site original copy draft and TEST workspace filters use only verified data',async()=>{
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs');
+ const markup=adapter.sameSiteAdmin(),nodes=new Map(),requests=[];
+ const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(v){this.children.push(v);},addEventListener(n,f){this[n]=f;}});
+ for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ nodes.get('e1WsStatus').value='ALL';
+ const doc={getElementById:id=>nodes.get(id),createElement:()=>make()};
+ const cases=[{alias:'TEST_01',state:'HELD',slotId:'TEST_SLOT_1',pdfSaved:false,otpStatus:'SIMULATED_VERIFIED'},
+  {alias:'TEST_02',state:'CONFIRMED',slotId:'TEST_SLOT_2',pdfSaved:true,otpStatus:'EMAIL_VERIFIED'}];
+ const slots=[1,2].map(i=>({slotId:'TEST_SLOT_'+i,startAtUtc:'2099-01-0'+i+'T01:00:00.000Z',endAtUtc:'2099-01-0'+i+'T02:00:00.000Z',capacity:1,occupied:1,remaining:0,bookable:false}));
+ let bad=false;
+ const preview={formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha:'a'.repeat(64),counts:{cases:2,holds:1,confirmed:1,pdfs:1},cases,slots};
+ const copy={mode:'OWNER_RECRUITMENT_DRAFT',source:'gas/Index.html',revision:'c'.repeat(64),baseSha256:'d'.repeat(64),title:'原首頁',intro:'原研究介紹',open:false,actionAuthority:'DRAFT_ONLY'};
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {
+  study1E1SyntheticUat(r){requests.push(r);s({ok:true,value:copy});},
+  study1SiteTestCleanup(r){requests.push(r);s({ok:true,value:bad?{...preview,formal:true}:preview});}
+ };}};}}}};
+ const window={google,addEventListener(){},confirm(){return false;}};
+ for(const m of markup.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:doc,window,google});
+ nodes.get('e1CopyLoad').click();assert.equal(nodes.get('e1CopyTitle').value,'原首頁');
+ nodes.get('e1CopyTitle').value='測試草稿';nodes.get('e1CopyPreview').click();nodes.get('e1CopyExport').click();
+ assert.equal(nodes.get('e1CopyTitlePreview').textContent,'測試草稿');
+ const draft=JSON.parse(nodes.get('e1CopyDraft').value);
+ assert.equal(draft.baseSha256,copy.baseSha256);assert.equal(draft.published,false);assert.equal(draft.approved,false);
+ nodes.get('e1CopyTitle').value='<img>';nodes.get('e1CopyTitle').input();nodes.get('e1CopyExport').click();
+ assert.equal(nodes.get('e1CopyDraft').value,'');
+ await nodes.get('siteTestPreview').click();
+ assert.equal(nodes.get('e1WsRows').children.length,2);assert.equal(nodes.get('e1WsSlots').children.length,2);
+ assert.match(nodes.get('e1WsRows').textContent,/Email OTP 已驗證/);
+ nodes.get('e1WsQuery').value='TEST_02';nodes.get('e1WsQuery').input();
+ assert.equal(nodes.get('e1WsRows').children.length,1);assert.doesNotMatch(nodes.get('e1WsRows').textContent,/TEST_01/);
+ nodes.get('e1WsQuery').value='';nodes.get('e1WsStatus').value='HELD';nodes.get('e1WsStatus').change();
+ assert.match(nodes.get('e1WsRows').textContent,/TEST_01/);assert.doesNotMatch(nodes.get('e1WsRows').textContent,/TEST_02/);
+ nodes.get('e1WsStatus').value='ALL';nodes.get('e1WsSlotFilter').value='TEST_SLOT_2';nodes.get('e1WsSlotFilter').change();
+ assert.match(nodes.get('e1WsRows').textContent,/TEST_02/);assert.equal(nodes.get('e1WsRows').children.length,1);
+ nodes.get('e1WsDate').value='2099-01-02';nodes.get('e1WsDate').change();
+ assert.equal(nodes.get('e1WsSlots').children.length,1);assert.match(nodes.get('e1WsSlots').textContent,/TEST_SLOT_2/);
+ assert.equal(requests.length,2);assert.match(nodes.get('siteTestCases').textContent,/全部案件/);
+ bad=true;await nodes.get('siteTestPreview').click();
+ assert.equal(nodes.get('e1WsRows').children.length,0);assert.equal(nodes.get('e1WsSlots').children.length,0);
+ assert.equal(nodes.get('siteTestClear').disabled,true);
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{

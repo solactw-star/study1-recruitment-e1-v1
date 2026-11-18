@@ -300,7 +300,7 @@ function sameSiteCleanupController(){
  window.addEventListener('pagehide',()=>{gateOut.value='';gateOut.hidden=true;});
  const casesOut=el('siteTestCases'),slotsOut=el('siteTestSlots'),recover=el('siteTestRecoverGate');
  if(!casesOut||!slotsOut||!recover)return;
- let current=null,busy=false,unknown=false,cleared=false;
+ let current=null,busy=false,unknown=false,cleared=false,visibleSnapshot=null;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  const valid=c=>c&&['cases','holds','confirmed','pdfs'].every(k=>Number.isInteger(c[k])&&c[k]>=0&&c[k]<=12)&&c.holds+c.confirmed<=c.cases&&c.pdfs===c.confirmed;
  const say=s=>{summary.textContent=s;};
@@ -328,12 +328,48 @@ function sameSiteCleanupController(){
    p.cases.filter(c=>c.state==='CONFIRMED').length===p.counts.confirmed&&
    p.slots.every(s=>s.occupied===p.cases.filter(c=>c.slotId===s.slotId&&['HELD','CONFIRMED'].includes(c.state)).length);
  };
+ const query=el('e1WsQuery'),statusFilter=el('e1WsStatus'),slotFilter=el('e1WsSlotFilter'),dateFilter=el('e1WsDate'),caseRows=el('e1WsRows'),slotRows=el('e1WsSlots');
+ const workspace=Boolean(query&&statusFilter&&slotFilter&&dateFilter&&caseRows&&slotRows);
+ const local=s=>new Date(s).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+ const localDate=s=>new Date(s).toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'});
+ const rows=(target,data)=>{
+  target.textContent='';
+  for(const values of data){
+   const tr=document.createElement('tr');
+   for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}
+   target.appendChild(tr);
+  }
+ };
+ const renderWorkspace=()=>{
+  if(!workspace)return;
+  if(!visibleSnapshot){rows(caseRows,[]);rows(slotRows,[]);return;}
+  const p=visibleSnapshot,search=String(query.value||'').trim().toUpperCase();
+  const filtered=p.cases.filter(c=>(!search||c.alias.includes(search))&&
+   (statusFilter.value==='ALL'||c.state===statusFilter.value)&&(!slotFilter.value||c.slotId===slotFilter.value));
+  rows(caseRows,filtered.map(c=>[c.alias,otpLabels[c.otpStatus],c.slotId||'未選時段',labels[c.state],c.pdfSaved?'已保存':'無']));
+  const shown=p.slots.filter(s=>!dateFilter.value||localDate(s.startAtUtc)===dateFilter.value);
+  rows(slotRows,shown.map(s=>[local(s.startAtUtc)+' – '+local(s.endAtUtc),s.slotId,s.bookable?'可預約':'不可預約',
+   s.capacity,p.cases.filter(c=>c.slotId===s.slotId&&c.state==='HELD').length,
+   p.cases.filter(c=>c.slotId===s.slotId&&c.state==='CONFIRMED').length,s.remaining]));
+  casesOut.textContent='顯示 '+filtered.length+' / '+p.cases.length+' 筆 TEST 案件；清除預覽仍為全部案件。';
+  slotsOut.textContent='顯示 '+shown.length+' / '+p.slots.length+' 個 TEST 場次；容量依完整名單計算。';
+ };
+ if(workspace){
+  query.addEventListener('input',renderWorkspace);
+  for(const element of [statusFilter,slotFilter,dateFilter])element.addEventListener('change',renderWorkspace);
+ }
  const showLists=p=>{
+  visibleSnapshot=p;
+  if(workspace){
+   const old=slotFilter.value;slotFilter.textContent='';
+   for(const id of ['',...p.slots.map(s=>s.slotId)]){const opt=document.createElement('option');opt.value=id;opt.textContent=id||'全部';slotFilter.appendChild(opt);}
+   slotFilter.value=p.slots.some(s=>s.slotId===old)?old:'';
+   renderWorkspace();return;
+  }
   casesOut.textContent=p.cases.length?p.cases.map(c=>c.alias+'｜'+labels[c.state]+'｜'+(c.slotId||'未選時段')+'｜'+(c.pdfSaved?'已保存測試 PDF':'無簽署 PDF')+'｜'+otpLabels[c.otpStatus]).join('\n'):'目前無測試案件';
-  const local=s=>new Date(s).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
   slotsOut.textContent=p.slots.map(s=>s.slotId+'｜'+local(s.startAtUtc)+' – '+local(s.endAtUtc)+'｜已占 '+s.occupied+'/'+s.capacity+'｜剩餘 '+s.remaining+'｜'+(s.bookable?'可預約':'不可預約')).join('\n');
  };
- const emptyLists=()=>{casesOut.textContent='尚未核實測試案件';slotsOut.textContent='尚未核實測試場次';};
+ const emptyLists=()=>{visibleSnapshot=null;renderWorkspace();casesOut.textContent='尚未核實測試案件';slotsOut.textContent='尚未核實測試場次';};
  const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。清除不寄信、不寫正式研究資料。';
  const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;
   recover.disabled=busy||unknown||cleared||!current||current.counts.cases!==0;};
@@ -450,10 +486,37 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // The same-site test management view does not initialize formal/sandbox RPCs.
  const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
  if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
- const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><button id="siteTestRecoverGate" type="button" disabled>遺失通行碼：重新產生（僅空表）</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
+ let section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><button id="siteTestRecoverGate" type="button" disabled>遺失通行碼：重新產生（僅空表）</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
+ // Reuse the original B11 markup and controller rather than redesign it.
+ const slice=(from,to)=>{
+  const a=source.indexOf(from),b=source.indexOf(to,a+from.length);
+  if(a<0||b<=a)throw Error('SAME_SITE_OWNER_WORKSPACE_ANCHOR');
+  return source.slice(a,b);
+ };
+ const copy=slice('<section id="e1RecruitmentDraft">','<section id="e1Workspace">');
+ const copyController=once(slice('function e1RecruitmentDraftSetup_(){','/* P0-B workspace:'),
+  '}).study1OwnerE1RecruitmentDraft();',
+  '}).study1E1SyntheticUat({operation:"recruitmentDraft"});');
+ // Adapt ONLY the original controller's response envelope; the same existing
+ // GitHub draft workflow verifies the exact Index digest before saving.
+ const copyScript=once(copyController,'withSuccessHandler(r=>{','withSuccessHandler(response=>{const r=response?.ok===true?response.value:null;');
+ const caseTable=slice('<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>代碼</th><th>姓名</th><th>信箱驗證</th>','<div id="e1Profile"');
+ const slotTable=slice('<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th>','<h3>場次變更預檢及核定後儲存</h3>');
+ const statusOptions=['ALL','OTP','SLOTS','HELD','CONFIRMED','CANCELLED','EXPIRED'].map((v,i)=>'<option value="'+v+'">'+['全部','待驗證','待選時段','暫留','已確認','已取消','已逾期'][i]+'</option>').join('');
+ const filters='<div class="booking-filter-grid">'+
+  slice('<div><label for="e1WsQuery">','<div><label for="e1WsStatus">').replace('姓名或參與者代碼','虛構測試代碼')+
+  '<div><label for="e1WsStatus">預約狀態</label><select id="e1WsStatus">'+statusOptions+'</select></div>'+
+  '<div><label for="e1WsSlotFilter">場次</label><select id="e1WsSlotFilter"><option value="">全部</option></select></div></div>';
+ section=once(section,'<main>','<main>'+copy);
+ section=once(section,'<h3>測試報名與預約名單</h3>','<h3>TEST 參與者名單（非正式研究資料）</h3>'+filters+
+  caseTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>代碼</th><th>信箱驗證</th><th>場次</th><th>預約</th><th>同意 PDF</th></tr></thead>'));
+ section=once(section,'<h3>測試場次與剩餘名額（臺灣時間）</h3>','<h3>測試場次與剩餘名額（臺灣時間）</h3>'+
+  slice('<label for="e1WsDate">','<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th>')+
+  slotTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>日期時間</th><th>場次</th><th>狀態</th><th>容量</th><th>暫留</th><th>確認</th><th>剩餘</th></tr></thead>')+
+  '<p>目前僅查詢 TEST 場次與容量；正式場次新增、修改及收件仍未開放。</p>');
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
  return source.slice(0,start)+section.replace('</main>',turnstile+'</main>')+
-  '<script>\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+  '<script>\n'+copyScript+'\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the
