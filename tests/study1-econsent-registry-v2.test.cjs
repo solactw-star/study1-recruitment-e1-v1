@@ -175,3 +175,88 @@ test('no authorized shared ScriptLock rejects migration before any Drive write',
  assert.throws(()=>f.scope.study1EConsentWrite_(f.legacy,next),/SHARED_LOCK_REQUIRED/);
  assert.equal(f.files.size,0);
 });
+
+
+// Capacity evidence uses only deterministic synthetic records and fake Drive.
+// Bulk snapshots exercise the real storage commit/readback, not a claim that
+// 3000 successive remote writes or actual Apps Script quotas were tested.
+function capacityDocument(f){
+ const raw=Buffer.from('%PDF-1.7\n'+ 'SYNTHETIC DOCUMENT BYTE INTEGRITY FIXTURE '.repeat(10));
+ const id='PRIVATE_TEMPLATE_CAPACITY_01',folderId='1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU';
+ const doc={id,experiment:'E1',version:'CAPACITY-TEST',title:'Synthetic template',sha256:sha(raw),
+  bytes:raw.length,url:'https://drive.google.com/file/d/'+id,researcherPresigned:true};
+ f.files.set(id,{id,bytes:raw,mime:'application/pdf',access:'PRIVATE',parentId:folderId});
+ f.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify({schemaVersion:1,revision:1,
+  documents:[doc],current:{E1:id,E2:null},published:{E1:null,E2:null}}));
+ return doc;
+}
+for(const count of [13,100,500,1000,3000,3001]){
+ test('CAPACITY registry V2 + independent B10 source '+count+' records',()=>{
+  const f=build();f.enable();const doc=capacityDocument(f);
+  const initialFileCount=f.files.size;
+  const next={...f.legacy,revision:2,records:Array.from({length:count},(_,i)=>f.entry(i+1))};
+  if(count===3001){
+   assert.throws(()=>f.scope.study1EConsentWrite_(f.legacy,next),/容量不合法/);
+   assert.equal(f.files.size,initialFileCount);
+   assert.equal(f.values.has('STUDY1_ECONSENT_POINTER_V2'),false);
+   assert.equal(f.scope.study1EConsentRegistry_().records.length,1);
+  }else{
+   f.scope.study1EConsentWrite_(f.legacy,next);
+   const p=JSON.parse(f.values.get('STUDY1_ECONSENT_POINTER_V2'));
+   const actual=f.scope.study1EConsentRegistry_();
+   assert.equal(actual.records.length,count);
+   assert.equal(JSON.stringify(actual),JSON.stringify(next));
+   assert.equal(p.sha256,sha(f.files.get(p.fileId).bytes));
+   assert.equal(f.files.size,initialFileCount+1);
+   // Duplicate at the tail must fail without creating another file/pointer.
+   const before=f.values.get('STUDY1_ECONSENT_POINTER_V2');
+   const dup={...actual,revision:3,records:actual.records.slice(0,-1).concat(actual.records[0])};
+   assert.throws(()=>f.scope.study1EConsentWrite_(actual,dup),/索引不一致/);
+   assert.equal(f.values.get('STUDY1_ECONSENT_POINTER_V2'),before);
+   assert.equal(f.files.size,initialFileCount+1);
+  }
+  assert.equal(f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),f.legacyBytes);
+  const catalog=f.scope.study1ConsentVersionRead_();
+  assert.equal(catalog.documents.length,1);assert.equal(catalog.current.E1,doc.id);
+  assert.equal(sha(f.scope.study1ConsentDocumentBytes_(catalog.documents[0])),doc.sha256);
+  f.files.get(doc.id).access='ANYONE';
+  assert.throws(()=>f.scope.study1ConsentDocumentBytes_(doc),/私人權限異常/);
+ });
+}
+for(const bytes of [4999999,5000000,5000001]){
+ test('CAPACITY registry exact UTF-8 '+bytes+' bytes plus independent B10 source',()=>{
+  const f=build();f.enable();const doc=capacityDocument(f);
+  const next={...f.legacy,revision:2,records:[f.entry(1),{...f.entry(2),syntheticPadding:''}]};
+  const remaining=bytes-Buffer.byteLength(JSON.stringify(next),'utf8');
+  // Deliberately artificial padding tests bytes rather than character count.
+  next.records[1].syntheticPadding='測'.repeat(Math.floor(remaining/3))+'x'.repeat(remaining%3);
+  assert.equal(Buffer.byteLength(JSON.stringify(next),'utf8'),bytes);
+  if(bytes>5000000){
+   assert.throws(()=>f.scope.study1EConsentWrite_(f.legacy,next),/SNAPSHOT_CAPACITY/);
+   assert.equal(f.values.has('STUDY1_ECONSENT_POINTER_V2'),false);
+   assert.equal(f.files.size,1);
+  }else{
+   f.scope.study1EConsentWrite_(f.legacy,next);
+   const ptr=JSON.parse(f.values.get('STUDY1_ECONSENT_POINTER_V2'));
+   assert.equal(f.files.get(ptr.fileId).bytes.length,bytes);
+   assert.equal(JSON.stringify(f.scope.study1EConsentRegistry_()),JSON.stringify(next));
+   assert.equal(ptr.sha256,sha(f.files.get(ptr.fileId).bytes));
+   assert.equal(f.files.size,2);
+  }
+  assert.equal(f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),f.legacyBytes);
+  assert.equal(sha(f.scope.study1ConsentDocumentBytes_(doc)),doc.sha256);
+ });
+}
+test('CAPACITY B10 independent catalog 24/25 versions, not 3000 consent records',()=>{
+ const f=build(),doc=capacityDocument(f);
+ const read=()=>JSON.parse(f.values.get('STUDY1_CONSENT_DOCUMENT_INDEX_V1'));
+ const catalog=read();
+ catalog.documents=Array.from({length:24},(_,i)=>({...doc,id:'PRIVATE_TEMPLATE_CAPACITY_'+String(i+1).padStart(2,'0'),
+  version:'CAPACITY-'+String(i+1)}));
+ catalog.current.E1=catalog.documents[0].id;
+ f.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify(catalog));
+ assert.equal(f.scope.study1ConsentVersionRead_().documents.length,24);
+ catalog.documents.push({...doc,id:'PRIVATE_TEMPLATE_CAPACITY_25',version:'CAPACITY-25'});
+ f.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify(catalog));
+ assert.throws(()=>f.scope.study1ConsentVersionRead_(),/版本目錄損毀/);
+});

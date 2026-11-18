@@ -1348,3 +1348,110 @@ test('P0-B B04 delayed prior-case response cannot replace a new selection or reo
  rows[0].children[9].children[0].click();g('e1ProfileBack').click();b.pending[2]();
  assert.equal(g('e1Profile').hidden,true);assert.equal(g('e1ProfileSummary').children.length,0);
 });
+
+
+// Synthetic full-source capacity tests. The registry validator is the exact
+// raw AdminSandbox implementation, while its disk I/O is covered separately
+// by registry-v2 tests. No participant, PDF contents, mail, or Google API.
+const capacityRegistryVM=vm.createContext({});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas/AdminSandbox.js'),'utf8'),capacityRegistryVM);
+function ownerCapacityHarness(count, targetBytes){
+ const h=wsHarness(),entries=[];
+ const slot=h.tables.Slots.rows[0];slot[3]=count;
+ const slots=h.tables.Slots.rows.map(r=>({experiment:r[0]===h.S3?'E2':'E1',
+  slotId:r[0],slotRowSha256:h.ctx.study1BindingHmac_(['STUDY1_E1_ORIGINAL_SLOT_ROW_V1',...r])}));
+ const raw=JSON.stringify(slots);
+ h.props.set('STUDY1_E1_SLOT_REGISTRY_V1',raw);
+ h.props.set('STUDY1_E1_SLOT_REGISTRY_HMAC',h.ctx.study1BindingHmac_(['STUDY1_E1_SLOT_REGISTRY_V1',raw]));
+ const t=h.clock.now;
+ for(let i=1;i<=count;i++){
+  const a=h.person('CAP'+String(i).padStart(4,'0'));
+  const id='00000000-1111-4222-8333-'+String(i).padStart(12,'0');
+  const reservationId='RSV_CAP_'+String(i).padStart(12,'0');
+  const hold=ts(t,600000),created=ts(t,-80000),confirmed=ts(t,-40000);
+  h.tables.Reservations.rows.push([reservationId,a.applicantId,h.S1,'CONFIRMED',hold,
+   'REQ_CAP_'+String(i).padStart(16,'0'),created,confirmed,'',confirmed]);
+  const binding={schemaVersion:1,applicantId:a.applicantId,reservationId,slotId:h.S1,
+   challengeId:a.challengeId,screeningId:a.screeningId,experiment:'E1',
+   documentSha:'a'.repeat(64),documentVersion:'E1-V1',
+   identityEvidenceSha:'b'.repeat(64),eligibilityEvidenceSha:'c'.repeat(64),priorE1EvidenceSha:null,
+   verifiedAtUtc:ts(t,-120000),otpUsedAtUtc:ts(t,-120000),holdUntilUtc:hold,digest:''};
+  binding.digest=h.ctx.study1BindingDigest_(binding);
+  const entry={id,channel:'FORMAL_E1',experiment:'E1',researcherPresigned:true,binding,state:'CONFIRMED',
+   documentSha:binding.documentSha,documentVersion:binding.documentVersion,
+   tokenHash:crypto.createHash('sha256').update('synthetic-token-'+i).digest('hex'),expires:t+600000,
+   signedPdf:{id:'PRIVATE_PDF_CAP_'+String(i).padStart(12,'0'),sha:'d'.repeat(64)},
+   signature:{id:'PRIVATE_SIG_CAP_'+String(i).padStart(12,'0'),sha:'e'.repeat(64)},
+   confirmation:{id:'PRIVATE_CNF_CAP_'+String(i).padStart(12,'0'),sha:'f'.repeat(64)}};
+  entries.push(entry);
+  const job='NTF_'+h.ctx.study1BindingHmac_(['E1_BOOKING_CONFIRMATION_NOTICE_V1',id,a.applicantId,reservationId]).slice(0,28);
+  h.tables.Notifications.rows.push([job,a.applicantId,reservationId,'E1_RESERVATION_CONFIRMED',
+   'PROVIDER_ACCEPTED',1,ts(t,-30000),ts(t,-20000),'']);
+ }
+ const registry={schemaVersion:1,revision:2,records:entries};
+ if(targetBytes){
+  entries[0].syntheticPadding='';
+  const remain=targetBytes-Buffer.byteLength(JSON.stringify(registry),'utf8');
+  assert.ok(remain>=0);
+  entries[0].syntheticPadding='測'.repeat(Math.floor(remain/3))+'x'.repeat(remain%3);
+  assert.equal(Buffer.byteLength(JSON.stringify(registry),'utf8'),targetBytes);
+ }
+ h.ctx.study1EConsentRegistry_=()=>{
+  capacityRegistryVM.study1EConsentValidateRegistry_(registry,3000);
+  // Mirrors the actual independent file-byte guard; its raw Drive reader
+  // is exercised at exact UTF-8 boundaries in the registry-v2 suite.
+  if(Buffer.byteLength(JSON.stringify(registry),'utf8')>5000000)throw Error('SYNTHETIC_SOURCE_BYTE_GUARD');
+  return registry;
+ };
+ h.ctx.study1OwnerE1SignedPdfVerified_=entry=>({recordId:entry.id,experiment:'E1',
+  researcherPreSigned:true,sourceSha256:entry.documentSha,signedPdfSha256:entry.signedPdf.sha,
+  signedAtUtc:ts(t,-50000),confirmedAtUtc:ts(t,-45000),bytes:200,mime:'application/pdf',base64:'SYNTHETIC_PDF_BYTES'});
+ return {h,entries,registry};
+}
+for(const count of [13,100,500,1000,3000,3001]){
+ test('CAPACITY B04/B08 original owner read '+count+' records',()=>{
+  const {h,entries}=ownerCapacityHarness(count),before=h.mutations.length;
+  if(count>3000){
+   assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/索引不一致/);
+   assert.throws(()=>h.ctx.study1OwnerE1OperationsAudit(),/索引不一致/);
+   assert.throws(()=>h.ctx.study1OwnerE1Profile({applicantId:entries[0].binding.applicantId,revision:'a'.repeat(64)}),/索引不一致/);
+  }else{
+   const list=h.ctx.study1OwnerE1Workspace({...wsFilter,offset:Math.max(0,count-50)});
+   assert.equal(list.total,count);assert.equal(list.participants.length,Math.min(count,50));
+   assert.equal(list.slots.find(s=>s.slotId===h.S1).remaining,0);
+   const last=entries[count-1],q={applicantId:last.binding.applicantId,revision:list.revision};
+   const p=h.ctx.study1OwnerE1Profile(q);
+   assert.equal(p.applicantId,last.binding.applicantId);assert.equal(p.consent.consentId,last.id);
+   assert.equal(p.consent.pdfStatus,'PRIVATE_SHA_VERIFIED');assert.equal(p.notices[0].status,'PROVIDER_ACCEPTED_NOT_DELIVERED');
+   assert.ok(!JSON.stringify(p).includes(entries[0].binding.applicantId));
+   assert.throws(()=>h.ctx.study1OwnerE1ProfilePdf({...q,consentId:entries[0].id}),/PDF_NOT_VERIFIED/);
+   const audit=h.ctx.study1OwnerE1OperationsAudit();
+   assert.equal(audit.booking.records.length,count);assert.equal(audit.notice.records.length,count);
+   assert.equal(new Set(audit.booking.records.map(x=>x.id)).size,count);
+   assert.ok(audit.booking.records.every(x=>x.bookingConfirmed===true));
+   assert.ok(audit.notice.records.every(x=>x.noticeStatus==='PROVIDER_ACCEPTED_NOT_DELIVERED'));
+   // Tail mismatch must not turn into a successful notification.
+   h.tables.Notifications.rows[count-1][1]='APP_WRONG_CAPACITY';
+   const bad=h.ctx.study1OwnerE1OperationsAudit();
+   assert.equal(bad.notice.records[count-1].noticeStatus,'SOURCE_MISMATCH');
+   assert.throws(()=>h.ctx.study1OwnerE1Profile(q),/STALE_LIST/);
+  }
+  assert.equal(h.mutations.length,before);
+ });
+}
+for(const bytes of [4999999,5000000,5000001]){
+ test('CAPACITY B04/B08 source byte boundary '+bytes+' (synthetic guard)',()=>{
+  const {h,entries}=ownerCapacityHarness(13,bytes),before=h.mutations.length;
+  if(bytes>5000000){
+   assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/SYNTHETIC_SOURCE_BYTE_GUARD/);
+   assert.throws(()=>h.ctx.study1OwnerE1OperationsAudit(),/SYNTHETIC_SOURCE_BYTE_GUARD/);
+  }else{
+   const list=h.ctx.study1OwnerE1Workspace(wsFilter);
+   const p=h.ctx.study1OwnerE1Profile({applicantId:entries[12].binding.applicantId,revision:list.revision});
+   assert.equal(p.consent.consentId,entries[12].id);
+   assert.equal(h.ctx.study1OwnerE1OperationsAudit().notice.records.length,13);
+   assert.ok(!JSON.stringify(p).includes('syntheticPadding'));
+  }
+  assert.equal(h.mutations.length,before);
+ });
+}
