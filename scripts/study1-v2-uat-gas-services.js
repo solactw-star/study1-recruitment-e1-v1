@@ -3,7 +3,7 @@
  * approved is supplied by trusted server configuration, NEVER browser parameters.
  * No actual store ID or access secret is included in source.
  */
-function study1UatGasCaseTransaction_(approved,access,decide){
+function study1UatGasCaseTransaction_(approved,access,decide,checkCurrentConfig){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
  const exact=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).sort().join(',')===k.slice().sort().join(',');
@@ -18,6 +18,7 @@ function study1UatGasCaseTransaction_(approved,access,decide){
  // The transaction core checks the marker and the ID again while locked.
  const config={storeId:approved.storeId,sourceSha:approved.sourceSha,slots:approved.slots,gateSha:approved.gateSha};
  const services=study1UatStoreServices_(config.storeId);
+ if(checkCurrentConfig)services.checkCurrentConfig=checkCurrentConfig;
 
  let value=null;
  study1UatStoreTransaction_(services,config,(rows,available,at)=>{
@@ -113,13 +114,13 @@ function study1UatEmailOtpHash_(access,code){
  * Not an RPC or a web route. Configuration must be supplied by a trusted caller.
  * No live study records or email, no fallback to a different store.
  */
-async function study1UatGasOperation_(approved,access,operation,payload){
+async function study1UatGasOperation_(approved,access,operation,payload,checkCurrentConfig){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
  const keys={start:['alias','eligible'],emailStart:['alias','eligible'],verify:['code'],slots:[],hold:['slotId','requestId'],read:[],document:[],sign:['requestId','sourceSha','ink','read','agree'],copy:[],cancel:[]};
  need(Object.prototype.hasOwnProperty.call(keys,operation)&&payload&&typeof payload==='object'&&!Array.isArray(payload)&&
   Object.keys(payload).sort().join(',')===keys[operation].slice().sort().join(','),'UAT_REQUEST');
- const tx=fn=>study1UatGasCaseTransaction_(approved,access,fn);
+ const tx=fn=>study1UatGasCaseTransaction_(approved,access,fn,checkCurrentConfig);
  const unchanged=value=>({record:null,value});
  const result=(record,at)=>({record,value:study1UatCaseView_(record,approved.slots,at)});
  const lookup=(mine)=>{need(mine,'UAT_CASE_NOT_FOUND');return mine;};
@@ -200,9 +201,9 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  const sameHold=mine=>['caseId','slotId','holdKey','holdUntil','sourceSha'].every(k=>mine[k]===snapshot.mine[k]);
  const encode=bytes=>Utilities.base64Encode(Array.from(bytes,x=>x>127?x-256:x));
  if(operation==='document'){
-  const doc=await study1UatDocument_('GAS_UAT');
+  const doc=await study1UatDocumentForSha_(approved.sourceSha);
   need(doc.hash===approved.sourceSha&&study1PdfDigest_(doc.bytes)===doc.hash&&doc.layout.pageCount===5,'UAT_DOCUMENT_SOURCE');
-  return tx((record,available,at)=>{const mine=held(lookup(record),at);need(sameHold(mine),'UAT_HOLD_CHANGED');return unchanged({caseId:mine.caseId,sha:doc.hash,pageCount:5,bytes:encode(doc.bytes)});});
+  return tx((record,available,at)=>{const mine=held(lookup(record),at);need(sameHold(mine),'UAT_HOLD_CHANGED');return unchanged({caseId:mine.caseId,sha:doc.hash,version:doc.layout.version,pageCount:5,bytes:encode(doc.bytes)});});
  }
  need(hex(payload.requestId,32)&&payload.read===true&&payload.agree===true&&payload.sourceSha===approved.sourceSha,'UAT_DOCUMENT_BINDING');
  need(typeof payload.ink==='string'&&payload.ink.length<=120000&&/^[A-Za-z0-9+/]+={0,2}$/.test(payload.ink),'UAT_INK');
@@ -214,9 +215,9 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  const inkSha=study1PdfDigest_(ink);
  const replay=mine=>{need(sameHold(mine)&&mine.state==='CONFIRMED'&&mine.signKey===payload.requestId&&mine.inkSha===inkSha,'UAT_SIGN_REPLAY_CONFLICT');return mine;};
  if(snapshot.mine.state==='CONFIRMED')return copyCurrent(replay(snapshot.mine));
- const doc=await study1UatDocument_('GAS_UAT');
+ const doc=await study1UatDocumentForSha_(approved.sourceSha);
  need(doc.hash===approved.sourceSha&&study1PdfDigest_(doc.bytes)===doc.hash,'UAT_DOCUMENT_SOURCE');
- const composed=await study1PdfComposeSigned_(doc.bytes,ink,doc.layout,{experiment:'E1',version:'UAT-SYNTHETIC-1',sha256:doc.hash},new Date(snapshot.at));
+ const composed=await study1PdfComposeSigned_(doc.bytes,ink,doc.layout,{experiment:'E1',version:doc.layout.version,sha256:doc.hash},new Date(snapshot.at));
  const pdf=encode(composed.signedPdfBytes);
  need(composed.pageCount===5&&composed.sourceSha256===approved.sourceSha&&study1PdfDigest_(composed.signedPdfBytes)===composed.signedSha256&&pdf.length<=320000,'UAT_SIGNED_PDF');
  const saved=tx((record,available,at)=>{
@@ -271,8 +272,48 @@ function study1UatTrustedConfig_(){return study1UatTrustedConfigSnapshot_().appr
  * isolated deployment call site; NOT itself a callable GAS web RPC.
  * Never reflect a raw GAS exception, credential, configuration, or table row.
  */
+async function study1UatDocumentRequest_(request){
+ const deny=error=>({ok:false,error});
+ try{
+  study1AdminOwnerRequired_();
+  const op=request.operation,keys=Object.keys(request).sort().join(',');
+  if(Array.isArray(request)||keys!==({documentCatalog:'operation',documentPreview:'operation,version',documentSelect:'activeSha,confirmation,expectedSha,operation,version'}[op]))return deny('UAT_REQUEST_REJECTED');
+  const snap=study1UatTrustedConfigSnapshot_(),{props,raw,approved}=snap;
+  const key='STUDY1_E1_SYNTHETIC_UAT_V1',docs=await study1UatDocumentCatalog_();
+  const current=docs.find(d=>d.hash===approved.sourceSha);
+  if(!current)throw Error('UAT_DOCUMENT_SOURCE');
+  const assertCurrent=()=>{
+   if(props.getProperty(key)!==raw||Date.parse(JSON.parse(raw).expiresAt)<=Date.now())throw Error('UAT_DOCUMENT_CONFIG_CHANGED');
+  };
+  const services=study1UatStoreServices_(approved.storeId);services.checkCurrentConfig=assertCurrent;
+  const entry=d=>({version:d.layout.version,sha:d.hash,pageCount:5});
+  if(op==='documentCatalog'){
+   const p=study1UatStoreTransaction_(services,approved,null,{mode:'preview'});
+   return {ok:true,value:{formal:false,activeSha:current.hash,documents:docs.map(entry),snapshotSha:p.snapshotSha,cases:p.counts.cases}};
+  }
+  const doc=docs.find(d=>d.layout.version===request.version);
+  if(!doc)return deny('UAT_REQUEST_REJECTED');
+  if(op==='documentPreview'){
+   study1UatStoreTransaction_(services,approved,null,{mode:'preview'});
+   return {ok:true,value:{formal:false,...entry(doc),bytes:Utilities.base64Encode(doc.bytes.map(x=>x>127?x-256:x))}};
+  }
+  if(request.confirmation!=='SELECT_TEST_DOCUMENT_ONLY'||request.activeSha!==current.hash||doc.hash===current.hash||
+   typeof request.expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedSha))return deny('UAT_REQUEST_REJECTED');
+  const next=JSON.stringify({...JSON.parse(raw),sourceSha:doc.hash});
+  services.selectDocument=sha=>{
+   assertCurrent();if(sha!==doc.hash)throw Error('UAT_DOCUMENT_SOURCE');
+   props.setProperty(key,next);return props.getProperty(key)===next;
+  };
+  const result=study1UatStoreTransaction_(services,approved,null,{mode:'select_document',expectedSha:request.expectedSha,nextSourceSha:doc.hash});
+  return {ok:true,value:{...result,version:doc.layout.version}};
+ }catch(error){
+  const safe=['UAT_DOCUMENT_SELECTION_UNKNOWN','UAT_DOCUMENT_REQUIRES_EMPTY','UAT_CLEANUP_STALE_PREVIEW','UAT_DOCUMENT_CONFIG_CHANGED','UAT_DOCUMENT_SOURCE'];
+  return deny(safe.includes(error?.message)?error.message:'UAT_REQUEST_REJECTED');
+ }
+}
 async function study1UatControlledRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ if(['documentCatalog','documentPreview','documentSelect'].includes(request?.operation))return study1UatDocumentRequest_(request);
  if(request?.operation==='recruitmentDraft'){
   if(Object.keys(request).join(',')!=='operation'||Array.isArray(request))return deny();
   try{study1AdminOwnerRequired_();return {ok:true,value:study1OwnerE1RecruitmentDraftRead_(true)};}catch(_){return deny();}
@@ -286,7 +327,8 @@ async function study1UatControlledRequest_(request){
   !request.payload||typeof request.payload!=='object'||Array.isArray(request.payload))return deny();
  try{
   const approved=study1UatTrustedConfig_();
-  const value=await study1UatGasOperation_(approved,{gate:request.gate,caseKey:request.caseKey},request.operation,request.payload);
+  const checkCurrent=()=>{if(JSON.stringify(study1UatTrustedConfig_())!==JSON.stringify(approved))throw Error('UAT_DOCUMENT_CONFIG_CHANGED');};
+  const value=await study1UatGasOperation_(approved,{gate:request.gate,caseKey:request.caseKey},request.operation,request.payload,checkCurrent);
   return {ok:true,value};
  }catch(e){
   // A thrown error may occur after a mutation or its flush. No automatic retry.

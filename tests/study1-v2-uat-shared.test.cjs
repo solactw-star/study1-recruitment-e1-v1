@@ -302,6 +302,8 @@ test('private GAS operation contract completes booking and real five-page PDF th
   SpreadsheetApp:{openById:x=>{assert.equal(locked,true);assert.equal(x,id);opens++;return {getId:()=>id,getName:()=> 'Study1 E1 SYNTHETIC UAT ONLY',getSheets:()=>[sheet]};},flush:()=>{assert.equal(locked,true);if(failFlush)throw Error('UNKNOWN');}}});
  for(const p of ['gas/BookingCore.js','gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js','scripts/study1-v2-uat-store-transaction.js','scripts/study1-v2-uat-gas-services.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
  const original=await vm.runInContext('study1UatDocument_("GAS_UAT")',realm);
+ const versions=await realm.study1UatDocumentCatalog_();assert.equal(versions[0].hash,original.hash);assert.notEqual(versions[1].hash,original.hash);
+ assert.equal((await PDFLib.PDFDocument.load(Uint8Array.from(versions[1].bytes))).getPageCount(),5);
  const config={storeId:id,gateSha:hash(gate),sourceSha:original.hash,slots:[
   ['TEST_SLOT_1','2026-11-19T02:00:00.000Z','2026-11-19T03:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z'],
   ['TEST_SLOT_2','2026-11-19T04:00:00.000Z','2026-11-19T05:00:00.000Z',1,'TEST_ONLY','OPEN','TEST','2026-11-18T02:00:00.000Z']]};
@@ -389,6 +391,30 @@ test('private GAS operation contract completes booking and real five-page PDF th
  await assert.rejects(run(keyA,'copy'),/MARKER_OR_FORMULA/);
  await assert.rejects(run(keyA,'start',{alias:'TEST_01',eligible:true}),/MARKER_OR_FORMULA/);
  realm.study1UatCaseCopy_=reopen;
+ // Real TEST selection through the existing locked store and isolated property adapter.
+ const newGate='e'.repeat(64),key='STUDY1_E1_SYNTHETIC_UAT_V1';let propertyWrites=0;
+ let raw=JSON.stringify({...config,gateSha:hash(newGate),profile:'E1_SYNTHETIC_UAT_V1',expiresAt:new Date(clock+86400000).toISOString()});
+ const props={getProperty:k=>{assert.equal(k,key);return raw;},setProperty:(k,v)=>{assert.equal(k,key);assert.equal(locked,true);propertyWrites++;raw=v;}};
+ realm.study1UatTrustedConfigSnapshot_=()=>({props,raw,approved:realm.study1UatConfigValidate_(raw,clock,hash(id))});
+ realm.study1UatTrustedConfig_=()=>realm.study1UatTrustedConfigSnapshot_().approved;
+ const req=r=>realm.study1UatControlledRequest_(r);
+ const cat=(await req({operation:'documentCatalog'})).value;assert.equal(cat.activeSha,original.hash);assert.equal(cat.cases,0);assert.equal(cat.documents.length,2);
+ const preview=(await req({operation:'documentPreview',version:'UAT-SYNTHETIC-2'})).value;
+ assert.equal(preview.sha,versions[1].hash);assert.equal(hash(Buffer.from(preview.bytes,'base64')),preview.sha);
+ const selection={operation:'documentSelect',version:preview.version,activeSha:cat.activeSha,expectedSha:cat.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'};
+ assert.equal((await req({...selection,storeId:id})).ok,false);assert.equal((await req({...selection,expectedSha:'0'.repeat(64)})).ok,false);assert.equal(propertyWrites,0);
+ const beforeSelect=writes;const selected=await req(selection);assert.equal(selected.ok,true);assert.equal(selected.value.activeSha,preview.sha);assert.equal(propertyWrites,1);assert.equal(writes,beforeSelect);
+ assert.equal((await req(selection)).ok,false);assert.equal(propertyWrites,1);
+ const testKey='8'.repeat(64),call=(operation,payload={})=>req({operation,payload,gate:newGate,caseKey:testKey});
+ assert.equal((await call('start',{alias:'TEST_01',eligible:true})).ok,true);
+ const nonempty=(await req({operation:'documentCatalog'})).value;assert.equal(nonempty.cases,1);
+ assert.equal((await req({...selection,version:'UAT-SYNTHETIC-1',activeSha:nonempty.activeSha,expectedSha:nonempty.snapshotSha})).error,'UAT_DOCUMENT_REQUIRES_EMPTY');assert.equal(propertyWrites,1);
+ assert.equal((await call('verify',{code:'12345678'})).ok,true);
+ assert.equal((await call('hold',{slotId:'TEST_SLOT_1',requestId:'6'.repeat(32)})).ok,true);
+ const chosen=(await call('document')).value;assert.equal(chosen.sha,preview.sha);assert.equal(chosen.version,preview.version);
+ assert.equal((await call('sign',{...sign,sourceSha:original.hash})).ok,false);
+ const signed2=(await call('sign',{...sign,sourceSha:chosen.sha})).value;assert.equal(signed2.sourceSha,chosen.sha);assert.equal(signed2.pageCount,5);
+ assert.equal(hash(Buffer.from(signed2.bytes,'base64')),signed2.sha);assert.equal((await PDFLib.PDFDocument.load(Buffer.from(signed2.bytes,'base64'))).getPageCount(),5);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
 });
 
@@ -486,7 +512,7 @@ test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutat
   if(r.operation==='slots')return available;
   if(r.operation==='hold'){state='HELD';if(loseHold){loseHold=false;throw Error('unknown committed');}return summary();}
   if(r.operation==='read')return summary();
-  if(r.operation==='document')return {caseId:wrongOriginal?'UAT_wrong':caseId,sha:sourceSha,pageCount:5,bytes:original.toString('base64')};
+  if(r.operation==='document')return {caseId:wrongOriginal?'UAT_wrong':caseId,sha:sourceSha,version:'UAT-SYNTHETIC-1',pageCount:5,bytes:original.toString('base64')};
   if(r.operation==='sign'){state='CONFIRMED';if(loseSign){loseSign=false;throw Error('unknown committed');}}
   if(r.operation==='copy'||r.operation==='sign')return {...summary(),sha:signedSha,bytes:signed.toString('base64'),pageCount:5,date:'2026/11/19'};
   throw Error('unexpected request');
@@ -627,6 +653,8 @@ test('same official site source routes preserve formal closure and require real 
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
   assert.equal((await c.study1E1SyntheticUat(testRequest)).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'documentCatalog'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'documentSelect'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:'a'.repeat(64),confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'b'.repeat(64)}).ok,false);

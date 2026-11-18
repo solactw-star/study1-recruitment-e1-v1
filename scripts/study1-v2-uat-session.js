@@ -1,6 +1,7 @@
 // Pure synthetic E1 document source, shared by UAT runtimes only.
 // No contact details, research document, file ID, data access or network calls.
-async function study1UatDocument_(profile){
+async function study1UatDocument_(profile,version='UAT-SYNTHETIC-1'){
+ if(!['UAT-SYNTHETIC-1','UAT-SYNTHETIC-2'].includes(version)||version==='UAT-SYNTHETIC-2'&&profile!=='GAS_UAT')throw Error('UAT_DOCUMENT_VERSION');
  const storageCopy={
   BROWSER:['Data: only this browser tab holds synthetic state.','No files, contact details or signatures are transmitted.'],
   SHARED_LOCAL:['Data: synthetic cases are stored in the local test database.','Only fictional test marks are saved; no Google data or mail.'],
@@ -15,8 +16,31 @@ async function study1UatDocument_(profile){
     storageCopy[profile],
     ['Example signature page - not a consent agreement.','Researcher example placeholder: TEST RESEARCHER.']];
    lines.forEach((copy,i)=>{const p=pdf.addPage([595,842]);p.drawText('SYNTHETIC UAT - NOT VALID CONSENT',{x:36,y:790,size:19,font});p.drawText('Study1 E1 / sample page '+(i+1)+' of 5',{x:36,y:752,size:13,font});copy.forEach((line,j)=>p.drawText(line,{x:36,y:704-j*26,size:12,font}));if(i===4){p.drawText('Fictional participant mark:',{x:80,y:129,size:12,font});p.drawRectangle({x:80,y:70,width:190,height:50,borderWidth:1});p.drawText('Test date:',{x:350,y:129,size:12,font});}p.drawText('TEST ONLY / never submit as research consent',{x:36,y:30,size:11,font});});
+   // V1 remains byte-identical; V2 clearly marks a fictional pre-signature.
+   if(version==='UAT-SYNTHETIC-2'){
+    pdf.getPages().forEach(p=>p.drawText('UAT-SYNTHETIC-2 / fictional researcher pre-sign sample',{x:36,y:595,size:12,font}));
+    const p=pdf.getPages()[4];p.drawText('TEST RESEARCHER / mock mark / 2026-01-01',{x:80,y:200,size:12,font});
+   }
    const bytes=Array.from(await pdf.save({useObjectStreams:false,objectsPerTick:Infinity})),hash=await study1PdfDigest_(bytes);
-   return {bytes,hash,layout:{experiment:'E1',documentSha:hash,version:'UAT-SYNTHETIC-1',pageCount:5,pageIndex:4,pageWidth:595,pageHeight:842,signature:{x:80,y:70,width:190,height:50},date:{x:350,y:87,fontSize:11}}};
+   return {bytes,hash,layout:{experiment:'E1',documentSha:hash,version,pageCount:5,pageIndex:4,pageWidth:595,pageHeight:842,signature:{x:80,y:70,width:190,height:50},date:{x:350,y:87,fontSize:11}}};
+}
+
+// Only generated TEST sources can be selected. No arbitrary bytes or Drive IDs.
+async function study1UatDocumentCatalog_(){
+ const docs=[];
+ for(const version of ['UAT-SYNTHETIC-1','UAT-SYNTHETIC-2']){
+  const doc=await study1UatDocument_('GAS_UAT',version);
+  const reopened=await PDFLib.PDFDocument.load(Uint8Array.from(doc.bytes),{ignoreEncryption:false,updateMetadata:false,parseSpeed:Infinity});
+  if(reopened.isEncrypted||reopened.getPageCount()!==5||study1PdfDigest_(doc.bytes)!==doc.hash)throw Error('UAT_DOCUMENT_SOURCE');
+  docs.push(doc);
+ }
+ if(docs[0].hash===docs[1].hash)throw Error('UAT_DOCUMENT_SOURCE');
+ return docs;
+}
+async function study1UatDocumentForSha_(sha){
+ const doc=(await study1UatDocumentCatalog_()).find(d=>d.hash===sha);
+ if(!doc)throw Error('UAT_DOCUMENT_SOURCE');
+ return doc;
 }
 
 /* Isolated E1 usability session, no real identity, persistence, or network.

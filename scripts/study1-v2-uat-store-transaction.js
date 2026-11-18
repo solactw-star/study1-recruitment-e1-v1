@@ -36,6 +36,8 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
   const k=Object.keys(maintenance).sort().join(',');
   need((maintenance.mode==='preview'&&k==='mode')||
    (maintenance.mode==='reconcile'&&k==='mode'&&typeof services.checkReconcileConfig==='function')||
+   (maintenance.mode==='select_document'&&k==='expectedSha,mode,nextSourceSha'&&hex(maintenance.expectedSha,64)&&
+    hex(maintenance.nextSourceSha,64)&&maintenance.nextSourceSha!==config.sourceSha&&maintenance.nextSourceSha!==config.gateSha&&typeof services.selectDocument==='function')||
    (['clear','recover_gate'].includes(maintenance.mode)&&k==='expectedSha,mode,nextGateSha'&&hex(maintenance.expectedSha,64)&&
     hex(maintenance.nextGateSha,64)&&maintenance.nextGateSha!==config.gateSha&&maintenance.nextGateSha!==config.sourceSha),
    'UAT_CLEANUP_REQUEST');
@@ -86,6 +88,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
  const owned=()=>need(lock.hasLock()===true,'UAT_LOCK_LOST');
  try{
   owned();
+  if(typeof services.checkCurrentConfig==='function')services.checkCurrentConfig();
   const sheet=services.getSheet();
   need(sheet&&sheet.getName()==='SYNTHETIC_CASES'&&sheet.getParent().getId()===config.storeId&&sheet.getLastRow()<=count+1&&sheet.getLastColumn()<=width,'UAT_STORE_IDENTITY');
   const range=sheet.getRange(1,1,count+1,width);
@@ -154,6 +157,14 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     return {formal:false,snapshotSha,counts,scope:'SYNTHETIC_CASES_ONLY',cases,slots:slotSummary};
    }
    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
+   if(maintenance.mode==='select_document'){
+    need(counts.cases===0,'UAT_DOCUMENT_REQUIRES_EMPTY');
+    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');owned();
+    try{need(services.selectDocument(maintenance.nextSourceSha)===true,'UAT_DOCUMENT_CONFIG_READBACK');owned();
+     need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+    }catch(_){throw Error('UAT_DOCUMENT_SELECTION_UNKNOWN');}
+    return {formal:false,scope:'SYNTHETIC_CASES_ONLY',activeSha:maintenance.nextSourceSha,remainingCases:0};
+   }
    const recovering=maintenance.mode==='recover_gate';
    // Lost gate recovery is not another cleanup. It is allowed only when
    // the current configuration and header already match and every case is empty.

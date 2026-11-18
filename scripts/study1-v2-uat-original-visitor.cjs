@@ -123,11 +123,11 @@ function gasController(){
  button('confirm',async()=>{
   need(current&&current.bookingStatus==='HELD','請先核對暫留');
   clearUrls();clearInk();const d=await call('document');
-  need(d&&d.caseId===expected&&d.sha===current.sourceSha&&d.pageCount===5,'完整測試原文不一致');
+  need(d&&d.caseId===expected&&d.sha===current.sourceSha&&d.pageCount===5&&['UAT-SYNTHETIC-1','UAT-SYNTHETIC-2'].includes(d.version),'完整測試原文不一致');
   originalUrl=await pdf(d.bytes,d.sha);source=d.sha;display(current);
   el('officialPdfDownload').href=originalUrl;el('officialPdfDownload').hidden=false;
   el('officialPdfViewer').data=originalUrl;el('officialPdfViewer').hidden=false;
-  txt('officialPdfSha',source);el('finish').disabled=unresolved.has(caseKey);show('consent');say('完整閱讀五頁合成文件，只畫虛構筆跡。');
+  txt('officialPdfSha',d.version+'｜'+source);el('finish').disabled=unresolved.has(caseKey);show('consent');say('完整閱讀五頁合成文件，只畫虛構筆跡。');
  });
  button('finish',async()=>{
   need(current&&source&&ink&&el('readPdf').checked&&el('agree').checked,'請閱讀完整測試 PDF 並畫虛構筆跡');
@@ -481,6 +481,61 @@ function sameSiteTurnstileController(){
   finally{verify.disabled=false;load.disabled=false;}
  });
 }
+// Adapt the existing B10 read/choose/attest controls to the TEST registry.
+// No formal upload, Drive or production publication RPC.
+function sameSiteDocumentController(){
+ const el=id=>document.getElementById(id),read=el('e1PdfRead'),choice=el('e1PdfChoose'),preview=el('e1PdfReview'),ack=el('e1PdfChooseAttest'),select=el('e1PdfSelect'),msg=el('e1PdfStatus'),link=el('siteTestPdfLink');
+ if([read,choice,preview,ack,select,msg,link].some(x=>!x))return;
+ let catalog=null,verified=null,busy=false,objectUrl=null;
+ const sha=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+ const version=x=>['UAT-SYNTHETIC-1','UAT-SYNTHETIC-2'].includes(x);
+ const entry=d=>d&&version(d.version)&&sha(d.sha)&&d.pageCount===5;
+ const say=x=>{msg.textContent=x;};
+ const selected=()=>catalog?.documents.find(d=>d.version===choice.value);
+ const clearPreview=()=>{verified=null;ack.checked=false;link.hidden=true;link.removeAttribute('href');if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=null;};
+ const controls=()=>{read.disabled=busy;choice.disabled=busy||!catalog;preview.disabled=busy||!selected();
+  select.disabled=busy||!catalog||catalog.cases!==0||!verified||!ack.checked||verified.sha===catalog.activeSha||verified.version!==choice.value;};
+ const rpc=request=>new Promise((resolve,reject)=>google.script.run.withFailureHandler(()=>reject(Error('UAT_DOCUMENT_SELECTION_UNKNOWN')))
+  .withSuccessHandler(r=>r?.ok===true?resolve(r.value):reject(Error(r?.error||'UAT_REQUEST_REJECTED'))).study1E1SyntheticUat(request));
+ const load=async()=>{
+  const r=await rpc({operation:'documentCatalog'});
+  if(!r||r.formal!==false||!sha(r.activeSha)||!sha(r.snapshotSha)||!Number.isInteger(r.cases)||r.cases<0||r.cases>12||
+   !Array.isArray(r.documents)||r.documents.length!==2||!r.documents.every(entry)||new Set(r.documents.map(d=>d.version)).size!==2||
+   new Set(r.documents.map(d=>d.sha)).size!==2||!r.documents.some(d=>d.sha===r.activeSha))throw Error('UAT_DOCUMENT_CATALOG');
+  catalog=r;choice.textContent='';
+  for(const d of r.documents){const o=document.createElement('option');o.value=d.version;o.textContent=d.version+'｜SHA '+d.sha+'｜5 頁';choice.appendChild(o);}
+  choice.value=r.documents.find(d=>d.sha===r.activeSha).version;
+  say('目前 TEST 簽署來源：'+choice.value+'；案件 '+r.cases+' 筆。'+(r.cases?'尚有案件，禁止切換。':'可預覽並核對後選用。'));
+ };
+ read.addEventListener('click',async()=>{if(busy)return;busy=true;catalog=null;clearPreview();controls();
+  try{await load();}catch(_){catalog=null;say('無法核實 TEST 文件目錄。');}finally{busy=false;controls();}});
+ choice.addEventListener('change',()=>{clearPreview();controls();});
+ ack.addEventListener('change',controls);
+ preview.addEventListener('click',async()=>{
+  if(busy||!selected())return;const d=selected();busy=true;clearPreview();controls();
+  try{
+   const r=await rpc({operation:'documentPreview',version:d.version});
+   if(!r||r.formal!==false||!entry(r)||r.version!==d.version||r.sha!==d.sha||typeof r.bytes!=='string'||r.bytes.length>320000)throw Error('UAT_DOCUMENT_SOURCE');
+   const bytes=Uint8Array.from(atob(r.bytes),x=>x.charCodeAt(0));
+   const digest=Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)),x=>x.toString(16).padStart(2,'0')).join('');
+   if(String.fromCharCode(...bytes.slice(0,5))!=='%PDF-'||digest!==d.sha)throw Error('UAT_DOCUMENT_SOURCE');
+   objectUrl=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));link.href=objectUrl;link.hidden=false;verified=d;
+   say('完整五頁 TEST PDF SHA 已核實；請開啟 PDF 逐頁核對，非正式研究同意。');
+  }catch(_){clearPreview();say('文件預覽未核實，不可選用。');}finally{busy=false;controls();}
+ });
+ select.addEventListener('click',async()=>{
+  if(select.disabled||busy||!catalog||!verified)return;
+  const d=verified,old=catalog;busy=true;catalog=null;clearPreview();controls();
+  try{
+   const r=await rpc({operation:'documentSelect',version:d.version,activeSha:old.activeSha,expectedSha:old.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'});
+   if(!r||r.formal!==false||r.scope!=='SYNTHETIC_CASES_ONLY'||r.activeSha!==d.sha||r.version!==d.version||r.remainingCases!==0)throw Error('UAT_DOCUMENT_SELECTION_UNKNOWN');
+   await load();
+   if(catalog.activeSha!==d.sha)throw Error('UAT_DOCUMENT_SELECTION_UNKNOWN');
+   say('TEST 簽署來源已回讀：'+d.version+'｜'+d.sha+'。未修改正式文件或開放真人收件。');
+  }catch(_){catalog=null;say('選用未獲完整確認；先重新載入目錄核對，不重送。');}finally{busy=false;controls();}
+ });
+ window.addEventListener('pagehide',clearPreview);controls();
+}
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // Preserve the original admin shell, style and controls in the repository.
  // The same-site test management view does not initialize formal/sandbox RPCs.
@@ -514,9 +569,15 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
   slice('<label for="e1WsDate">','<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th>')+
   slotTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>日期時間</th><th>場次</th><th>狀態</th><th>容量</th><th>暫留</th><th>確認</th><th>剩餘</th></tr></thead>')+
   '<p>目前僅查詢 TEST 場次與容量；正式場次新增、修改及收件仍未開放。</p>');
+ const pdfSection='<section id="e1OwnerPresign" aria-labelledby="e1OwnerPresignTitle"><h2 id="e1OwnerPresignTitle">E1 TEST 文件管理｜虛構預簽 PDF（OWNER）</h2><p>僅使用程式生成的完整五頁測試文件；選用須清楚核對 SHA，且 TEST 案件為空。不得上傳正式同意書。</p>'+
+  slice('<button type="button" class="secondary" id="e1PdfRead">','<label for="e1PdfFile">').replace('唯讀載入原私人 PDF 版本目錄','載入 TEST PDF 版本目錄').replace('尚未核對 OWNER 正式文件來源。','尚未核對 TEST 文件來源。')+
+  slice('<label for="e1PdfChoose">','<a id="e1PdfReview"').replace('選擇既有預簽文件版號與 SHA','選擇 TEST 文件版號與 SHA').replace('尚未載入私人目錄','尚未載入 TEST 目錄')+
+  '<button type="button" id="e1PdfReview" disabled>核對完整 PDF SHA</button><a id="siteTestPdfLink" hidden target="_blank" rel="noopener noreferrer">開啟完整五頁 TEST PDF</a>'+
+  slice('<label><input type="checkbox" id="e1PdfChooseAttest">','<button id="e1PdfSource"').replace('所選原 PDF 的研究者簽名、完整內容、版號與 SHA','所選 TEST PDF 的完整內容、虛構預簽示意、版號與 SHA').replace('選用正式 E1 PDF','選用 TEST E1 PDF')+'</section>';
+ section=once(section,'<main>','<main>'+pdfSection);
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
  return source.slice(0,start)+section.replace('</main>',turnstile+'</main>')+
-  '<script>\n'+copyScript+'\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+  '<script>\n'+copyScript+'\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the
