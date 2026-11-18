@@ -3,6 +3,14 @@
  * approved is supplied by trusted server configuration, NEVER browser parameters.
  * No actual store ID or access secret is included in source.
  */
+// Scoped same-site B02/B03 read/preview authority. This property is NOT a
+// live intake switch, and is deliberately not provisioned by this build.
+function study1SiteFormalWorkspaceReadGate_(){
+ study1AdminOwnerRequired_();
+ const p=PropertiesService.getScriptProperties();
+ if(p.getProperty('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED')!=='true')throw Error('E1_FORMAL_WORKSPACE_READ_NOT_APPROVED');
+ study1OwnerE1WorkspaceGate_();
+}
 function study1UatGasCaseTransaction_(approved,access,decide,checkCurrentConfig){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);

@@ -925,6 +925,39 @@ test('P0-B owner data gate, public denial and duplicate applicant fail closed',(
  assert.equal(h.mutations.length,n);
 });
 
+test('same-site formal B02/B03 uses original isolated workspace, independent OWNER gate and no writes',()=>{
+ const h=wsHarness(),a=h.person('A'),z=h.person('B');h.holdSlot(h.proof(a),h.S1);
+ const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ vm.runInContext(get('Study1UatGasServices'),h.ctx);
+ vm.runInContext(get('Study1FormalBooking'),h.ctx);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ const n=h.mutations.length,orig=h.ctx.SpreadsheetApp.openById;let opens=0;
+ h.ctx.SpreadsheetApp.openById=id=>{opens++;return orig(id);};
+ const read=()=>h.ctx.study1OwnerE1Workspace(wsFilter);
+ assert.throws(read,/FORMAL_WORKSPACE_READ_NOT_APPROVED/);assert.equal(opens,0);
+ h.props.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');
+ h.ctx.study1AdminOwnerRequired_=()=>{throw Error('OWNER_REQUIRED');};
+ assert.throws(read,/OWNER_REQUIRED/);assert.equal(opens,0);
+ h.ctx.study1AdminOwnerRequired_=()=>true;
+ h.props.delete('STUDY1_PARTICIPANT_DATA_USE_APPROVED');
+ assert.throws(read,/DATA_NOT_APPROVED/);assert.equal(opens,0);
+ h.props.set('STUDY1_PARTICIPANT_DATA_USE_APPROVED','true');
+ const w=read(),slot=w.slots.find(s=>s.slotId===h.S1);
+ assert.equal(w.total,2);assert.equal(w.slots.length,2);assert.equal(slot.remaining,0);
+ assert.equal(h.ctx.study1OwnerE1Workspace({...wsFilter,query:z.applicantId}).total,1);
+ assert.doesNotMatch(JSON.stringify(w),/example.org|otp_hmac|SLOT_E2/);
+ assert.throws(()=>h.ctx.study1OwnerE1Workspace({...wsFilter,mode:'TEST'}),/FILTER_INVALID/);
+ const q={action:'UPDATE',revision:w.revision,slotId:slot.slotId,startAtUtc:slot.startAtUtc,endAtUtc:slot.endAtUtc,capacity:2,locationCode:slot.locationCode};
+ assert.equal(h.ctx.study1OwnerE1SlotChangePreview(q).written,false);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,capacity:0}),/DRAFT_INVALID/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,slotId:h.S3}),/SCOPE_INVALID/);
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(q),/PUBLIC_READ_ONLY/);
+ h.tables.Applicants.rows[0][1]='NEW_SYNTHETIC_NAME';
+ assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview(q),/SOURCE_CHANGED/);
+ assert.equal(h.mutations.length,n);
+ h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');const after=opens;
+ assert.throws(read,/FORMAL_WORKSPACE_READ_NOT_APPROVED/);assert.equal(opens,after);
+});
 test('P0-B recruitment source is the original Index; no write or public read of owner RPC',()=>{
  const h=wsHarness(),n=h.mutations.length;
  h.ctx.HtmlService={createHtmlOutputFromFile:name=>{

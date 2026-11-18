@@ -627,7 +627,7 @@ test('same official site source routes preserve formal closure and require real 
  const extra=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
  assert.deepEqual(files.map(f=>f.name).sort(),[...baseNames,...extra].sort());
  const modified=baseline.filter(f=>get(f.name)!==f.source).map(f=>f.name).sort();
- assert.deepEqual(modified,['AdminConsole','Study1Visitor','Website']);
+ assert.deepEqual(modified,['AdminConsole','Study1FormalBooking','Study1Visitor','Website']);
  for(const f of baseline)assert.equal(files.find(x=>x.name===f.name).type,f.type);
  assert.equal(get('appsscript'),baseline.find(f=>f.name==='appsscript').source);
  const globals=source=>[...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]).filter(n=>!n.endsWith('_')).sort();
@@ -686,6 +686,7 @@ test('same official site source routes preserve formal closure and require real 
   const form=c.doGet({parameter:{view:'apply'}});assert.equal(form.mode,'FORMAL');assert.equal(form.siteOwner,false);
   assert.throws(()=>c.doGet({parameter:{view:'apply',test:'1'}}),/拒絕存取/);
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
+  assert.throws(()=>c.doGet({parameter:{view:'admin',workspace:'formal'}}),/拒絕存取/);
   assert.equal((await c.study1E1SyntheticUat(testRequest)).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'documentCatalog'})).ok,false);
@@ -700,6 +701,8 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
  active=owner;effective=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
  assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
+ c.PropertiesService={getScriptProperties:()=>({getProperty:()=>null})};
+ assert.throws(()=>c.doGet({parameter:{view:'admin',workspace:'formal'}}),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);
  assert.equal((await c.study1E1SyntheticUat({...testRequest,storeId:'OTHER'})).ok,false);
  assert.equal((await c.study1E1SyntheticUat({...testRequest,operation:'publish'})).ok,false);
  assert.equal(requests,0);
@@ -745,6 +748,7 @@ test('same-site assembler source contract rejects unreviewed inventory, bytes, t
   [[...target,{name:'Unreviewed',type:'SERVER_JS',source:'function extra_(){}'}],/candidate inventory/],
   [target.filter(f=>f.name!=='Study1UatSession'),/candidate inventory/],
   [change('BookingCore',f=>({...f,source:f.source+'\n// unreviewed change'})),/unexpected source changes/],
+  [change('Study1FormalBooking',f=>({...f,source:f.source.replace('study1SiteFormalWorkspaceReadGate_();','')})),/unexpected formal workspace delta/],
   [change('appsscript',f=>({...f,source:f.source+' '})),/unexpected source changes/],
   [change('AdminConsole',f=>({...f,type:'SERVER_JS'})),/file type changed/],
   [restore('Website'),/unexpected source changes/],

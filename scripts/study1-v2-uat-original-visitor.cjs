@@ -626,6 +626,83 @@ function sameSiteNoticeController(){
   }catch(_){clear();status.textContent='通知未獲完整確認，先重新唯讀查核，不重送。';}finally{busy=false;control();}});
  control();
 }
+// Scope only the two existing read/preview RPCs in this candidate. Preserve
+// their original booking/workspace implementation and all other deny guards.
+function sameSiteFormalBooking(source,restore=false){
+ const deny="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
+ const gate='study1SiteFormalWorkspaceReadGate_();';
+ for(const name of ['study1OwnerE1Workspace','study1OwnerE1SlotChangePreview']){
+  const head='function '+name+'(input){';
+  source=once(source,head+(restore?gate:deny),head+(restore?deny:gate));
+ }
+ return source;
+}
+function sameSiteFormalWorkspaceController(){
+ const el=id=>document.getElementById('e1FormalWs'+id),load=el('Load');
+ if(!load)return;
+ const status=el('StatusText'),cases=el('Rows'),slots=el('Slots'),preview=el('Preview');
+ let data=null,offset=0,epoch=0,busy=false,selected=null,creating=false;
+ const exact=(o,k)=>o&&Object.keys(o).sort().join(',')===k.slice().sort().join(',');
+ const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+ const iso=x=>typeof x==='string'&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString()===x;
+ const id=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{8,64}$/.test(x);
+ const text=(node,value)=>{node.textContent=String(value??'—');};
+ const local=x=>new Date(x).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
+ const localDate=x=>new Date(x).toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'});
+ const localInput=x=>new Date(Date.parse(x)+8*3600000).toISOString().slice(0,16);
+ const value=k=>el(k).value;
+ const draftMsg=x=>text(el('DraftResult'),x);
+ const clearDraft=()=>{selected=null;creating=false;for(const k of ['DraftId','DraftStart','DraftEnd','DraftLocation','DraftCap']){el(k).value='';el(k).disabled=true;}draftMsg('');};
+ const controls=()=>{load.disabled=busy;el('Prev').disabled=busy||!data||offset===0;el('Next').disabled=busy||!data||offset+50>=data.total;el('New').disabled=busy||!data;preview.disabled=busy||!data||(!selected&&!creating);el('Close').disabled=busy||!selected||selected.status!=='OPEN';el('Open').disabled=busy||!selected||selected.status!=='CLOSED';};
+ const clear=()=>{data=null;cases.textContent='';slots.textContent='';clearDraft();controls();};
+ const cells=(body,values)=>{const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');text(td,v);tr.appendChild(td);}body.appendChild(tr);return tr;};
+ const fillDraft=s=>{selected=s;creating=!s;for(const k of ['DraftId','DraftStart','DraftEnd','DraftLocation','DraftCap'])el(k).disabled=false;
+  el('DraftId').disabled=!!s;el('DraftId').value=s?.slotId||'';el('DraftStart').value=s?localInput(s.startAtUtc):'';el('DraftEnd').value=s?localInput(s.endAtUtc):'';el('DraftLocation').value=s?.locationCode||'';el('DraftCap').value=s?String(s.capacity):'';draftMsg('草稿不會儲存正式資料。');controls();};
+ const renderSlots=()=>{slots.textContent='';if(!data)return;
+  for(const s of data.slots.filter(x=>!value('Date')||localDate(x.startAtUtc)===value('Date'))){
+   const tr=cells(slots,[local(s.startAtUtc)+' – '+local(s.endAtUtc),s.slotId+' / '+s.locationCode,s.status,s.capacity,s.held,s.confirmed,s.waitlisted,s.remaining]);
+   const td=document.createElement('td'),btn=document.createElement('button');btn.type='button';text(btn,'預檢草稿');btn.addEventListener('click',()=>{if(!busy&&data&&data.slots.includes(s))fillDraft(s);});td.appendChild(btn);tr.appendChild(td);
+  }
+ };
+ const nonneg=x=>Number.isSafeInteger(x)&&x>=0;
+ const validSlot=s=>exact(s,['slotId','startAtUtc','endAtUtc','capacity','locationCode','status','held','confirmed','waitlisted','remaining','historicalCount'])&&id(s.slotId)&&iso(s.startAtUtc)&&iso(s.endAtUtc)&&s.startAtUtc<s.endAtUtc&&typeof s.locationCode==='string'&&['OPEN','CLOSED'].includes(s.status)&&Number.isSafeInteger(s.capacity)&&s.capacity>0&&[s.held,s.confirmed,s.waitlisted,s.remaining,s.historicalCount].every(nonneg)&&s.remaining===s.capacity-s.held-s.confirmed&&s.historicalCount>=s.held+s.confirmed+s.waitlisted;
+ const validPerson=(p,r)=>exact(p,['applicantId','name','applicationStatus','eligibility','screenedAtUtc','bookingStatus','slotId','consentState','consentBookingStatus','noticeStatus'])&&id(p.applicantId)&&typeof p.name==='string'&&['PENDING_EMAIL','EMAIL_VERIFIED'].includes(p.applicationStatus)&&['ELIGIBLE','INELIGIBLE'].includes(p.eligibility)&&iso(p.screenedAtUtc)&&typeof p.bookingStatus==='string'&&[p.consentState,p.consentBookingStatus,p.noticeStatus].every(s=>typeof s==='string')&&(p.slotId===null||r.slots.some(s=>s.slotId===p.slotId));
+ const render=r=>{
+  if(!exact(r,['mode','experiment','revision','asOfUtc','total','excluded','offset','pageSize','participants','slots','actionAuthority'])||r.mode!=='OWNER_E1_WORKSPACE'||r.experiment!=='E1'||r.actionAuthority!=='READ_AND_PREVIEW_ONLY'||!hex(r.revision)||!iso(r.asOfUtc)||!nonneg(r.total)||!nonneg(r.excluded)||r.offset!==offset||r.pageSize!==50||!Array.isArray(r.slots)||!r.slots.every(validSlot)||new Set(r.slots.map(s=>s.slotId)).size!==r.slots.length||!Array.isArray(r.participants)||r.participants.length!==Math.min(50,Math.max(0,r.total-offset))||!r.participants.every(p=>validPerson(p,r))||new Set(r.participants.map(p=>p.applicantId)).size!==r.participants.length)throw Error('FORMAL_WORKSPACE_SOURCE');
+  const old=value('SlotFilter');el('SlotFilter').textContent='';
+  for(const s of ['',...r.slots.map(x=>x.slotId)]){const o=document.createElement('option');o.value=s;text(o,s||'全部');el('SlotFilter').appendChild(o);}
+  el('SlotFilter').value=r.slots.some(s=>s.slotId===old)?old:'';
+  for(const p of r.participants)cells(cases,[p.applicantId,p.name,p.applicationStatus,p.eligibility,p.slotId,p.bookingStatus,p.consentState,p.consentBookingStatus,p.noticeStatus]);
+  data=r;renderSlots();text(status,'正式來源唯讀快照：'+local(r.asOfUtc)+'；符合 '+r.total+' 筆，未辨識 '+r.excluded+' 筆。未啟用真人收件。');
+ };
+ const refresh=async()=>{
+  if(busy)return;busy=true;const e=++epoch;clear();text(status,'核對原正式來源…');
+  try{const q={query:value('Query'),status:value('Status'),eligibility:value('Eligibility'),slotId:value('SlotFilter'),offset};
+   const r=await new Promise((resolve,reject)=>google.script.run.withFailureHandler(reject).withSuccessHandler(resolve).study1OwnerE1Workspace(q));
+   if(e===epoch)render(r);
+  }catch(_){if(e===epoch){clear();text(status,'正式來源或權限未核實，請重新查詢。未改寫資料。');}}
+  finally{busy=false;controls();}
+ };
+ const check=async action=>{
+  if(busy||!data||(!selected&&!creating))return;
+  const utc=(v,old)=>old&&v===localInput(old)?old:new Date(v+':00+08:00').toISOString();
+  let q;try{q={action,revision:data.revision,slotId:value('DraftId').trim(),startAtUtc:utc(value('DraftStart'),selected?.startAtUtc),endAtUtc:utc(value('DraftEnd'),selected?.endAtUtc),capacity:Number(value('DraftCap')),locationCode:value('DraftLocation').trim()};}catch(_){draftMsg('日期不合法');return;}
+  busy=true;const e=++epoch;controls();draftMsg('核對草稿…');
+  try{const r=await new Promise((resolve,reject)=>google.script.run.withFailureHandler(reject).withSuccessHandler(resolve).study1OwnerE1SlotChangePreview(q));
+   if(e!==epoch)return;
+   if(!r||r.mode!=='E1_SLOT_CHANGE_PREVIEW'||r.revision!==q.revision||r.action!==q.action||r.written!==false||r.actionAuthority!=='NONE'||r.preservesReservations!==true||r.requiresPiApproval!==true||!hex(r.proposal)||!r.after||r.after.slotId!==q.slotId||r.after.capacity!==q.capacity||r.after.startAtUtc!==q.startAtUtc||r.after.endAtUtc!==q.endAtUtc||r.after.locationCode!==q.locationCode)throw Error('FORMAL_PREVIEW_SOURCE');
+   draftMsg('預檢通過（未儲存）：'+r.after.slotId+'｜名額 '+r.after.capacity+'｜'+r.after.status+'；保留原預約，正式儲存未開放。');
+  }catch(_){if(e===epoch){clear();text(status,'草稿或來源已變更／不允許，請重新查詢。');}}
+  finally{busy=false;controls();}
+ };
+ load.addEventListener('click',()=>{offset=0;return refresh();});
+ el('Prev').addEventListener('click',()=>{if(!busy&&data&&offset>=50){offset-=50;return refresh();}});
+ el('Next').addEventListener('click',()=>{if(!busy&&data&&offset+50<data.total){offset+=50;return refresh();}});
+ for(const k of ['Query','Status','Eligibility','SlotFilter'])el(k).addEventListener('change',()=>{epoch++;offset=0;clear();text(status,'篩選已變更，請重新查詢。');});
+ el('Date').addEventListener('change',renderSlots);el('New').addEventListener('click',()=>{if(!busy&&data)fillDraft(null);});
+ preview.addEventListener('click',()=>check(creating?'CREATE':'UPDATE'));el('Close').addEventListener('click',()=>check('CLOSE'));el('Open').addEventListener('click',()=>check('OPEN'));window.addEventListener('pagehide',()=>{epoch++;clear();});
+ clear();
+}
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // Preserve the original admin shell, style and controls in the repository.
  // The same-site test management view does not initialize formal/sandbox RPCs.
@@ -681,9 +758,18 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
   .replace('E1 正式預約與通知核對結果','E1 TEST 預約與通知核對結果')+
   '<label for="siteNoticeAlias">已確認、未通知 TEST 案件</label><select id="siteNoticeAlias"></select><label><input type="checkbox" id="siteNoticeAck">僅發送單次隔離測試通知到研究室測試信箱</label><button id="siteNoticeSend" type="button" disabled>發送 TEST 確認通知</button></section>';
  section=once(section,'<main>','<main>'+notices);
+ // One site and original B02/B03 markup. Server renders only the authorized
+ // source mode; no shared client-mode parameter can grant formal access.
+ const formalPanel=(slice('<section id="e1Workspace">','<div id="e1Profile"')+
+  slice('<h3>場次與名額（臺灣時間）</h3>','<label><input id="e1WsConfirm"')+'</section>')
+  .replace(/e1Ws/g,'e1FormalWs').replace('id="e1Workspace"','id="e1FormalWorkspace"')
+  .replace('<th>個案</th>','').replace('場次變更預檢及核定後儲存','場次變更唯讀預檢（不儲存）')
+  .replace('原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更須先預檢，且只有獨立核定的完全相同草稿、正式資料寫入授權及安全條件均通過時才可儲存；未核定不寫入。開放單一場次不代表啟用招募。','正式來源唯讀 B02/B03。僅適用獨立授權的研究室 OWNER；不儲存正式場次、不啟用真人收件。');
+ const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+'</main>';
+ section=once(section,'<main>','<main><p><a href="<?= siteAppUrl + \'?view=admin&workspace=formal\' ?>" target="_top">正式 B02/B03 唯讀工作區（須獨立資料授權）</a></p>');
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
- return source.slice(0,start)+section.replace('</main>',turnstile+'</main>')+
-  '<script>\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+ return source.slice(0,start)+"<? if (siteFormalWorkspace) { ?>"+formalMarkup+"<? } else { ?>"+section.replace('</main>',turnstile+'</main>')+"<? } ?>"+
+  '<script>\n('+sameSiteFormalWorkspaceController.toString()+')();\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the
@@ -694,7 +780,7 @@ function requireSameSiteSourceDelta(anonymous,result){
  core.digest(anonymous);
  const need=(ok,reason)=>{if(!ok)throw Error('SAME_SITE_SOURCE_DELTA: '+reason);};
  const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
- const modified=['AdminConsole','Study1Visitor','Website'];
+ const modified=['AdminConsole','Study1FormalBooking','Study1Visitor','Website'];
  const added=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
  const baseNames=anonymous.map(f=>f.name).sort();
  need(eq(baseNames,core.APPROVED),'baseline inventory');
@@ -707,6 +793,7 @@ function requireSameSiteSourceDelta(anonymous,result){
   if(next.source!==file.source)changed.push(file.name);
  }
  need(eq(changed.sort(),modified),'unexpected source changes');
+ need(candidate.get('Study1FormalBooking').source===sameSiteFormalBooking(base.get('Study1FormalBooking').source),'unexpected formal workspace delta');
  // The existing anonymous manifest must remain byte-for-byte unchanged.
  // The inherited public RPCs remain closed; only these two OWNER-gated
  // entry points may be added for the same-site TEST product.
@@ -735,15 +822,18 @@ function sameSiteCandidate(){
   if(f.name==='appsscript')return {...get(anonymous,f.name)};
   if(f.name==='Study1Visitor')return {...f,source:sameSiteVisitor(get(base,f.name).source)};
   if(f.name==='AdminConsole')return {...f,source:sameSiteAdmin(get(base,f.name).source)};
+  if(f.name==='Study1FormalBooking')return {...f,source:sameSiteFormalBooking(get(base,f.name).source)};
   if(f.name!=='Website')return f;
   let source=get(base,'Website').source;
   source=once(source,'function doGet(e){',`function doGet(e){
  if(e&&e.parameter&&e.parameter.view==='admin'){
   study1AdminOwnerRequired_();
-  study1UatTrustedConfig_();
+  const formal=e.parameter.workspace==='formal';
+  if(formal)study1SiteFormalWorkspaceReadGate_();else study1UatTrustedConfig_();
   const t=HtmlService.createTemplateFromFile('AdminConsole');
+  t.siteFormalWorkspace=formal;
   t.siteAppUrl=study1V2SelfWebUrl_();
-  return t.evaluate().setTitle('Study 1｜測試資料管理').addMetaTag('viewport','width=device-width, initial-scale=1');
+  return t.evaluate().setTitle(formal?'Study 1｜正式唯讀管理':'Study 1｜測試資料管理').addMetaTag('viewport','width=device-width, initial-scale=1');
  }`);
   source=once(source,"  t.flowMode='FORMAL';",`  t.flowMode='FORMAL';
   t.siteOwner=false;
@@ -773,6 +863,9 @@ function requireSameSiteReleaseSource(files){
  const sourceSha=core.digest(files);
  if(sourceSha!==core.digest(sameSiteCandidate()))throw Error('SAME_SITE_RELEASE_SOURCE_MISMATCH');
  const inherited=files.map(f=>{
+  // The exact candidate digest and source-delta check above bind the scoped
+  // OWNER read gate; check all other inherited RPCs with the original guard.
+  if(f.name==='Study1FormalBooking')return {...f,source:sameSiteFormalBooking(f.source,true)};
   if(f.name!=='Website')return f;
   if(!f.source.endsWith(siteTestRpc))throw Error('SAME_SITE_RELEASE_RPC_BOUNDARY');
   return {...f,source:f.source.slice(0,-siteTestRpc.length)};
