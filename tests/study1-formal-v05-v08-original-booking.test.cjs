@@ -1350,11 +1350,30 @@ test('P0-B B04 delayed prior-case response cannot replace a new selection or reo
 });
 
 
-// Synthetic full-source capacity tests. The registry validator is the exact
-// raw AdminSandbox implementation, while its disk I/O is covered separately
-// by registry-v2 tests. No participant, PDF contents, mail, or Google API.
-const capacityRegistryVM=vm.createContext({});
-vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas/AdminSandbox.js'),'utf8'),capacityRegistryVM);
+// Synthetic full-source capacity tests. The actual V2 reader (including
+// pointer HMAC, bytes, ACL, parent, digest and registry validation) runs in
+// a separate VM backed by fake Drive/Properties. No real data or I/O.
+const capacityRegistrySource=fs.readFileSync(path.join(__dirname,'../gas/AdminSandbox.js'),'utf8');
+function capacityRegistryReader(h,registry){
+ const folderId='1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU',fileId='PRIVATE_CAPACITY_REGISTRY_0001';
+ const digest=v=>crypto.createHash('sha256').update(typeof v==='string'?v:Buffer.from(v)).digest('hex');
+ let bytes=Buffer.from(JSON.stringify(registry),'utf8'),access='PRIVATE',parent=folderId;
+ const pointer={schemaVersion:2,revision:registry.revision,fileId,sha256:digest(bytes),legacySha256:digest('')};
+ pointer.hmac=h.ctx.study1BindingHmac_(['STUDY1_ECONSENT_POINTER_V2',pointer.revision,fileId,pointer.sha256,pointer.legacySha256]);
+ const values=new Map([['STUDY1_ECONSENT_POINTER_V2',JSON.stringify(pointer)]]);
+ const readVM=vm.createContext({
+  PropertiesService:{getScriptProperties:()=>({getProperty:key=>values.get(key)??null})},
+  DriveApp:{Access:{PRIVATE:'PRIVATE'},getFolderById:id=>{assert.equal(id,folderId);return {getSharingAccess:()=> 'PRIVATE'};},
+   getFileById:id=>{assert.equal(id,fileId);return {getSharingAccess:()=>access,getMimeType:()=> 'application/json',
+    getSize:()=>bytes.length,getParents:()=>{let done=false;return {hasNext:()=>!done,next:()=>{done=true;return {getId:()=>parent};}};},
+    getBlob:()=>({getBytes:()=>Buffer.from(bytes),getDataAsString:()=>bytes.toString('utf8')})};}},
+  Utilities:{DigestAlgorithm:{SHA_256:'sha256'},computeDigest:(_,v)=>Array.from(Buffer.from(digest(v),'hex'))},
+  study1BindingHmac_:parts=>h.ctx.study1BindingHmac_(parts)
+ });
+ vm.runInContext(capacityRegistrySource,readVM);
+ h.ctx.study1EConsentRegistry_=()=>readVM.study1EConsentRegistry_();
+ return {tamper:()=>{bytes=Buffer.from(bytes);bytes[20]^=1;},share:()=>{access='ANYONE';},move:()=>{parent='OTHER_FOLDER';}};
+}
 function ownerCapacityHarness(count, targetBytes){
  const h=wsHarness(),entries=[];
  const slot=h.tables.Slots.rows[0];slot[3]=count;
@@ -1396,17 +1415,11 @@ function ownerCapacityHarness(count, targetBytes){
   entries[0].syntheticPadding='測'.repeat(Math.floor(remain/3))+'x'.repeat(remain%3);
   assert.equal(Buffer.byteLength(JSON.stringify(registry),'utf8'),targetBytes);
  }
- h.ctx.study1EConsentRegistry_=()=>{
-  capacityRegistryVM.study1EConsentValidateRegistry_(registry,3000);
-  // Mirrors the actual independent file-byte guard; its raw Drive reader
-  // is exercised at exact UTF-8 boundaries in the registry-v2 suite.
-  if(Buffer.byteLength(JSON.stringify(registry),'utf8')>5000000)throw Error('SYNTHETIC_SOURCE_BYTE_GUARD');
-  return registry;
- };
+ const reader=capacityRegistryReader(h,registry);
  h.ctx.study1OwnerE1SignedPdfVerified_=entry=>({recordId:entry.id,experiment:'E1',
   researcherPreSigned:true,sourceSha256:entry.documentSha,signedPdfSha256:entry.signedPdf.sha,
   signedAtUtc:ts(t,-50000),confirmedAtUtc:ts(t,-45000),bytes:200,mime:'application/pdf',base64:'SYNTHETIC_PDF_BYTES'});
- return {h,entries,registry};
+ return {h,entries,registry,reader};
 }
 for(const count of [13,100,500,1000,3000,3001]){
  test('CAPACITY B04/B08 original owner read '+count+' records',()=>{
@@ -1440,11 +1453,11 @@ for(const count of [13,100,500,1000,3000,3001]){
  });
 }
 for(const bytes of [4999999,5000000,5000001]){
- test('CAPACITY B04/B08 source byte boundary '+bytes+' (synthetic guard)',()=>{
+ test('CAPACITY B04/B08 source byte boundary '+bytes+' (actual V2 reader)',()=>{
   const {h,entries}=ownerCapacityHarness(13,bytes),before=h.mutations.length;
   if(bytes>5000000){
-   assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/SYNTHETIC_SOURCE_BYTE_GUARD/);
-   assert.throws(()=>h.ctx.study1OwnerE1OperationsAudit(),/SYNTHETIC_SOURCE_BYTE_GUARD/);
+   assert.throws(()=>h.ctx.study1OwnerE1Workspace(wsFilter),/E1_REGISTRY_V2_PRIVATE_FILE_INVALID/);
+   assert.throws(()=>h.ctx.study1OwnerE1OperationsAudit(),/E1_REGISTRY_V2_PRIVATE_FILE_INVALID/);
   }else{
    const list=h.ctx.study1OwnerE1Workspace(wsFilter);
    const p=h.ctx.study1OwnerE1Profile({applicantId:entries[12].binding.applicantId,revision:list.revision});
@@ -1455,3 +1468,14 @@ for(const bytes of [4999999,5000000,5000001]){
   assert.equal(h.mutations.length,before);
  });
 }
+
+test('CAPACITY B04/B08 actual V2 reader rejects changed private source without fallback',()=>{
+ for(const [fault,code] of [['tamper',/SNAPSHOT_SHA_CHANGED/],['share',/PRIVATE_FILE_INVALID/],['move',/OUTSIDE_PRIVATE_FOLDER/]]){
+  const {h,entries,reader}=ownerCapacityHarness(13),n=h.mutations.length;
+  const list=h.ctx.study1OwnerE1Workspace(wsFilter);
+  reader[fault]();
+  assert.throws(()=>h.ctx.study1OwnerE1Profile({applicantId:entries[12].binding.applicantId,revision:list.revision}),code);
+  assert.throws(()=>h.ctx.study1OwnerE1OperationsAudit(),code);
+  assert.equal(h.mutations.length,n);
+ }
+});
