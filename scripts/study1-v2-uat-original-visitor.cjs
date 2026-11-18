@@ -399,13 +399,56 @@ function sameSiteCleanupController(){
  });
  buttons();
 }
+function sameSiteTurnstileController(){
+ const load=document.getElementById('siteTurnstileLoad');
+ const verify=document.getElementById('siteTurnstileVerify');
+ const status=document.getElementById('siteTurnstileStatus');
+ if(!load||!verify||!status)return;
+ const say=value=>{status.textContent=value;};
+ const rpc=request=>new Promise((resolve,reject)=>google.script.run
+  .withFailureHandler(()=>reject(Error('UAT_TURNSTILE_RPC_FAILED')))
+  .withSuccessHandler(result=>result?.ok===true?resolve(result.value):reject(Error(result?.error||'UAT_TURNSTILE_RPC_FAILED')))
+  .study1E1SyntheticUat(request));
+ let token='',widget=null;
+ load.addEventListener('click',async()=>{
+  load.disabled=true;verify.disabled=true;token='';
+  try{
+   const config=await rpc({operation:'turnstileConfig'});
+   if(!window.turnstile)await new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('UAT_TURNSTILE_WIDGET_LOAD_FAILED'));};
+    document.head.appendChild(script);
+   });
+   if(widget!==null)window.turnstile.remove(widget);
+   widget=window.turnstile.render('#siteTurnstileWidget',{
+    sitekey:config.siteKey,action:config.action,'refresh-expired':'manual',
+    callback:value=>{token=value;verify.disabled=false;say('Token 已取得。可立即驗證，或等待五分鐘後測試過期。');},
+    'expired-callback':()=>say('Token 已過期；可送出原 token 核對 Cloudflare 回覆。'),
+    'error-callback':code=>say('Turnstile widget: '+code)
+   });
+  }catch(error){say(error.message);}
+  finally{load.disabled=false;}
+ });
+ verify.addEventListener('click',async()=>{
+  if(!token)return;
+  verify.disabled=true;load.disabled=true;
+  try{
+   const result=await rpc({operation:'turnstileVerify',token});
+   say(result?.verified===true?'Siteverify 已通過。可用同一 token 測試重用。':'UAT_TURNSTILE_RESPONSE_INVALID');
+  }catch(error){say(error.message);}
+  finally{verify.disabled=false;load.disabled=false;}
+ });
+}
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // Preserve the original admin shell, style and controls in the repository.
  // The same-site test management view does not initialize formal/sandbox RPCs.
  const start=source.indexOf('<main>'),end=source.lastIndexOf('</main>');
  if(start<0||end<=start)throw Error('SAME_SITE_ADMIN_ANCHOR');
  const section='<main><section id="siteTestCleanup"><h2>測試資料管理</h2><p>只清除本網站專用測試案件、預約與內嵌簽署 PDF。不影響正式資料。</p><p><a href="<?= siteAppUrl + \'?view=apply&test=1\' ?>" target="_top">返回本網站測試報名</a></p><button id="siteTestPreview" type="button" class="secondary">重新載入名單、場次與清除預覽</button><h3>測試報名與預約名單</h3><div id="siteTestCases" class="booking-feedback" role="status">尚未核實測試案件</div><h3>測試場次與剩餘名額（臺灣時間）</h3><div id="siteTestSlots" class="booking-feedback" role="status">尚未核實測試場次</div><button id="siteTestClear" type="button" disabled>清空測試資料</button><button id="siteTestRecoverGate" type="button" disabled>遺失通行碼：重新產生（僅空表）</button><p id="siteTestCleanupSummary" role="status" aria-live="polite">先預覽，再確認清除。</p><input id="siteTestNewGate" type="text" readonly hidden autocomplete="off" spellcheck="false" aria-label="新測試通行碼；只供管理者複製，不存於網址"></section></main>';
- return source.slice(0,start)+section+'<script>\n('+sameSiteCleanupController.toString()+')();\n</script></body></html>';
+ const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
+ return source.slice(0,start)+section.replace('</main>',turnstile+'</main>')+
+  '<script>\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the

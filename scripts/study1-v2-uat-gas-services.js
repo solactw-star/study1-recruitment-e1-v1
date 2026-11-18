@@ -273,6 +273,8 @@ function study1UatTrustedConfig_(){return study1UatTrustedConfigSnapshot_().appr
  */
 async function study1UatControlledRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ if(request?.operation==='turnstileConfig'||request?.operation==='turnstileVerify')
+  return study1UatTurnstileRequest_(request);
  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  if(!exact(request,'caseKey,gate,operation,payload')||!hex(request.gate)||!hex(request.caseKey)||
@@ -289,6 +291,58 @@ async function study1UatControlledRequest_(request){
   const safe=['UAT_WRITE_UNKNOWN_READ_CASE','UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN',
    'UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID'];
   return {ok:false,error:safe.includes(e?.message)?e.message:'UAT_REQUEST_REJECTED'};
+ }
+}
+
+function study1UatTurnstileSiteverify_(c,token){
+ if(typeof token!=='string'||token.length<25||token.length>2048||
+    /[\s<>\x00-\x1f]/.test(token))
+  throw Error('BOT_PROTECTION_TOKEN_INVALID');
+ // No name, email, phone, or screening answers are sent to Cloudflare.
+ let response;
+ try{
+  response=UrlFetchApp.fetch(
+   'https://challenges.cloudflare.com/turnstile/v0/siteverify',{
+    method:'post',contentType:'application/json',muteHttpExceptions:true,
+    payload:JSON.stringify({secret:c.secret,response:token})
+   });
+ }catch(_){throw Error('BOT_PROTECTION_PROVIDER_UNAVAILABLE');}
+ if(!response||response.getResponseCode()!==200)
+  throw Error('BOT_PROTECTION_PROVIDER_UNAVAILABLE');
+ let verified;
+ try{verified=JSON.parse(response.getContentText());}
+ catch(_){throw Error('BOT_PROTECTION_RESPONSE_INVALID');}
+ const ts=typeof verified?.challenge_ts==='string'?
+  Date.parse(verified.challenge_ts):NaN;
+ const now=Date.now();
+ if(verified?.success===false){
+  const codes=Array.isArray(verified['error-codes'])?verified['error-codes']:[];
+  const original=codes.find(code=>['timeout-or-duplicate','invalid-input-secret','invalid-input-response','missing-input-secret','bad-request','internal-error'].includes(code));
+  if(original)throw Error(original);
+ }
+ if(!verified||verified.success!==true||
+    verified.hostname!==c.host||verified.action!==c.action||
+    !Number.isFinite(ts)||ts>now+30000||now-ts>300000)
+  throw Error('BOT_PROTECTION_REJECTED');
+ return ts;
+}
+function study1UatTurnstileRequest_(request){
+ const reject=error=>({ok:false,error});
+ const verify=request.operation==='turnstileVerify';
+ if(Object.keys(request).sort().join(',')!==(verify?'operation,token':'operation'))
+  return reject('UAT_REQUEST_REJECTED');
+ try{
+  study1AdminOwnerRequired_();
+  study1UatTrustedConfig_();
+  const config={...study1ParticipantTurnstileConfig_(),action:'study1_e1_owner_test'};
+  if(!verify)return {ok:true,value:{siteKey:config.siteKey,action:config.action}};
+  study1UatTurnstileSiteverify_(config,request.token);
+  return {ok:true,value:{verified:true}};
+ }catch(error){
+  const visible=['BOT_PROTECTION_PROVIDER_NOT_READY','BOT_PROTECTION_PROVIDER_UNAVAILABLE','BOT_PROTECTION_TOKEN_INVALID',
+   'BOT_PROTECTION_RESPONSE_INVALID','BOT_PROTECTION_REJECTED','timeout-or-duplicate','invalid-input-secret',
+   'invalid-input-response','missing-input-secret','bad-request','internal-error'];
+  return reject(visible.includes(error?.message)?error.message:'UAT_REQUEST_REJECTED');
  }
 }
 
