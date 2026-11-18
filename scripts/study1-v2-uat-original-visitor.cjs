@@ -631,7 +631,7 @@ function sameSiteNoticeController(){
 function sameSiteFormalBooking(source,restore=false){
  const deny="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
  const gate='study1SiteFormalWorkspaceReadGate_();';
- for(const name of ['study1OwnerE1Workspace','study1OwnerE1SlotChangePreview']){
+ for(const name of ['study1OwnerE1Workspace','study1OwnerE1SlotChangePreview','study1OwnerE1Profile','study1OwnerE1ProfilePdf']){
   const head='function '+name+'(input){';
   source=once(source,head+(restore?gate:deny),head+(restore?deny:gate));
  }
@@ -639,7 +639,39 @@ function sameSiteFormalBooking(source,restore=false){
  const previewReturn="  return {...project,canCommit:commitBlocker===null,commitBlocker,\n   approvalRef:approval?approval.approvalRef:null,approvalReason:approval?approval.reason:null};";
  const readOnlyReturn="  return {...project,canCommit:false,commitBlocker:'FORMAL_WORKSPACE_READ_ONLY',approvalRef:null,approvalReason:null};";
  for(const [before,after] of [[workspaceReturn,'  '+gate+'\n'+workspaceReturn],[previewReturn,'  '+gate+'\n'+readOnlyReturn]])source=once(source,restore?after:before,restore?before:after);
+ for(const before of ['  return study1OwnerE1ProfileSource_(x,input.applicantId,lock).view;', '  return {...result.pdf,applicantId:input.applicantId,revision:x.revision};']){
+  const after=before.includes('.view;')?'  const profile=study1OwnerE1ProfileSource_(x,input.applicantId,lock).view;\n  '+gate+'\n  return profile;':'  '+gate+'\n'+before;
+  source=once(source,restore?after:before,restore?before:after);
+ }
  return source;
+}
+// Preserve the original private catalog and byte verifier; return only E1
+// metadata, never Drive locator, and require a pinned revision for preview.
+function sameSiteFormalDocuments(source,restore=false){
+ const original="function study1ConsentVersionList(){if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();\n study1AdminOwnerRequired_();study1SandboxBookingFlags_();\n return study1ConsentVersionRead_();\n}";
+ const adapted=`function study1ConsentVersionList(input){
+ study1SiteFormalWorkspaceReadGate_();study1SandboxBookingFlags_();
+ const preview=input!==undefined;
+ if(preview&&(!input||Array.isArray(input)||Object.keys(input).sort().join(',')!=='revision,sha256,version'||!Number.isSafeInteger(input.revision)||input.revision<1||typeof input.version!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{0,32}$/.test(input.version)||typeof input.sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.sha256)))throw Error('E1_DOCUMENT_PREVIEW_INPUT');
+ const lock=LockService.getScriptLock();
+ if(!lock||lock.tryLock(10000)!==true)throw Error('E1_DOCUMENT_READ_BUSY');
+ try{
+  const index=study1ConsentVersionRead_(),raw=JSON.stringify(index);
+  const project=d=>({version:d.version,title:d.title,sha256:d.sha256,bytes:d.bytes,researcherPresigned:d.researcherPresigned===true,selected:index.current.E1===d.id,protectedSource:index.published.E1===d.id});
+  let result={mode:'OWNER_E1_PDF_CATALOG',experiment:'E1',readOnly:true,revision:index.revision,documents:index.documents.filter(d=>d.experiment==='E1').map(project)};
+  if(preview){
+   const entry=index.documents.find(d=>d.experiment==='E1'&&d.version===input.version&&d.sha256===input.sha256&&d.researcherPresigned===true);
+   if(!entry||index.revision!==input.revision)throw Error('E1_DOCUMENT_PREVIEW_STALE_OR_INVALID');
+   const bytes=study1ConsentDocumentBytes_(entry);
+   result={mode:'OWNER_E1_PDF_PREVIEW',experiment:'E1',readOnly:true,revision:index.revision,document:project(entry),mime:'application/pdf',base64:Utilities.base64Encode(bytes)};
+  }
+  if(lock.hasLock()!==true||JSON.stringify(study1ConsentVersionRead_())!==raw)throw Error('E1_DOCUMENT_SOURCE_CHANGED');
+  study1SiteFormalWorkspaceReadGate_();study1SandboxBookingFlags_();
+  if(lock.hasLock()!==true)throw Error('E1_DOCUMENT_READ_BUSY');
+  return result;
+ }finally{lock.releaseLock();}
+}`;
+ return once(source,restore?adapted:original,restore?original:adapted);
 }
 function sameSiteFormalWorkspaceController(){
  const el=id=>document.getElementById('e1FormalWs'+id),load=el('Load');
@@ -656,9 +688,10 @@ function sameSiteFormalWorkspaceController(){
  const localInput=x=>new Date(Date.parse(x)+8*3600000).toISOString().slice(0,16);
  const value=k=>el(k).value;
  const draftMsg=x=>text(el('DraftResult'),x);
+ /* FORMAL_PROFILE_CONTROLLER */
  const clearDraft=()=>{selected=null;creating=false;for(const k of ['DraftId','DraftStart','DraftEnd','DraftLocation','DraftCap']){el(k).value='';el(k).disabled=true;}draftMsg('');};
  const controls=()=>{load.disabled=busy;el('Prev').disabled=busy||!data||offset===0;el('Next').disabled=busy||!data||offset+50>=data.total;el('New').disabled=busy||!data;preview.disabled=busy||!data||(!selected&&!creating);el('Close').disabled=busy||!selected||selected.status!=='OPEN';el('Open').disabled=busy||!selected||selected.status!=='CLOSED';};
- const clear=()=>{data=null;cases.textContent='';slots.textContent='';clearDraft();controls();};
+ const clear=()=>{closeProfile();data=null;cases.textContent='';slots.textContent='';clearDraft();controls();};
  const cells=(body,values)=>{const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');text(td,v);tr.appendChild(td);}body.appendChild(tr);return tr;};
  const fillDraft=s=>{selected=s;creating=!s;for(const k of ['DraftId','DraftStart','DraftEnd','DraftLocation','DraftCap'])el(k).disabled=false;
   el('DraftId').disabled=!!s;el('DraftId').value=s?.slotId||'';el('DraftStart').value=s?localInput(s.startAtUtc):'';el('DraftEnd').value=s?localInput(s.endAtUtc):'';el('DraftLocation').value=s?.locationCode||'';el('DraftCap').value=s?String(s.capacity):'';draftMsg('草稿不會儲存正式資料。');controls();};
@@ -676,7 +709,10 @@ function sameSiteFormalWorkspaceController(){
   const old=value('SlotFilter');el('SlotFilter').textContent='';
   for(const s of ['',...r.slots.map(x=>x.slotId)]){const o=document.createElement('option');o.value=s;text(o,s||'全部');el('SlotFilter').appendChild(o);}
   el('SlotFilter').value=r.slots.some(s=>s.slotId===old)?old:'';
-  for(const p of r.participants)cells(cases,[p.applicantId,p.name,p.applicationStatus,p.eligibility,p.slotId,p.bookingStatus,p.consentState,p.consentBookingStatus,p.noticeStatus]);
+  for(const p of r.participants){
+   const tr=cells(cases,[p.applicantId,p.name,p.applicationStatus,p.eligibility,p.slotId,p.bookingStatus,p.consentState,p.consentBookingStatus,p.noticeStatus]);
+   const td=document.createElement('td'),btn=document.createElement('button');btn.type='button';text(btn,'查看個案');btn.addEventListener('click',()=>openProfile(p));td.appendChild(btn);tr.appendChild(td);
+  }
   data=r;renderSlots();text(status,'正式來源唯讀快照：'+local(r.asOfUtc)+'；符合 '+r.total+' 筆，未辨識 '+r.excluded+' 筆。未啟用真人收件。');
  };
  const refresh=async()=>{
@@ -691,7 +727,7 @@ function sameSiteFormalWorkspaceController(){
   if(busy||!data||(!selected&&!creating))return;
   const utc=(v,old)=>old&&v===localInput(old)?old:new Date(v+':00+08:00').toISOString();
   let q;try{q={action,revision:data.revision,slotId:value('DraftId').trim(),startAtUtc:utc(value('DraftStart'),selected?.startAtUtc),endAtUtc:utc(value('DraftEnd'),selected?.endAtUtc),capacity:Number(value('DraftCap')),locationCode:value('DraftLocation').trim()};}catch(_){draftMsg('日期不合法');return;}
-  busy=true;const e=++epoch;controls();draftMsg('核對草稿…');
+  closeProfile();busy=true;const e=++epoch;controls();draftMsg('核對草稿…');
   try{const r=await new Promise((resolve,reject)=>google.script.run.withFailureHandler(reject).withSuccessHandler(resolve).study1OwnerE1SlotChangePreview(q));
    if(e!==epoch)return;
    if(!r||r.mode!=='E1_SLOT_CHANGE_PREVIEW'||r.revision!==q.revision||r.action!==q.action||r.written!==false||r.actionAuthority!=='NONE'||r.preservesReservations!==true||r.requiresPiApproval!==true||r.canCommit!==false||r.commitBlocker!=='FORMAL_WORKSPACE_READ_ONLY'||!hex(r.proposal)||!r.after||r.after.slotId!==q.slotId||r.after.capacity!==q.capacity||r.after.startAtUtc!==q.startAtUtc||r.after.endAtUtc!==q.endAtUtc||r.after.locationCode!==q.locationCode)throw Error('FORMAL_PREVIEW_SOURCE');
@@ -706,6 +742,39 @@ function sameSiteFormalWorkspaceController(){
  el('Date').addEventListener('change',renderSlots);el('New').addEventListener('click',()=>{if(!busy&&data)fillDraft(null);});
  preview.addEventListener('click',()=>check(creating?'CREATE':'UPDATE'));el('Close').addEventListener('click',()=>check('CLOSE'));el('Open').addEventListener('click',()=>check('OPEN'));window.addEventListener('pagehide',()=>{epoch++;clear();});
  clear();
+}
+function sameSiteFormalDocumentsController(){
+ const el=k=>document.getElementById('e1FormalPdf'+k),read=el('Read');
+ if(!read)return;
+ const status=el('Status'),choice=el('Choose'),preview=el('Preview'),link=el('Review'),detail=el('Detail');
+ let index=null,busy=false,epoch=0,url=null;
+ const say=s=>{status.textContent=s;};
+ const exact=(o,ks)=>o&&Object.keys(o).sort().join(',')===ks.slice().sort().join(',');
+ const entry=d=>exact(d,['version','title','sha256','bytes','researcherPresigned','selected','protectedSource'])&&typeof d.version==='string'&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,32}$/.test(d.version)&&typeof d.title==='string'&&d.title.length<=100&&/^[a-f0-9]{64}$/.test(d.sha256)&&Number.isSafeInteger(d.bytes)&&d.bytes>=100&&d.bytes<=3000000&&['researcherPresigned','selected','protectedSource'].every(k=>typeof d[k]==='boolean');
+ const selected=()=>index?.documents.find(d=>d.version===choice.value);
+ const clearPreview=()=>{epoch++;link.hidden=true;link.href='';if(url)URL.revokeObjectURL(url);url=null;};
+ const controls=()=>{read.disabled=busy;choice.disabled=busy||!index;preview.disabled=busy||!selected()?.researcherPresigned;};
+ const reset=()=>{clearPreview();index=null;choice.textContent='';detail.textContent='';controls();};
+ const show=()=>{const d=selected();detail.textContent=d?d.title+'｜'+d.version+'｜SHA '+d.sha256+'｜'+d.bytes+' bytes｜'+(d.researcherPresigned?'已登錄研究者預簽（非簽名真偽核實）':'未登錄預簽')+'｜'+(d.selected?'目前選用':'未選用')+'｜'+(d.protectedSource?'受保護來源':'非受保護來源'):'';};
+ const rpc=(input)=>new Promise((resolve,reject)=>{const runner=google.script.run.withFailureHandler(reject).withSuccessHandler(resolve);if(input===undefined)runner.study1ConsentVersionList();else runner.study1ConsentVersionList(input);});
+ read.addEventListener('click',async()=>{if(busy)return;busy=true;reset();const e=epoch;
+  try{const r=await rpc();if(e!==epoch)return;
+   if(!exact(r,['mode','experiment','readOnly','revision','documents'])||r.mode!=='OWNER_E1_PDF_CATALOG'||r.experiment!=='E1'||r.readOnly!==true||!Number.isSafeInteger(r.revision)||r.revision<0||!Array.isArray(r.documents)||r.documents.length>24||!r.documents.every(entry)||new Set(r.documents.map(d=>d.version)).size!==r.documents.length||r.documents.filter(d=>d.selected).length>1||r.documents.filter(d=>d.protectedSource).length>1)throw Error('E1_DOCUMENT_CATALOG');
+   index=r;for(const d of r.documents){const o=document.createElement('option');o.value=d.version;o.textContent=d.version+'｜'+d.title;choice.appendChild(o);}
+   choice.value=r.documents.find(d=>d.selected)?.version||r.documents[0]?.version||'';show();say('正式 E1 私人索引 revision '+r.revision+'；尚未逐份驗證 PDF 內容。唯讀，不代表 REC 核准。');
+  }catch(_){if(e===epoch){reset();say('私人目錄未核實，請重新載入。');}}finally{busy=false;controls();}
+ });
+ choice.addEventListener('change',()=>{clearPreview();show();controls();});
+ preview.addEventListener('click',async()=>{const d=selected();if(busy||!index||!d?.researcherPresigned)return;busy=true;clearPreview();const e=epoch,revision=index.revision;controls();
+  try{const r=await rpc({revision,version:d.version,sha256:d.sha256});if(e!==epoch)return;
+   if(!exact(r,['mode','experiment','readOnly','revision','document','mime','base64'])||r.mode!=='OWNER_E1_PDF_PREVIEW'||r.experiment!=='E1'||r.readOnly!==true||r.revision!==revision||!entry(r.document)||JSON.stringify(r.document)!==JSON.stringify(d)||r.mime!=='application/pdf'||typeof r.base64!=='string'||r.base64.length>4000000)throw Error('E1_DOCUMENT_PREVIEW');
+   const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0)),digest=Array.from(new Uint8Array(await window.crypto.subtle.digest('SHA-256',bytes)),n=>n.toString(16).padStart(2,'0')).join('');
+   if(e!==epoch||selected()!==d)return;
+   if(bytes.length!==d.bytes||String.fromCharCode(...bytes.slice(0,5))!=='%PDF-'||digest!==d.sha256)throw Error('E1_DOCUMENT_SHA');
+   url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));link.href=url;link.hidden=false;say('原私人 PDF 位元組與 SHA 已核實；請逐頁人工複核。');
+  }catch(_){if(e===epoch){reset();say('文件來源、授權或 SHA 未核實；請重新查詢，不提供預覽。');}}finally{busy=false;controls();}
+ });
+ window.addEventListener('pagehide',reset);reset();
 }
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // Preserve the original admin shell, style and controls in the repository.
@@ -764,16 +833,27 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  section=once(section,'<main>','<main>'+notices);
  // One site and original B02/B03 markup. Server renders only the authorized
  // source mode; no shared client-mode parameter can grant formal access.
- const formalPanel=(slice('<section id="e1Workspace">','<div id="e1Profile"')+
-  slice('<h3>場次與名額（臺灣時間）</h3>','<label><input id="e1WsConfirm"')+'</section>')
-  .replace(/e1Ws/g,'e1FormalWs').replace('id="e1Workspace"','id="e1FormalWorkspace"')
-  .replace('<th>個案</th>','').replace('場次變更預檢及核定後儲存','場次變更唯讀預檢（不儲存）')
-  .replace('原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更須先預檢，且只有獨立核定的完全相同草稿、正式資料寫入授權及安全條件均通過時才可儲存；未核定不寫入。開放單一場次不代表啟用招募。','正式來源唯讀 B02/B03。僅適用獨立授權的研究室 OWNER；不儲存正式場次、不啟用真人收件。');
- const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+'</main>';
- section=once(section,'<main>','<main><p><a href="<?= siteAppUrl + \'?view=admin&workspace=formal\' ?>" target="_top">正式 B02/B03 唯讀工作區（須獨立資料授權）</a></p>');
+ const formalPanel=(slice('<section id="e1Workspace">','<label><input id="e1WsConfirm"')+'</section>')
+  .replace(/e1Ws/g,'e1FormalWs').replace(/e1Profile/g,'e1FormalProfile').replace('id="e1Workspace"','id="e1FormalWorkspace"')
+  .replace('場次變更預檢及核定後儲存','場次變更唯讀預檢（不儲存）')
+  .replace('原正式名單及核定場次。以現行 E1 資格規則及場次登錄為範圍；未辨識原案不猜測。場次變更須先預檢，且只有獨立核定的完全相同草稿、正式資料寫入授權及安全條件均通過時才可儲存；未核定不寫入。開放單一場次不代表啟用招募。','正式來源唯讀 B02/B03/B04。僅適用獨立授權的研究室 OWNER；不儲存正式場次、不啟用真人收件。');
+ const formalDocuments='<section id="e1FormalPdf"><h2>B10｜E1 正式私人預簽 PDF（OWNER 唯讀）</h2><p>只查詢 E1 版本索引及核對原私人 PDF；已簽參與者副本請由原 B04 同一案件取得。不替換、不上傳、不選用、不公開。</p>'+
+  slice('<button type="button" class="secondary" id="e1PdfRead">','<label for="e1PdfFile">').replace(/e1Pdf/g,'e1FormalPdf')+
+  slice('<label for="e1PdfChoose">','<a id="e1PdfReview"').replace(/e1Pdf/g,'e1FormalPdf').replace('選擇既有預簽文件版號與 SHA','查閱既有文件版號與 SHA')+
+  '<p id="e1FormalPdfDetail"></p><button id="e1FormalPdfPreview" type="button" disabled>核對原私人 PDF SHA</button><a id="e1FormalPdfReview" hidden target="_blank" rel="noopener noreferrer">開啟已核實私人 PDF</a></section>';
+ // Reuse the exact original B04 controller with only scoped DOM IDs and
+ // existing formal workspace state; no original write controllers loaded.
+ const profileScript=slice(' const profileStatus=m=>',' const clearApproval=()=>')
+  .replace(/el\('e1Profile/g,"pel('e1FormalProfile").replace(/\bclear\(/g,'clearNode(')
+  .replace("local(v).replace('T',' ')","localInput(v).replace('T',' ')")
+  .replace("status('個案來源或權限已改變，請重整原名單。');","text(status,'個案來源或權限已改變，請重整原名單。');");
+ const formalController=once(sameSiteFormalWorkspaceController.toString(),'/* FORMAL_PROFILE_CONTROLLER */',
+  "const pel=id=>document.getElementById(id);const clearNode=n=>{n.textContent='';};let profile=null,profileEpoch=0,profileUrl=null;\n"+profileScript);
+ const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+formalDocuments+'</main>';
+ section=once(section,'<main>','<main><p><a href="<?= siteAppUrl + \'?view=admin&workspace=formal\' ?>" target="_top">正式 B02/B03/B04/B10 唯讀工作區（須獨立資料授權）</a></p>');
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
  return source.slice(0,start)+"<? if (siteFormalWorkspace) { ?>"+formalMarkup+"<? } else { ?>"+section.replace('</main>',turnstile+'</main>')+"<? } ?>"+
-  '<script>\n('+sameSiteFormalWorkspaceController.toString()+')();\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+  '<script>\n('+formalController+')();\n('+sameSiteFormalDocumentsController.toString()+')();\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the
@@ -784,7 +864,7 @@ function requireSameSiteSourceDelta(anonymous,result){
  core.digest(anonymous);
  const need=(ok,reason)=>{if(!ok)throw Error('SAME_SITE_SOURCE_DELTA: '+reason);};
  const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
- const modified=['AdminConsole','Study1FormalBooking','Study1Visitor','Website'];
+ const modified=['AdminConsole','AdminSandbox','Study1FormalBooking','Study1Visitor','Website'];
  const added=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
  const baseNames=anonymous.map(f=>f.name).sort();
  need(eq(baseNames,core.APPROVED),'baseline inventory');
@@ -798,6 +878,7 @@ function requireSameSiteSourceDelta(anonymous,result){
  }
  need(eq(changed.sort(),modified),'unexpected source changes');
  need(candidate.get('Study1FormalBooking').source===sameSiteFormalBooking(base.get('Study1FormalBooking').source),'unexpected formal workspace delta');
+ need(candidate.get('AdminSandbox').source===sameSiteFormalDocuments(base.get('AdminSandbox').source),'unexpected formal document delta');
  // The existing anonymous manifest must remain byte-for-byte unchanged.
  // The inherited public RPCs remain closed; only these two OWNER-gated
  // entry points may be added for the same-site TEST product.
@@ -827,6 +908,7 @@ function sameSiteCandidate(){
   if(f.name==='Study1Visitor')return {...f,source:sameSiteVisitor(get(base,f.name).source)};
   if(f.name==='AdminConsole')return {...f,source:sameSiteAdmin(get(base,f.name).source)};
   if(f.name==='Study1FormalBooking')return {...f,source:sameSiteFormalBooking(get(base,f.name).source)};
+  if(f.name==='AdminSandbox')return {...f,source:sameSiteFormalDocuments(get(base,f.name).source)};
   if(f.name!=='Website')return f;
   let source=get(base,'Website').source;
   source=once(source,'function doGet(e){',`function doGet(e){
@@ -870,6 +952,7 @@ function requireSameSiteReleaseSource(files){
   // The exact candidate digest and source-delta check above bind the scoped
   // OWNER read gate; check all other inherited RPCs with the original guard.
   if(f.name==='Study1FormalBooking')return {...f,source:sameSiteFormalBooking(f.source,true)};
+  if(f.name==='AdminSandbox')return {...f,source:sameSiteFormalDocuments(f.source,true)};
   if(f.name!=='Website')return f;
   if(!f.source.endsWith(siteTestRpc))throw Error('SAME_SITE_RELEASE_RPC_BOUNDARY');
   return {...f,source:f.source.slice(0,-siteTestRpc.length)};

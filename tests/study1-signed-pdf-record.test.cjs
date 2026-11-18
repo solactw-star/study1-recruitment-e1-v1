@@ -219,6 +219,29 @@ test('full signing is fail-closed when the independent PDF or wizard binding gat
 
 
 
+test('same-site formal B10 original private index and byte verifier, E1 only, no write, stale and tampered preview denied',async()=>{
+ const bytes=await createBlank(),h=buildHarness(bytes),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ // Fresh realm avoids redeclaring the original const bindings.
+ const scope=vm.createContext({PDFLib,Utilities:h.scope.Utilities,DriveApp:h.scope.DriveApp,Session:h.scope.Session,PropertiesService:h.scope.PropertiesService,LockService:h.scope.LockService,JSON,Date,Number,String,Array,Set,Object,Uint8Array,Math,Error});
+ vm.runInContext(get('AdminSandbox'),scope);vm.runInContext(get('Study1UatGasServices'),scope);
+ scope.study1OwnerE1WorkspaceGate_=()=>{if(h.values.get('STUDY1_PARTICIPANT_DATA_USE_APPROVED')!=='true')throw Error('DATA_NOT_APPROVED');};
+ scope.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ const key='STUDY1_CONSENT_DOCUMENT_INDEX_V1',index=JSON.parse(h.values.get(key));index.documents[0].researcherPresigned=true;
+ index.documents.push({...index.documents[0],experiment:'E2',id:'SyntheticPrivatePdfE2_0001',version:'E2-V1'});h.values.set(key,JSON.stringify(index));
+ h.values.set('OPEN','false');h.values.set('CONSENT_READY','false');
+ assert.throws(()=>scope.study1ConsentVersionList(),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);
+ h.values.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');h.values.set('STUDY1_PARTICIPANT_DATA_USE_APPROVED','true');
+ const n=h.writes(),cat=scope.study1ConsentVersionList();assert.equal(cat.documents.length,1);assert.equal(cat.documents[0].sha256,sha(bytes));assert.doesNotMatch(JSON.stringify(cat),/drive.google|SyntheticPrivatePdf|E2-V1/);
+ const q={revision:cat.revision,version:cat.documents[0].version,sha256:cat.documents[0].sha256},p=scope.study1ConsentVersionList(q);
+ assert.equal(p.mode,'OWNER_E1_PDF_PREVIEW');assert.deepEqual(Buffer.from(p.base64,'base64'),bytes);assert.equal((await PDFLib.PDFDocument.load(Buffer.from(p.base64,'base64'))).getPageCount(),5);
+ for(const bad of [{...q,revision:1},{...q,version:'E2-V1'},{...q,sha256:'0'.repeat(64)},{...q,id:h.originalId}])assert.throws(()=>scope.study1ConsentVersionList(bad),/E1_DOCUMENT_PREVIEW/);
+ const f=h.files.get(h.originalId);f.access='PUBLIC';assert.throws(()=>scope.study1ConsentVersionList(q),/私人權限/);f.access='PRIVATE';
+ const saved=Buffer.from(f.bytes);f.bytes[30]^=1;assert.throws(()=>scope.study1ConsentVersionList(q),/雜湊/);f.bytes=saved;
+ const getFile=scope.DriveApp.getFileById;scope.DriveApp.getFileById=id=>{h.values.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');return getFile(id);};
+ assert.throws(()=>scope.study1ConsentVersionList(q),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);scope.DriveApp.getFileById=getFile;
+ assert.throws(()=>scope.study1ConsentVersionUpload({}),/PUBLIC_READ_ONLY/);
+ assert.throws(()=>scope.study1ConsentVersionSelect({}),/PUBLIC_READ_ONLY/);assert.equal(h.writes(),n);
+});
 test('MVP actual PDF engine accepts only researcher presigned source, adds participant ink once and permits OWNER private download',async()=>{
  const docPdf=await PDFLib.PDFDocument.load(await createBlank());
  docPdf.getPage(4).drawText('SYNTHETIC RESEARCHER PRESIGNED BEFORE PARTICIPANT',

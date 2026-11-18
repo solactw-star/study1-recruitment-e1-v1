@@ -627,7 +627,7 @@ test('same official site source routes preserve formal closure and require real 
  const extra=['Study1UatGasServices','Study1UatSession','Study1UatStoreTransaction'];
  assert.deepEqual(files.map(f=>f.name).sort(),[...baseNames,...extra].sort());
  const modified=baseline.filter(f=>get(f.name)!==f.source).map(f=>f.name).sort();
- assert.deepEqual(modified,['AdminConsole','Study1FormalBooking','Study1Visitor','Website']);
+ assert.deepEqual(modified,['AdminConsole','AdminSandbox','Study1FormalBooking','Study1Visitor','Website']);
  for(const f of baseline)assert.equal(files.find(x=>x.name===f.name).type,f.type);
  assert.equal(get('appsscript'),baseline.find(f=>f.name==='appsscript').source);
  const globals=source=>[...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/gm)].map(m=>m[1]).filter(n=>!n.endsWith('_')).sort();
@@ -754,6 +754,7 @@ test('same-site assembler source contract rejects unreviewed inventory, bytes, t
   [target.filter(f=>f.name!=='Study1UatSession'),/candidate inventory/],
   [change('BookingCore',f=>({...f,source:f.source+'\n// unreviewed change'})),/unexpected source changes/],
   [change('Study1FormalBooking',f=>({...f,source:f.source.replace('study1SiteFormalWorkspaceReadGate_();','')})),/unexpected formal workspace delta/],
+  [change('AdminSandbox',f=>({...f,source:f.source.replace('study1SiteFormalWorkspaceReadGate_();','')})),/unexpected formal document delta/],
   [change('appsscript',f=>({...f,source:f.source+' '})),/unexpected source changes/],
   [change('AdminConsole',f=>({...f,type:'SERVER_JS'})),/file type changed/],
   [restore('Website'),/unexpected source changes/],
