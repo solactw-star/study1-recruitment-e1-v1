@@ -542,6 +542,12 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(candidateSha,core.digest(adapter.sameSiteCandidate()));
  console.log('SAME_SITE_REVIEW_ONLY '+JSON.stringify({candidateSha256:candidateSha,fileCount:files.length,modified,added:extra,access:'ANYONE_ANONYMOUS',executeAs:'USER_DEPLOYING',releaseAuthorized:false}));
  assert.throws(()=>core.publicRpcSurface(files));
+ assert.equal(adapter.requireSameSiteReleaseSource(files),candidateSha);
+ const unguarded=files.map(f=>f.name==='Website'?{
+  ...f,source:f.source.replace('try{study1AdminOwnerRequired_();}catch(_){return {ok:false,error:"UAT_REQUEST_REJECTED"};}','')
+ }:f);
+ assert.notEqual(core.digest(unguarded),candidateSha);
+ assert.throws(()=>adapter.requireSameSiteReleaseSource(unguarded),/SAME_SITE_RELEASE_SOURCE_MISMATCH/);
  assert.throws(()=>core.requireReviewedInventory(files),/allowlist/);
  const html=get('Study1Visitor'),admin=get('AdminConsole');
  assert.match(html,/<\? if \(flowMode === 'GAS_UAT'\) \{ \?>/);
@@ -556,8 +562,14 @@ test('same official site source routes preserve formal closure and require real 
   Utilities:{getUuid:()=> 'mock-only-uuid',DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
  for(const n of ['AdminSandbox','Study1PdfStampCore','Study1UatGasServices','Website'])vm.runInContext(get(n),c);
  const owner=vm.runInContext('STUDY1_ADMIN_OWNER_',c);
- c.study1UatTrustedConfig_=()=>{config++;return {};};
- c.study1UatControlledRequest_=async r=>{requests++;return {ok:true,value:r.operation};};
+ const approvedTestStore={storeId:'TEST_MOCK_BOOK'};
+ c.study1UatTrustedConfig_=()=>{config++;return approvedTestStore;};
+ c.study1UatGasOperation_=async (approved,_,operation)=>{
+  assert.equal(approved,approvedTestStore);
+  requests++;
+  return operation;
+ };
+ const testRequest={operation:'read',caseKey:'a'.repeat(64),gate:'b'.repeat(64),payload:{}};
  c.study1UatCleanup_=m=>{maintenance.push(JSON.parse(JSON.stringify(m)));return {scope:'SYNTHETIC_CASES_ONLY'};};
  const propKey='STUDY1_E1_SYNTHETIC_UAT_V1',future=new Date(Date.now()+3600000).toISOString();
  let raw=JSON.stringify({gateSha:'d'.repeat(64),expiresAt:future,otherTestSetting:'preserve'}),propWrites=0;
@@ -575,7 +587,7 @@ test('same official site source routes preserve formal closure and require real 
   const form=c.doGet({parameter:{view:'apply'}});assert.equal(form.mode,'FORMAL');assert.equal(form.siteOwner,false);
   assert.throws(()=>c.doGet({parameter:{view:'apply',test:'1'}}),/拒絕存取/);
   assert.throws(()=>c.doGet({parameter:{view:'admin'}}),/拒絕存取/);
-  assert.equal((await c.study1E1SyntheticUat({operation:'start'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat(testRequest)).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'recover_gate',expectedSha:'a'.repeat(64),confirmation:'RECOVER_EMPTY_TEST_GATE',entropy:'b'.repeat(64)}).ok,false);
@@ -583,7 +595,11 @@ test('same official site source routes preserve formal closure and require real 
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
  active=owner;effective=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
  assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
- assert.equal((await c.study1E1SyntheticUat({operation:'read'})).value,'read');
+ assert.equal((await c.study1E1SyntheticUat({...testRequest,storeId:'OTHER'})).ok,false);
+ assert.equal((await c.study1E1SyntheticUat({...testRequest,operation:'publish'})).ok,false);
+ assert.equal(requests,0);
+ assert.equal((await c.study1E1SyntheticUat(testRequest)).value,'read');
+ assert.equal(requests,1);
  assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,true);
  assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).value.state,'MATCHED_EMPTY');
  assert.equal(c.study1SiteTestCleanup({mode:'reconcile',storeId:'OTHER'}).ok,false);assert.equal(propWrites,0);
