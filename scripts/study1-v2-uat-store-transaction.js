@@ -35,6 +35,8 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    'UAT_CLEANUP_REQUEST');
   const k=Object.keys(maintenance).sort().join(',');
   need((maintenance.mode==='preview'&&k==='mode')||
+   (maintenance.mode==='notice_audit'&&k==='mode')||
+   (maintenance.mode==='notice_send'&&k==='alias,expectedSha,mode'&&/^TEST_(0[1-9]|1[0-2])$/.test(maintenance.alias)&&hex(maintenance.expectedSha,64)&&typeof services.sendTestNotice==='function')||
    (maintenance.mode==='reconcile'&&k==='mode'&&typeof services.checkReconcileConfig==='function')||
    (maintenance.mode==='select_document'&&k==='expectedSha,mode,nextSourceSha'&&hex(maintenance.expectedSha,64)&&
     hex(maintenance.nextSourceSha,64)&&maintenance.nextSourceSha!==config.sourceSha&&maintenance.nextSourceSha!==config.gateSha&&typeof services.selectDocument==='function')||
@@ -43,8 +45,14 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    'UAT_CLEANUP_REQUEST');
  }
  const validate=(c,i)=>{
-  const fields=c&&Object.hasOwn(c,'emailOtp')?[...keys,'emailOtp']:keys;
+  const fields=[...keys,...(c&&Object.hasOwn(c,'emailOtp')?['emailOtp']:[]),...(c&&Object.hasOwn(c,'bookingNotice')?['bookingNotice']:[])];
   need(c&&typeof c==='object'&&!Array.isArray(c)&&equal(Object.keys(c).sort(),fields.slice().sort()),'UAT_CASE_SCHEMA');
+  if(Object.hasOwn(c,'bookingNotice')){
+   const n=c.bookingNotice;
+   need(c.state==='CONFIRMED'&&n&&equal(Object.keys(n).sort(),['acceptedAtUtc','queuedAtUtc','status'])&&
+    ['DISPATCHING','PROVIDER_ACCEPTED','UNKNOWN'].includes(n.status)&&iso(n.queuedAtUtc)&&Date.parse(n.queuedAtUtc)>=Date.parse(c.signedAt)&&
+    (n.status==='PROVIDER_ACCEPTED'?iso(n.acceptedAtUtc)&&Date.parse(n.acceptedAtUtc)>=Date.parse(n.queuedAtUtc):n.acceptedAtUtc===''),'UAT_NOTICE_SCHEMA');
+  }
   if(Object.hasOwn(c,'emailOtp')){
    const otp=c.emailOtp;
    need(otp&&equal(Object.keys(otp).sort(),['expiresAt','hash'])&&iso(otp.expiresAt)&&
@@ -66,6 +74,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
  const encode=c=>{
   const meta={};for(const k of keys.filter(x=>x!=='pdf'))meta[k]=c[k];
   if(Object.hasOwn(c,'emailOtp'))meta.emailOtp=c.emailOtp;
+  if(Object.hasOwn(c,'bookingNotice'))meta.bookingNotice=c.bookingNotice;
   // Prefix chunks so a base64 value cannot be interpreted as a formula.
   return ['case:'+JSON.stringify(meta),...Array.from({length:8},(_,i)=>{const part=c.pdf.slice(i*chunk,(i+1)*chunk);return part?'pdf:'+part:'';})];
  };
@@ -139,6 +148,36 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     confirmed:live.filter(c=>c.state==='CONFIRMED').length,pdfs:live.filter(c=>c.pdf!=='').length};
    const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,counts,initial.raw]),c=>c.charCodeAt(0)));
    need(hex(snapshotSha,64),'UAT_CLEANUP_DIGEST');
+   // Mirror original B08 outbox semantics in the isolated case, never formal Notifications.
+   if(maintenance.mode==='notice_audit'){
+    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+    const cases=live.map(c=>({alias:c.alias,bookingStatus:c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state,
+     noticeStatus:!c.bookingNotice?'NOT_QUEUED':c.bookingNotice.status==='PROVIDER_ACCEPTED'?'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW',
+     queuedAtUtc:c.bookingNotice?.queuedAtUtc||null,acceptedAtUtc:c.bookingNotice?.acceptedAtUtc||null}));
+    return {formal:false,scope:'SYNTHETIC_CASES_ONLY',readOnly:true,snapshotSha,cases};
+   }
+   if(maintenance.mode==='notice_send'){
+    need(maintenance.expectedSha===snapshotSha,'UAT_CLEANUP_STALE_PREVIEW');
+    const i=initial.records.findIndex(c=>c&&c.alias===maintenance.alias),c=initial.records[i];
+    need(c&&c.state==='CONFIRMED'&&!c.bookingNotice,'UAT_NOTICE_NOT_SENDABLE');
+    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');owned();
+    const n={status:'DISPATCHING',queuedAtUtc:new Date(at).toISOString(),acceptedAtUtc:''};
+    const expected=initial.raw.map(row=>row.slice());
+    const persist=record=>{
+     expected[i+1]=encode(record);validate(record,i);owned();
+     sheet.getRange(i+2,1,1,width).setValues([expected[i+1]]);
+     services.flush();owned();need(equal(snapshot().raw,expected),'UAT_NOTICE_READBACK');
+    };
+    try{persist({...c,bookingNotice:n});}catch(_){throw Error('UAT_NOTICE_OUTCOME_UNKNOWN');}
+    let accepted=false;
+    try{owned();services.sendTestNotice(c.alias);accepted=true;}catch(_){}
+    try{
+     owned();need(equal(snapshot().raw,expected),'UAT_STORE_CHANGED');
+     const end=services.now();need(Number.isSafeInteger(end)&&end>=at,'UAT_CLOCK');
+     persist({...c,bookingNotice:{...n,status:accepted?'PROVIDER_ACCEPTED':'UNKNOWN',acceptedAtUtc:accepted?new Date(end).toISOString():''}});
+    }catch(_){throw Error('UAT_NOTICE_OUTCOME_UNKNOWN');}
+    return {formal:false,scope:'SYNTHETIC_CASES_ONLY',alias:c.alias,noticeStatus:accepted?'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW'};
+   }
    if(maintenance.mode==='preview'){
     // Owner maintenance projection: only validated synthetic aliases and
     // booking status, never hashes, keys, PDF bytes or stored raw rows.

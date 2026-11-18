@@ -418,6 +418,26 @@ test('private GAS operation contract completes booking and real five-page PDF th
  assert.equal((await call('sign',{...sign,sourceSha:original.hash})).ok,false);
  const signed2=(await call('sign',{...sign,sourceSha:chosen.sha})).value;assert.equal(signed2.sourceSha,chosen.sha);assert.equal(signed2.pageCount,5);
  assert.equal(hash(Buffer.from(signed2.bytes,'base64')),signed2.sha);assert.equal((await PDFLib.PDFDocument.load(Buffer.from(signed2.bytes,'base64'))).getPageCount(),5);
+ // B08: actual isolated transaction, controlled mock provider. No external email.
+ const audit=async()=>{const before=writes,r=await req({operation:'noticeAudit'});assert.equal(r.ok,true);assert.equal(writes,before);assert.doesNotMatch(JSON.stringify(r),/tokenHash|caseId|owner@example|signedSha/);return r.value;};
+ let p=await audit();assert.equal(p.cases[0].noticeStatus,'NOT_QUEUED');
+ const noticeSend={operation:'noticeSend',alias:'TEST_01',expectedSha:p.snapshotSha,confirmation:'SEND_TEST_NOTICE_ONLY'};
+ let sends=0;realm.MailApp.sendEmail=message=>{assert.equal(locked,true);assert.match(matrix[1][0],/DISPATCHING/);assert.equal(message.to,'owner@example.invalid');assert.match(message.subject,/TEST/);sends++;};
+ assert.equal((await req({...noticeSend,email:'other@example.invalid'})).ok,false);
+ assert.equal((await req({...noticeSend,expectedSha:'0'.repeat(64)})).ok,false);assert.equal(sends,0);
+ const sent=await req(noticeSend);assert.equal(sent.ok,true);assert.equal(sent.value.noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');assert.equal(sends,1);
+ p=await audit();assert.equal(p.cases[0].noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');
+ assert.equal((await req({...noticeSend,expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,1);
+ const key2='6'.repeat(64),op2=(operation,payload={})=>req({operation,payload,gate:newGate,caseKey:key2});
+ await op2('start',{alias:'TEST_02',eligible:true});p=await audit();
+ assert.equal((await req({...noticeSend,alias:'TEST_02',expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,1);
+ await op2('verify',{code:'12345678'});await op2('hold',{slotId:'TEST_SLOT_2',requestId:'7'.repeat(32)});
+ const signed3=await op2('sign',{...sign,requestId:'8'.repeat(32),sourceSha:chosen.sha});assert.equal(signed3.ok,true);
+ realm.MailApp.sendEmail=()=>{sends++;throw Error('provider receipt ambiguous');};p=await audit();
+ const second={...noticeSend,alias:'TEST_02',expectedSha:p.snapshotSha};
+ assert.equal((await req(second)).value.noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');assert.equal(sends,2);
+ p=await audit();assert.equal(p.cases[1].noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');
+ assert.equal((await req({...second,expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,2);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
 });
 
@@ -657,6 +677,8 @@ test('same official site source routes preserve formal closure and require real 
   assert.equal((await c.study1E1SyntheticUat(testRequest)).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'documentCatalog'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'noticeAudit'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'noticeSend'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'documentSelect'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'reconcile'}).ok,false);

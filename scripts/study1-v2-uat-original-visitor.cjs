@@ -536,6 +536,41 @@ function sameSiteDocumentController(){
  });
  window.addEventListener('pagehide',clearPreview);controls();
 }
+function sameSiteNoticeController(){
+ const el=id=>document.getElementById(id),read=el('e1OpsRead'),status=el('e1OpsStatus'),out=el('e1OpsResults'),pick=el('siteNoticeAlias'),ack=el('siteNoticeAck'),send=el('siteNoticeSend');
+ if([read,status,out,pick,ack,send].some(x=>!x))return;
+ let snapshot=null,busy=false;
+ const sha=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
+ const iso=x=>typeof x==='string'&&Number.isFinite(Date.parse(x))&&new Date(x).toISOString()===x;
+ const labels={NOT_QUEUED:'無通知紀錄（不得推定已通知）',PROVIDER_ACCEPTED_NOT_DELIVERED:'郵件服務已接受（非實際送達證明）',UNKNOWN_REQUIRES_STAFF_REVIEW:'結果未知，禁止重送'};
+ const eligible=c=>c.bookingStatus==='CONFIRMED'&&c.noticeStatus==='NOT_QUEUED';
+ const control=()=>{read.disabled=busy;pick.disabled=busy||!snapshot;ack.disabled=busy||!snapshot;
+  send.disabled=busy||!snapshot||!ack.checked||!snapshot.cases.some(c=>c.alias===pick.value&&eligible(c));};
+ const clear=()=>{snapshot=null;out.textContent='';pick.textContent='';ack.checked=false;control();};
+ const rpc=request=>new Promise((resolve,reject)=>google.script.run.withFailureHandler(()=>reject(Error('UNKNOWN'))).withSuccessHandler(r=>r?.ok===true?resolve(r.value):reject(Error(r?.error||'UNKNOWN'))).study1E1SyntheticUat(request));
+ const load=async()=>{
+  const p=await rpc({operation:'noticeAudit'});
+  if(!p||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||p.readOnly!==true||!sha(p.snapshotSha)||!Array.isArray(p.cases)||p.cases.length>12||
+   new Set(p.cases.map(c=>c.alias)).size!==p.cases.length||!p.cases.every(c=>c&&Object.keys(c).sort().join(',')==='acceptedAtUtc,alias,bookingStatus,noticeStatus,queuedAtUtc'&&/^TEST_(0[1-9]|1[0-2])$/.test(c.alias)&&['OTP','SLOTS','HELD','EXPIRED','CONFIRMED','CANCELLED'].includes(c.bookingStatus)&&Object.hasOwn(labels,c.noticeStatus)&&
+    (c.noticeStatus==='NOT_QUEUED'?c.queuedAtUtc===null&&c.acceptedAtUtc===null:c.bookingStatus==='CONFIRMED'&&iso(c.queuedAtUtc)&&(c.noticeStatus==='PROVIDER_ACCEPTED_NOT_DELIVERED'?iso(c.acceptedAtUtc)&&Date.parse(c.acceptedAtUtc)>=Date.parse(c.queuedAtUtc):c.acceptedAtUtc===null))))throw Error('UAT_NOTICE_SOURCE');
+  const table=document.createElement('table'),body=document.createElement('tbody'),head=document.createElement('tr');
+  for(const name of ['TEST 代碼','預約','通知 outbox','建立時間 UTC','服務接受時間 UTC','人工查核']){const th=document.createElement('th');th.textContent=name;head.appendChild(th);}table.appendChild(head);
+  for(const c of p.cases){const tr=document.createElement('tr');
+   for(const v of [c.alias,c.bookingStatus,labels[c.noticeStatus],c.queuedAtUtc||'—',c.acceptedAtUtc||'—',c.noticeStatus==='UNKNOWN_REQUIRES_STAFF_REVIEW'?'核對測試信箱及原 TEST 紀錄；不補寄':eligible(c)?'可獨立發出一次 TEST 確認通知':'無可執行寄送']){const td=document.createElement('td');td.textContent=v;tr.appendChild(td);}body.appendChild(tr);
+   if(eligible(c)){const o=document.createElement('option');o.value=c.alias;o.textContent=c.alias;pick.appendChild(o);}
+  }
+  table.appendChild(body);out.appendChild(table);snapshot=p;status.textContent='已核對 '+p.cases.length+' 筆隔離案件；郵件服務接受不代表送達。';
+ };
+ read.addEventListener('click',async()=>{if(busy)return;busy=true;clear();try{await load();}catch(_){clear();status.textContent='通知來源未核實。';}finally{busy=false;control();}});
+ pick.addEventListener('change',()=>{ack.checked=false;control();});ack.addEventListener('change',control);
+ send.addEventListener('click',async()=>{if(send.disabled||busy)return;const alias=pick.value,expectedSha=snapshot.snapshotSha;busy=true;clear();
+  try{const r=await rpc({operation:'noticeSend',alias,expectedSha,confirmation:'SEND_TEST_NOTICE_ONLY'});
+   if(!r||r.formal!==false||r.scope!=='SYNTHETIC_CASES_ONLY'||r.alias!==alias||!['PROVIDER_ACCEPTED_NOT_DELIVERED','UNKNOWN_REQUIRES_STAFF_REVIEW'].includes(r.noticeStatus))throw Error('UNKNOWN');
+   await load();if(snapshot.cases.find(c=>c.alias===alias)?.noticeStatus!==r.noticeStatus)throw Error('UNKNOWN');
+   status.textContent=labels[r.noticeStatus]+'；不重送。';
+  }catch(_){clear();status.textContent='通知未獲完整確認，先重新唯讀查核，不重送。';}finally{busy=false;control();}});
+ control();
+}
 function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  // Preserve the original admin shell, style and controls in the repository.
  // The same-site test management view does not initialize formal/sandbox RPCs.
@@ -575,9 +610,17 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
   '<button type="button" id="e1PdfReview" disabled>核對完整 PDF SHA</button><a id="siteTestPdfLink" hidden target="_blank" rel="noopener noreferrer">開啟完整五頁 TEST PDF</a>'+
   slice('<label><input type="checkbox" id="e1PdfChooseAttest">','<button id="e1PdfSource"').replace('所選原 PDF 的研究者簽名、完整內容、版號與 SHA','所選 TEST PDF 的完整內容、虛構預簽示意、版號與 SHA').replace('選用正式 E1 PDF','選用 TEST E1 PDF')+'</section>';
  section=once(section,'<main>','<main>'+pdfSection);
+ const notices=slice('<section id="e1OwnerOperations"','<h3>跨工作階段原案件核對（唯讀）</h3>')
+  .replace('E1 正式營運狀態｜本人簽署、原預約與通知唯讀核對','B08｜E1 TEST 通知管理（OWNER）')
+  .replace('此處逐筆核對原同意索引、原 Reservations 與 Notifications outbox，不寫回、不重送郵件、不以已簽 PDF 推定預約成立，亦不將寄件服務接受當成已送達。','僅核對隔離合成案件通知。確認預約後可明確操作一次測試通知，固定研究室測試收件人，不寄真人信。')
+  .replace('唯讀核對 E1 預約及通知狀態','唯讀核對 TEST 預約及通知狀態')
+  .replace('尚未核對；請先唯讀核實原預約與通知。','尚未核對 TEST 通知。')
+  .replace('E1 正式預約與通知核對結果','E1 TEST 預約與通知核對結果')+
+  '<label for="siteNoticeAlias">已確認、未通知 TEST 案件</label><select id="siteNoticeAlias"></select><label><input type="checkbox" id="siteNoticeAck">僅發送單次隔離測試通知到研究室測試信箱</label><button id="siteNoticeSend" type="button" disabled>發送 TEST 確認通知</button></section>';
+ section=once(section,'<main>','<main>'+notices);
  const turnstile='<section><h2>隔離 Turnstile 驗證</h2><p>此處只驗證 Cloudflare token，不建立報名案件。</p><button id="siteTurnstileLoad" type="button">載入 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><button id="siteTurnstileVerify" type="button" disabled>送出目前的 token 驗證</button><p id="siteTurnstileStatus" role="status" aria-live="polite"></p></section>';
  return source.slice(0,start)+section.replace('</main>',turnstile+'</main>')+
-  '<script>\n'+copyScript+'\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
+  '<script>\n'+copyScript+'\n('+sameSiteNoticeController.toString()+')();\n('+sameSiteDocumentController.toString()+')();\n('+sameSiteCleanupController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script></body></html>';
 }
 // Enforce the existing same-site CI source delta in the actual assembler,
 // not just its test/report. This is a local source contract only: the

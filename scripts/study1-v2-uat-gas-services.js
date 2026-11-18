@@ -311,8 +311,24 @@ async function study1UatDocumentRequest_(request){
   return deny(safe.includes(error?.message)?error.message:'UAT_REQUEST_REJECTED');
  }
 }
+function study1UatNoticeRequest_(request){
+ try{
+  study1AdminOwnerRequired_();
+  const send=request.operation==='noticeSend',keys=Object.keys(request).sort().join(',');
+  if(Array.isArray(request)||keys!==(send?'alias,confirmation,expectedSha,operation':'operation')||
+   send&&(request.confirmation!=='SEND_TEST_NOTICE_ONLY'||!/^TEST_(0[1-9]|1[0-2])$/.test(request.alias)||!/^[a-f0-9]{64}$/.test(request.expectedSha)))throw Error('UAT_REQUEST_REJECTED');
+  const approved=study1UatTrustedConfig_(),services=study1UatStoreServices_(approved.storeId);
+  services.checkCurrentConfig=()=>{study1AdminOwnerRequired_();if(JSON.stringify(study1UatTrustedConfig_())!==JSON.stringify(approved))throw Error('UAT_DOCUMENT_CONFIG_CHANGED');};
+  if(send)services.sendTestNotice=alias=>{
+   services.checkCurrentConfig();
+   MailApp.sendEmail({to:STUDY1_ADMIN_OWNER_,subject:'Study1 V2｜隔離 TEST 預約確認 '+alias,body:'隔離 TEST 通知，非正式研究招募。此虛構案件已完成測試預約及合成 PDF，無真人資料。'});
+  };
+  return {ok:true,value:study1UatStoreTransaction_(services,approved,null,send?{mode:'notice_send',alias:request.alias,expectedSha:request.expectedSha}:{mode:'notice_audit'})};
+ }catch(e){const safe=['UAT_NOTICE_OUTCOME_UNKNOWN','UAT_NOTICE_NOT_SENDABLE','UAT_CLEANUP_STALE_PREVIEW'];return {ok:false,error:safe.includes(e?.message)?e.message:'UAT_REQUEST_REJECTED'};}
+}
 async function study1UatControlledRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ if(['noticeAudit','noticeSend'].includes(request?.operation))return study1UatNoticeRequest_(request);
  if(['documentCatalog','documentPreview','documentSelect'].includes(request?.operation))return study1UatDocumentRequest_(request);
  if(request?.operation==='recruitmentDraft'){
   if(Object.keys(request).join(',')!=='operation'||Array.isArray(request))return deny();
