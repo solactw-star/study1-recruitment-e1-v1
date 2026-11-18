@@ -104,6 +104,11 @@ async function study1UatCaseCopy_(record,slots,at){
  return {...view,pageCount:5,sha:view.signedSha,bytes:record.pdf};
 }
 
+function study1UatEmailOtpHash_(access,code){
+ return Utilities.computeHmacSha256Signature('STUDY1_UAT_EMAIL_OTP:'+access.caseKey+':'+code,access.gate)
+  .map(byte=>(byte&255).toString(16).padStart(2,'0')).join('');
+}
+
 /* Private operation layer for the existing seven-step isolated UAT contract.
  * Not an RPC or a web route. Configuration must be supplied by a trusted caller.
  * No live study records or email, no fallback to a different store.
@@ -111,7 +116,7 @@ async function study1UatCaseCopy_(record,slots,at){
 async function study1UatGasOperation_(approved,access,operation,payload){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
- const keys={start:['alias','eligible'],verify:['code'],slots:[],hold:['slotId','requestId'],read:[],document:[],sign:['requestId','sourceSha','ink','read','agree'],copy:[],cancel:[]};
+ const keys={start:['alias','eligible'],emailStart:['alias','eligible'],verify:['code'],slots:[],hold:['slotId','requestId'],read:[],document:[],sign:['requestId','sourceSha','ink','read','agree'],copy:[],cancel:[]};
  need(Object.prototype.hasOwnProperty.call(keys,operation)&&payload&&typeof payload==='object'&&!Array.isArray(payload)&&
   Object.keys(payload).sort().join(',')===keys[operation].slice().sort().join(','),'UAT_REQUEST');
  const tx=fn=>study1UatGasCaseTransaction_(approved,access,fn);
@@ -129,15 +134,38 @@ async function study1UatGasOperation_(approved,access,operation,payload){
  };
  const held=(mine,at)=>{need(mine.state==='HELD'&&Date.parse(mine.holdUntil)>at&&mine.sourceSha===approved.sourceSha,'UAT_HOLD_REQUIRED');return mine;};
  const availableView=available=>available.map(s=>({slotId:s.slotId,startAtUtc:s.startAtUtc,endAtUtc:s.endAtUtc,remaining:s.remaining}));
- if(operation==='start')return tx((mine,available,at)=>{
+ if(operation==='start'||operation==='emailStart'){
+  const emailMode=operation==='emailStart';
+  if(emailMode)study1AdminOwnerRequired_();
+  const code=emailMode?String((Number.parseInt(Utilities.getUuid().slice(0,8),16)%100000000)).padStart(8,'0'):'';
+  let send=false;
+  const view=tx((mine,available,at)=>{
   need(payload.eligible===true&&/^TEST_(0[1-9]|1[0-2])$/.test(payload.alias),'UAT_SYNTHETIC_IDENTITY_REQUIRED');
-  if(mine){need(mine.alias===payload.alias,'UAT_CASE_BINDING');return unchanged(study1UatCaseView_(mine,approved.slots,at));}
+  if(mine){need(mine.alias===payload.alias&&Boolean(mine.emailOtp)===emailMode,'UAT_CASE_BINDING');
+   if(emailMode)throw Error('UAT_EMAIL_OTP_ALREADY_ISSUED');
+   return unchanged(study1UatCaseView_(mine,approved.slots,at));}
   const tokenHash=study1PdfDigest_(Array.from(access.caseKey,c=>c.charCodeAt(0)));
-  return result({alias:payload.alias,caseId:'UAT_'+tokenHash.slice(0,24),tokenHash,state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''},at);
- });
- if(operation==='verify'||operation==='slots')return tx((record,available)=>{
+  const record={alias:payload.alias,caseId:'UAT_'+tokenHash.slice(0,24),tokenHash,state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''};
+  if(emailMode){record.emailOtp={expiresAt:new Date(at+300000).toISOString(),hash:study1UatEmailOtpHash_(access,code)};send=true;}
+  return result(record,at);
+  });
+  if(send){
+   try{MailApp.sendEmail({to:STUDY1_ADMIN_OWNER_,subject:'Study1 V2｜隔離 TEST Email OTP '+view.caseId,
+    body:'隔離測試，非研究招募。\n測試驗證碼：'+code+'\n五分鐘內有效，限用一次。'});}
+   catch(_){throw Error('UAT_EMAIL_OTP_DELIVERY_UNKNOWN');}
+  }
+  return view;
+ }
+ if(operation==='verify'||operation==='slots')return tx((record,available,at)=>{
   const mine=lookup(record);
   if(operation==='verify'){
+   if(mine.emailOtp){
+    need(mine.state==='OTP','UAT_EMAIL_OTP_USED');
+    need(Date.parse(mine.emailOtp.expiresAt)>at,'UAT_EMAIL_OTP_EXPIRED');
+    need(typeof payload.code==='string'&&/^\d{8}$/.test(payload.code)&&otpConstantTimeHexEquals_(
+     mine.emailOtp.hash,study1UatEmailOtpHash_(access,payload.code)),'UAT_EMAIL_OTP_INVALID');
+    return {record:{...mine,state:'SLOTS',emailOtp:{...mine.emailOtp,hash:''}},value:availableView(available)};
+   }
    need(payload.code==='12345678'&&['OTP','SLOTS'].includes(mine.state),'UAT_SYNTHETIC_OTP_INVALID');
    if(mine.state==='OTP')return {record:{...mine,state:'SLOTS'},value:availableView(available)};
   }else need(mine.state==='SLOTS','UAT_CASE_STATE');
@@ -156,7 +184,8 @@ async function study1UatGasOperation_(approved,access,operation,payload){
   need(mine.state!=='CONFIRMED','UAT_CONFIRMED_IMMUTABLE');
   if(['CANCELLED','EXPIRED'].includes(mine.state))return unchanged(study1UatCaseView_(mine,approved.slots,at));
   const expired=mine.state==='HELD'&&Date.parse(mine.holdUntil)<=at;
-  return result({...mine,state:expired?'EXPIRED':'CANCELLED'},at);
+  return result({...mine,state:expired?'EXPIRED':'CANCELLED',
+   ...(mine.emailOtp?{emailOtp:{...mine.emailOtp,hash:''}}:{})},at);
  });
  if(operation==='copy'){
   const snapshot=tx(mine=>{need(lookup(mine).state==='CONFIRMED','UAT_COPY_NOT_CONFIRMED');return unchanged(mine);});
@@ -247,7 +276,7 @@ async function study1UatControlledRequest_(request){
  const exact=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys;
  const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
  if(!exact(request,'caseKey,gate,operation,payload')||!hex(request.gate)||!hex(request.caseKey)||
-  request.gate===request.caseKey||!['start','verify','slots','hold','document','sign','read','copy','cancel'].includes(request.operation)||
+  request.gate===request.caseKey||!['start','emailStart','verify','slots','hold','document','sign','read','copy','cancel'].includes(request.operation)||
   !request.payload||typeof request.payload!=='object'||Array.isArray(request.payload))return deny();
  try{
   const approved=study1UatTrustedConfig_();
@@ -257,7 +286,9 @@ async function study1UatControlledRequest_(request){
   // A thrown error may occur after a mutation or its flush. No automatic retry.
   // Distinguish only the explicitly verified unknown-write marker; do not leak
   // arbitrary service exceptions (they may contain resource identifiers).
-  return {ok:false,error:e&&e.message==='UAT_WRITE_UNKNOWN_READ_CASE'?'UAT_WRITE_UNKNOWN_READ_CASE':'UAT_REQUEST_REJECTED'};
+  const safe=['UAT_WRITE_UNKNOWN_READ_CASE','UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN',
+   'UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID'];
+  return {ok:false,error:safe.includes(e?.message)?e.message:'UAT_REQUEST_REJECTED'};
  }
 }
 

@@ -41,7 +41,13 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    'UAT_CLEANUP_REQUEST');
  }
  const validate=(c,i)=>{
-  need(c&&typeof c==='object'&&!Array.isArray(c)&&equal(Object.keys(c).sort(),keys.slice().sort()),'UAT_CASE_SCHEMA');
+  const fields=c&&Object.hasOwn(c,'emailOtp')?[...keys,'emailOtp']:keys;
+  need(c&&typeof c==='object'&&!Array.isArray(c)&&equal(Object.keys(c).sort(),fields.slice().sort()),'UAT_CASE_SCHEMA');
+  if(Object.hasOwn(c,'emailOtp')){
+   const otp=c.emailOtp;
+   need(otp&&equal(Object.keys(otp).sort(),['expiresAt','hash'])&&iso(otp.expiresAt)&&
+    (c.state==='OTP'?hex(otp.hash,64):otp.hash===''),'UAT_EMAIL_OTP_SCHEMA');
+  }
   need(c.alias==='TEST_'+String(i+1).padStart(2,'0')&&/^UAT_[a-f0-9]{24}$/.test(c.caseId)&&hex(c.tokenHash,64)&&
    ['OTP','SLOTS','HELD','CANCELLED','EXPIRED','CONFIRMED'].includes(c.state),'UAT_CASE_SCHEMA');
   const booked=c.slotId!=='';
@@ -57,6 +63,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
  };
  const encode=c=>{
   const meta={};for(const k of keys.filter(x=>x!=='pdf'))meta[k]=c[k];
+  if(Object.hasOwn(c,'emailOtp'))meta.emailOtp=c.emailOtp;
   // Prefix chunks so a base64 value cannot be interpreted as a formula.
   return ['case:'+JSON.stringify(meta),...Array.from({length:8},(_,i)=>{const part=c.pdf.slice(i*chunk,(i+1)*chunk);return part?'pdf:'+part:'';})];
  };

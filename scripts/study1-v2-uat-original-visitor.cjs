@@ -18,7 +18,7 @@ function gasController(){
  const digest=async b=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),x=>x.toString(16).padStart(2,'0')).join('');
  const bytes=b=>Uint8Array.from(atob(b),x=>x.charCodeAt(0));
  const taipei=s=>new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',dateStyle:'full',timeStyle:'short'}).format(new Date(s));
- const mutating=new Set(['start','verify','hold','sign','cancel']);
+ const mutating=new Set(['start','emailStart','verify','hold','sign','cancel']);
  const unresolved=new Map();
  let gate='',caseKey='',expected='',current=null,busy=false,ink=false,previous=null,originalUrl=null,signedUrl=null,source=null;
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
@@ -47,6 +47,8 @@ function gasController(){
    google.script.run.withFailureHandler(()=>reject(Error('線上回應不明，請唯讀核對本案，勿重送')))
     .withSuccessHandler(r=>{
      if(!r||r.ok!==true||!Object.prototype.hasOwnProperty.call(r,'value')){
+      const known=['UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN','UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID'];
+      if(known.includes(r?.error)){settle(operation);reject(Error(r.error));return;}
       reject(Error('測試操作未確認，請唯讀核對本案，勿重送'));return;
      }
      // Clear mutations only after the caller validates the value, not the envelope.
@@ -106,9 +108,16 @@ function gasController(){
   need(el('fictionalEligible').checked,'請確認只使用虛構身分');
   need(!caseKey,'已有本案，請使用唯讀核對，不另建案件');
   const k=random(32);el('caseKey').value=k;await bind(k);
-  const c=await call('start',{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');settle('start');show('otp');say('請保存測試案件密鑰。模擬驗證碼為 12345678，不會寄信。');
+  const email=el('testEmailOtp').checked,op=email?'emailStart':'start';
+  const c=await call(op,{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');settle(op);show('otp');
+  el('uatOtpMode').textContent=email?'從研究室測試信箱取得八位驗證碼，五分鐘內有效。':'模擬驗證，不寄信。測試碼 12345678。';
+  say(email?'寄信服務已接受，請到研究室測試信箱確認收件。':'模擬驗證碼為 12345678，不會寄信。');
  });
- button('otpVerify',async()=>{need(el('otpInput').value==='12345678','測試驗證碼不符');slots(await call('verify',{code:el('otpInput').value}),'verify');});
+ button('otpVerify',async()=>{need(/^\d{8}$/.test(el('otpInput').value),'測試驗證碼格式不符');slots(await call('verify',{code:el('otpInput').value}),'verify');el('uatOtpReplay').hidden=!el('testEmailOtp').checked;});
+ button('uatOtpReplay',async()=>{
+  await call('verify',{code:el('otpInput').value});
+  throw Error('UAT_EMAIL_OTP_REPLAY_UNEXPECTEDLY_ACCEPTED');
+ });
  button('formalSlotsRetry',async()=>slots(await call('slots')));
  button('hold',async()=>{el('hold').disabled=true;held(await call('hold',{slotId:el('slot').value,requestId:random(16)}));settle('hold');});
  button('confirm',async()=>{
@@ -129,7 +138,7 @@ function gasController(){
   clearUrls();hideSteps();clearInk();current=null;
   await bind(el('caseKey').value.trim());const c=await call('read');display(c);
   const pending=unresolved.get(caseKey);
-  if((pending==='start'&&c.stage==='OTP')||(pending==='verify'&&c.stage==='SLOTS')||
+  if((['start','emailStart'].includes(pending)&&c.stage==='OTP')||(pending==='verify'&&c.stage==='SLOTS')||
     (pending==='hold'&&c.stage==='HELD')||(pending==='sign'&&c.stage==='DONE')||
     (pending==='cancel'&&['CANCELLED','EXPIRED'].includes(c.stage)))unresolved.delete(caseKey);
   if(c.stage==='DONE')await receipt(await call('copy'));
@@ -150,7 +159,7 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
  s=once(s,'<main class="shell">','<main class="shell" id="uatOriginalMain" hidden>');
  const notice=/<div class="noticebar"[^>]*>[\s\S]*?<\/div>/;
  if(!notice.test(s))throw Error('UAT_ORIGINAL_NOTICE');
- s=s.replace(notice,'<div class="noticebar" role="status">私人 E1 線上隔離驗收｜非正式招募，禁止真實個資及簽名，不寄信</div>');
+ s=s.replace(notice,'<div class="noticebar" role="status">私人 E1 線上隔離驗收｜禁止真實個資與簽名；選用 Email OTP 時只寄研究室測試信箱</div>');
  const hero=/<div class="hero">[\s\S]*?<\/div><\/header>/;
  if(!hero.test(s))throw Error('UAT_ORIGINAL_HERO');
  s=s.replace(hero,'<div class="hero"><div class="eyebrow">Study1 E1 · 私人線上隔離驗收</div><h1>測試原報名流程</h1><p>只使用虛構身分、合成時段與五頁測試文件；不是正式研究同意。</p></div></header>');
@@ -171,11 +180,11 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
    .replace(/<div class="box">[\s\S]*?<\/div>/,'<div class="box">無正式招募、報酬、個資或真實簽署。</div>');
  });
  edit('screen',b=>b.slice(0,b.indexOf('<p class="lead">'))+
-  '<p class="lead">使用固定虛構人物，不填真實姓名、信箱、電話或健康資訊。</p><div class="box"><label for="testAlias" class="field">虛構身分</label><select id="testAlias">'+Array.from({length:12},(_,i)=>'<option>TEST_'+String(i+1).padStart(2,'0')+'</option>').join('')+'</select><label class="check"><input id="fictionalEligible" type="checkbox">僅以虛構身分執行測試</label></div><button id="screenNext" type="button">確認虛構資格並繼續</button>');
+  '<p class="lead">使用固定虛構人物，不填真實姓名、信箱、電話或健康資訊。</p><div class="box"><label for="testAlias" class="field">虛構身分</label><select id="testAlias">'+Array.from({length:12},(_,i)=>'<option>TEST_'+String(i+1).padStart(2,'0')+'</option>').join('')+'</select><label class="check"><input id="fictionalEligible" type="checkbox">僅以虛構身分執行測試</label><label class="check"><input id="testEmailOtp" type="checkbox">寄送隔離 Email OTP 到研究室測試信箱</label></div><button id="screenNext" type="button">確認虛構資格並繼續</button>');
  edit('otp',b=>b.slice(0,b.indexOf('<p class="lead">'))+
-  '<p class="lead">模擬驗證，不寄信。測試碼 12345678。</p><label class="field" for="otpInput">八位測試碼</label><input id="otpInput" inputmode="numeric" maxlength="8" autocomplete="off"><button id="otpVerify" type="button">驗證並選擇時段</button>');
+  '<p class="lead" id="uatOtpMode">模擬驗證，不寄信。測試碼 12345678。</p><label class="field" for="otpInput">八位測試碼</label><input id="otpInput" inputmode="numeric" maxlength="8" autocomplete="off"><button id="otpVerify" type="button">驗證並選擇時段</button>');
  edit('slots',b=>b.slice(0,b.indexOf('<p class="lead">'))+
-  '<p class="lead">合成場次與共用剩餘名額；送出時伺服器重新核對。</p><label class="field" for="slot">合成時段（臺灣時間）</label><select id="slot"></select><div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost">重新載入測試時段</button></div>');
+  '<p class="lead">合成場次與共用剩餘名額；送出時伺服器重新核對。</p><label class="field" for="slot">合成時段（臺灣時間）</label><select id="slot"></select><div class="actionrow"><button id="hold" type="button" disabled>暫留此時段並繼續</button><button id="formalSlotsRetry" type="button" class="ghost">重新載入測試時段</button><button id="uatOtpReplay" type="button" class="ghost" hidden>驗證同一測試碼無法重用</button></div>');
  edit('confirm',b=>b.replace(/<p>[\s\S]*?<\/p>/,'<p>核對虛構案件及測試暫留；完整測試 PDF 簽署後才確認。</p>').replace('</dl>','<dt>暫留有效至</dt><dd id="holdUntil"></dd></dl>'));
  edit('consent',b=>{
   b=once(b,'id="officialPdfDownload" class="pdf" hidden download="Study1_Consent_Original.pdf"','id="officialPdfDownload" class="pdf" hidden download="UAT_NOT_CONSENT_original.pdf"');
@@ -320,7 +329,7 @@ function sameSiteCleanupController(){
   slotsOut.textContent=p.slots.map(s=>s.slotId+'｜'+local(s.startAtUtc)+' – '+local(s.endAtUtc)+'｜已占 '+s.occupied+'/'+s.capacity+'｜剩餘 '+s.remaining+'｜'+(s.bookable?'可預約':'不可預約')).join('\n');
  };
  const emptyLists=()=>{casesOut.textContent='尚未核實測試案件';slotsOut.textContent='尚未核實測試場次';};
- const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。此流程不寄信、不寫正式研究資料。';
+ const describe=c=>'測試案件 '+c.cases+' 筆；有效暫留 '+c.holds+' 筆；已確認預約 '+c.confirmed+' 筆；測試 PDF '+c.pdfs+' 份。清除不寄信、不寫正式研究資料。';
  const buttons=()=>{preview.disabled=busy;clear.disabled=busy||unknown||cleared||!current||current.counts.cases===0;
   recover.disabled=busy||unknown||cleared||!current||current.counts.cases!==0;};
  const call=request=>new Promise((resolve,reject)=>{
