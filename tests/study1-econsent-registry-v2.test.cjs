@@ -5,27 +5,33 @@ const source=fs.readFileSync(path.join(__dirname,'../gas/AdminSandbox.js'),'utf8
 const sha=value=>crypto.createHash('sha256').update(
  Buffer.isBuffer(value)?value:Array.isArray(value)?Buffer.from(value.map(n=>n&255)):
  Buffer.from(String(value),'utf8')).digest('hex');
-function build(){
+function build({diskDir=null}={}){
  const values=new Map(),files=new Map(),folderId='1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU';
- let counter=0,onCreate=null,onPointerWrite=null;
+ let counter=0,onCreate=null,onPointerWrite=null,onPropertyWrite=null;
  const prop={getProperty:key=>values.has(key)?values.get(key):null,
   setProperty:(key,value)=>{
    values.set(key,value);
+   if(onPropertyWrite)onPropertyWrite(key,value);
    if(key==='STUDY1_ECONSENT_POINTER_V2'&&onPointerWrite)onPointerWrite();
   }};
  const proxy=data=>({
-  getId:()=>data.id,getSize:()=>data.bytes.length,
+  getId:()=>data.id,getSize:()=>data.diskSize??data.bytes.length,
+  getUrl:()=> 'https://drive.google.com/file/d/'+data.id+'/view',
+  setTrashed:value=>{data.trashed=value;},
   getMimeType:()=>data.mime,getSharingAccess:()=>data.access,
   setSharing:access=>{data.access=access;},
   getParents:()=>{let done=false;return {hasNext:()=>!done,
    next:()=>{done=true;return {getId:()=>data.parentId};}};},
-  getBlob:()=>({getBytes:()=>[...data.bytes],
-   getDataAsString:()=>data.bytes.toString('utf8')})
+  getBlob:()=>{const b=data.bytes;return {getBytes:()=>diskDir?b:[...b],
+   getDataAsString:()=>b.toString('utf8')};}
  });
  const folder={getSharingAccess:()=> 'PRIVATE',
   createFile:blob=>{
    const data={id:'V2_PRIVATE_FILE_'+(++counter).toString().padStart(10,'0'),
     bytes:Buffer.from(blob.bytes),mime:blob.mime,access:'PRIVATE',parentId:folderId};
+   if(diskDir){const target=path.join(diskDir,data.id);fs.writeFileSync(target,data.bytes);
+    data.diskSize=data.bytes.length;delete data.bytes;
+    Object.defineProperty(data,'bytes',{get:()=>fs.readFileSync(target)});}
    files.set(data.id,data);
    if(onCreate)onCreate();
    return proxy(data);
@@ -39,12 +45,13 @@ function build(){
   Utilities:{DigestAlgorithm:{SHA_256:'sha256'},
    computeDigest:(_,v)=>[...Buffer.from(sha(v),'hex')],
    newBlob:(v,mime='application/json',name='')=>{
-    const bytes=Buffer.from(String(v),'utf8');
-    return {bytes,mime,name,getBytes:()=>[...bytes]};
+    const bytes=Array.isArray(v)?Buffer.from(v):Buffer.from(String(v),'utf8');
+    return {bytes,mime,name,getBytes:()=>diskDir?bytes:[...bytes]};
    }},
   STUDY1_CONSENT_DOC_FOLDER_:folderId,
   study1BindingHmac_:items=>crypto.createHmac('sha256','only-synthetic-strong-test-key')
    .update(JSON.stringify(items)).digest('hex'),
+  Session:{getActiveUser:()=>({getEmail:()=> 'solac.tw@gmail.com'}),getEffectiveUser:()=>({getEmail:()=> 'solac.tw@gmail.com'})},
   Date,JSON,Math,Number,String,Array,Object,Set,Error
  });
  vm.runInContext(source,scope,{timeout:5000});
@@ -59,7 +66,7 @@ function build(){
  values.set('STUDY1_ECONSENT_PRIVATE_V1',legacyBytes);
  return {scope,values,files,legacy,legacyBytes,entry,
   enable:()=>values.set('STUDY1_ECONSENT_MIGRATION_V2_APPROVED','true'),
-  onCreate:fn=>{onCreate=fn;},onPointerWrite:fn=>{onPointerWrite=fn;}};
+  onCreate:fn=>{onCreate=fn;},onPointerWrite:fn=>{onPointerWrite=fn;},onPropertyWrite:fn=>{onPropertyWrite=fn;}};
 }
 function grow(f,start,end){
  let prior=f.scope.study1EConsentRegistry_();
@@ -259,4 +266,157 @@ test('CAPACITY B10 independent catalog 24/25 versions, not 3000 consent records'
  catalog.documents.push({...doc,id:'PRIVATE_TEMPLATE_CAPACITY_25',version:'CAPACITY-25'});
  f.values.set('STUDY1_CONSENT_DOCUMENT_INDEX_V1',JSON.stringify(catalog));
  assert.throws(()=>f.scope.study1ConsentVersionRead_(),/版本目錄損毀/);
+});
+
+
+// A dedicated disk-backed fake Drive retains every exact snapshot byte.
+// No real Apps Script service, quota or remote data is involved.
+test('RETENTION sequential real V2 write/readback to 3000 records, all historical snapshots retained',t=>{
+ const diskDir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'study1-registry-retention-'));
+ t.after(()=>fs.rmSync(diskDir,{recursive:true,force:true}));
+ const f=build({diskDir});f.enable();
+ const expected=new Map(),marks=new Set([13,100,500,1000,3000]);
+ let old=f.legacy,total=0;
+ for(let i=2;i<=3000;i++){
+  const next={...old,revision:old.revision+1,records:old.records.concat(f.entry(i))};
+  f.scope.study1EConsentWrite_(old,next);
+  const ptr=JSON.parse(f.values.get('STUDY1_ECONSENT_POINTER_V2'));
+  const file=f.files.get(ptr.fileId);
+  assert.equal(ptr.revision,i);assert.ok(!expected.has(ptr.fileId));
+  assert.equal(file.diskSize,Buffer.byteLength(JSON.stringify(next),'utf8'));
+  assert.equal(file.access,'PRIVATE');assert.equal(f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),f.legacyBytes);
+  total+=file.diskSize;expected.set(ptr.fileId,{sha:ptr.sha256,revision:i,bytes:file.diskSize});
+  old=next;
+  if(marks.has(i))t.diagnostic('RETENTION_METRIC '+JSON.stringify({records:i,snapshots:f.files.size,currentBytes:file.diskSize,historyBytes:total}));
+ }
+ const active=f.scope.study1EConsentRegistry_();
+ assert.equal(JSON.stringify(active),JSON.stringify(old));
+ assert.equal(active.records.length,3000);assert.equal(f.files.size,2999);
+ let verified=0;
+ for(const [id,meta] of expected){
+  const file=f.files.get(id),bytes=file.bytes;
+  assert.equal(bytes.length,meta.bytes);assert.equal(sha(bytes),meta.sha);
+  assert.equal(JSON.parse(bytes).revision,meta.revision);
+  assert.equal(file.parentId,'1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU');
+  assert.equal(file.trashed,undefined);verified++;
+ }
+ assert.equal(verified,2999);
+ const before=f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ assert.throws(()=>f.scope.study1EConsentWrite_(old,{...old,revision:3001,records:old.records.concat(f.entry(3001))}),/容量不合法/);
+ assert.equal(f.values.get('STUDY1_ECONSENT_POINTER_V2'),before);assert.equal(f.files.size,2999);
+ t.diagnostic('RETENTION_VERIFIED '+JSON.stringify({snapshots:verified,historyBytes:total}));
+});
+test('RETENTION repeated revisions and ambiguous V2 commit retain historic signatures and withdrawal evidence',()=>{
+ const f=build();f.enable();
+ const signature={id:'PRIVATE_SIG_HISTORY_00001',sha:sha('synthetic signature')};
+ const confirmation={id:'PRIVATE_CONF_HISTORY_00001',sha:sha('synthetic confirmation')};
+ const signedPdf={id:'PRIVATE_PDF_HISTORY_00001',sha:sha('synthetic signed pdf')};
+ const token='a'.repeat(80);
+ const e={...f.entry(1),tokenHash:sha(token),expires:Date.now()+600000,state:'CONFIRMED',signature,confirmation,signedPdf};
+ const first={...f.legacy,revision:2,records:[e]};
+ f.scope.study1EConsentWrite_(f.legacy,first);
+ const oldPointer=f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ const oldFile=f.files.get(JSON.parse(oldPointer).fileId),oldHash=sha(oldFile.bytes);
+ const result=f.scope.study1EConsentWithdraw({token,reason:'synthetic request for destruction',dataChoice:'DESTROY'});
+ assert.equal(result.recorded,true);assert.equal(result.requiresResearcherDataDisposition,true);
+ assert.equal(result.dataDispositionState,'PENDING_RESEARCH_TEAM_ACTION');
+ const current=f.scope.study1EConsentRegistry_(),withdrawn=current.records[0];
+ assert.equal(withdrawn.state,'WITHDRAWN');assert.equal(withdrawn.signedPdf.id,signedPdf.id);
+ assert.equal(withdrawn.signature.sha,signature.sha);assert.equal(withdrawn.confirmation.sha,confirmation.sha);
+ assert.equal(f.scope.study1EConsentEvent_(withdrawn.withdrawal,withdrawn,'WITHDRAWAL').data.dataChoice,'DESTROY');
+ assert.equal(sha(oldFile.bytes),oldHash);assert.equal(JSON.parse(oldFile.bytes).records[0].state,'CONFIRMED');
+ assert.equal(f.files.size,3);
+ f.onPointerWrite(()=>{throw Error('synthetic lost response after commit');});
+ const next={...current,revision:4,records:current.records.concat(f.entry(2))};
+ assert.throws(()=>f.scope.study1EConsentWrite_(current,next),/lost response/);
+ f.onPointerWrite(null);
+ assert.equal(JSON.stringify(f.scope.study1EConsentRegistry_()),JSON.stringify(next));
+ assert.equal(f.files.size,4);assert.equal(sha(oldFile.bytes),oldHash);
+ assert.ok([...f.files.values()].every(x=>!x.trashed));
+ assert.equal(f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),f.legacyBytes);
+});
+// Characterization, not a security pass: valid old pointers are not a
+// monotonic external anchor, and non-current history is not scanned on read.
+test('RETENTION known gap: valid historical pointer rollback and missing inactive snapshot are not detected',t=>{
+ const f=build();f.enable();grow(f,2,2);
+ const earlier=f.values.get('STUDY1_ECONSENT_POINTER_V2'),earlyId=JSON.parse(earlier).fileId;
+ grow(f,3,3);const latest=f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ f.values.set('STUDY1_ECONSENT_POINTER_V2',earlier);
+ assert.equal(f.scope.study1EConsentRegistry_().revision,2);
+ f.values.set('STUDY1_ECONSENT_POINTER_V2',latest);
+ f.files.delete(earlyId);
+ assert.equal(f.scope.study1EConsentRegistry_().revision,3);
+ t.diagnostic('RETENTION_KNOWN_GAP valid old pointer replay and inactive history deletion undetected; independent anchor/inventory needed');
+});
+function b10Fixture(){
+ const f=build(),key='STUDY1_CONSENT_DOCUMENT_INDEX_V1';
+ f.values.set('OPEN','false');f.values.set('CONSENT_READY','false');
+ const pdf=Buffer.from('%PDF-1.7\n'+'synthetic byte fixture '.repeat(12)+'\n%%EOF');
+ const fixed='2026-11-18T00:00:00.000Z';
+ f.scope.Date=class extends Date{constructor(...a){super(...(a.length?a:[fixed]));}};
+ f.scope.Utilities.base64Decode=s=>Array.from(Buffer.from(s,'base64'));
+ const input={experiment:'E1',title:'Synthetic template',version:'NEW-01',researcherPresigned:true,expectedRevision:1,base64:pdf.toString('base64')};
+ const doc={experiment:'E1',id:'V2_PRIVATE_FILE_0000000001',title:input.title,version:input.version,
+  sha256:sha(pdf),bytes:pdf.length,url:'https://drive.google.com/file/d/V2_PRIVATE_FILE_0000000001/view',researcherPresigned:true,at:fixed};
+ const seed={experiment:'E1',id:'PRIVATE_OLD_PDF_00001',title:'Synthetic old',version:'OLD-01',
+  sha256:sha(pdf),bytes:pdf.length,url:'https://drive.google.com/file/d/PRIVATE_OLD_PDF_00001/view',researcherPresigned:true,at:fixed};
+ const catalog={schemaVersion:1,revision:1,documents:[seed],current:{E1:null,E2:null},published:{E1:null,E2:null}};
+ const persist=()=>{
+  for(const d of catalog.documents)f.files.set(d.id,{id:d.id,bytes:pdf,mime:'application/pdf',access:'PRIVATE',parentId:'1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU'});
+  f.values.set(key,JSON.stringify(catalog));
+ };
+ const planned=kind=>kind==='upload'?{...catalog,revision:2,documents:catalog.documents.concat(doc)}:
+  kind==='select'?{...catalog,revision:2,current:{...catalog.current,E1:seed.id}}:
+  {...catalog,revision:2,published:{...catalog.published,E1:seed.id}};
+ const prepare=(kind,n,unicode=false)=>{
+  if(kind==='publish')catalog.current.E1=seed.id;
+  if(unicode){
+   catalog.documents=Array.from({length:12},(_,i)=>({...seed,id:'PRIVATE_OLD_PDF_'+String(i+1).padStart(5,'0'),version:'OLD-'+String(i+1).padStart(2,'0'),title:'測'.repeat(100)}));
+  }
+  const remainder=n-JSON.stringify(planned(kind)).length;
+  assert.ok(remainder>=0);catalog.documents[0].url+='x'.repeat(remainder);
+  assert.equal(JSON.stringify(planned(kind)).length,n);persist();
+ };
+ const execute=kind=>kind==='upload'?f.scope.study1ConsentVersionUpload(input):
+  kind==='select'?f.scope.study1ConsentVersionSelect({id:seed.id,expectedRevision:1}):
+  f.scope.study1ConsentVersionPublication({id:seed.id,experiment:'E1',expectedRevision:1,confirmSha256:seed.sha256});
+ return {f,key,doc,seed,catalog,prepare,execute,planned};
+}
+for(const kind of ['upload','select','publish']){
+ for(const n of [7499,7500,7501]){
+  test('RETENTION B10 '+kind+' exact '+n+' UTF-16 code units',()=>{
+   const b=b10Fixture();b.prepare(kind,n);
+   const before=b.f.values.get(b.key);
+   if(n===7501){
+    assert.throws(()=>b.execute(kind),/索引容量不足/);
+    assert.equal(b.f.values.get(b.key),before);
+    assert.equal(b.f.files.get(b.seed.id).trashed,undefined);
+    if(kind==='upload')assert.equal(b.f.files.get(b.doc.id).trashed,true);
+   }else{
+    const result=b.execute(kind);
+    assert.equal(JSON.stringify(result).length,n);
+    assert.equal(b.f.values.get(b.key),JSON.stringify(b.planned(kind)));
+    assert.equal(b.f.files.get(b.seed.id).trashed,undefined);
+    if(kind==='upload')assert.equal(b.f.files.get(b.doc.id).trashed,undefined);
+   }
+  });
+ }
+}
+test('RETENTION B10 7500 UTF-16 units can exceed byte quota: multibyte characterization',t=>{
+ const b=b10Fixture();b.prepare('upload',7500,true);
+ const expected=JSON.stringify(b.planned('upload')),bytes=Buffer.byteLength(expected,'utf8');
+ assert.equal(expected.length,7500);assert.ok(bytes>9000);
+ b.execute('upload');
+ assert.equal(b.f.values.get(b.key),expected);
+ t.diagnostic('RETENTION_B10_MULTIBYTE '+JSON.stringify({codeUnits:expected.length,utf8Bytes:bytes,providerQuotaEnforced:false}));
+});
+test('RETENTION B10 upload response lost after index commit preserves both old and new referenced files',()=>{
+ const b=b10Fixture();b.prepare('upload',7500);
+ b.f.onPropertyWrite((key)=>{if(key===b.key)throw Error('synthetic response lost after catalog commit');});
+ assert.throws(()=>b.execute('upload'),/response lost/);b.f.onPropertyWrite(null);
+ const current=b.f.scope.study1ConsentVersionRead_();
+ assert.equal(current.documents.length,2);assert.equal(current.revision,2);
+ assert.equal(b.f.files.get(b.seed.id).trashed,undefined);
+ assert.equal(b.f.files.get(b.doc.id).trashed,undefined);
+ assert.equal(sha(b.f.scope.study1ConsentDocumentBytes_(current.documents[1])),b.doc.sha256);
 });
