@@ -1,0 +1,27 @@
+name: Study1 V2 release
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: study1-v2-gas-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-save --package-lock=false @googleapis/script@16.0.1
+      - run: node --test tests/study1-v2-release-core.test.cjs tests/study1-v2-uat-shared.test.cjs tests/study1-v2-public-readonly.test.cjs
+      - name: Verify original V2 GAS deployment with read-only API calls
+        run: node scripts/study1-v2-apps-script.cjs
+        env:
+          V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
