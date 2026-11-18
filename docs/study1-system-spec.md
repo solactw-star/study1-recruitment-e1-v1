@@ -2,7 +2,7 @@
 
 > **權責：** 介面功能與 UAT 唯一 GitHub 主規格，固定路徑 `docs/study1-system-spec.md`。Google Drive 文件 `1y9mflKzjzTRnt6CMsGZRSIGETuio77SCSdtHdXL-7WI` 是對應 V0.2 閱讀／行政副本，不是第二份正式主規格。
 > **決策基準：** 已確認第 1–67 題之 2026-11-05 V0.2 累積決策摘要；原逐題作答未隨本次 V0.2 原稿逐題附上，因此不得推定未明載的各題答案字母。本檔後述功能／狀態為已確認需求，不代表現有程式已實作。
-> **目前最高優先級建置原則（2026-11-18 更新）：** 使用者已正式採用 §70-S.50「Study1 V2 系統建置核心準則 V1.0」十三條。一般建置／測試／適用授權內技術部署與真人研究營運分離；最小必要限制、例行發布可採適用的持續性授權、乾淨重建可先淘汰本地舊 V2 發布子系統（本次僅修規格，不刪程式）。原 §70-S.35 唯一 V2／V1 封存、§70-S.42 匿名入口、§70-S.46 同站測試與 TEST 清除、正式研究資料與啟用界線繼續適用。歷史固定 SHA／檔數／版號／逐次確認、強制三輪或固定測試數，以及先發布驗收才得淘汰的相牴觸工程要求依 §70-S.50 取代；不推定平台許可或真人收件核准。
+> **目前最高優先級建置原則（2026-11-18 更新）：** 使用者已正式採用 §70-S.50「Study1 V2 系統建置核心準則 V1.0」十三條。一般建置／測試／適用授權內技術部署與真人研究營運分離；最小必要限制、例行發布可採適用的持續性授權、本地舊 V2 發布子系統已淘汰；§70-S.51 正式採用 Google Apps Script API、Google 官方 Node.js Client Library 與單一 GitHub Actions 發布程序（架構核定，遠端寫入尚待實際允許與適用授權）。原 §70-S.35 唯一 V2／V1 封存、§70-S.42 匿名入口、§70-S.46 同站測試與 TEST 清除、正式研究資料與啟用界線繼續適用。歷史固定 SHA／檔數／版號／逐次確認、強制三輪或固定測試數，以及先發布驗收才得淘汰的相牴觸工程要求依 §70-S.50 取代；不推定平台許可或真人收件核准。
 
 計畫：NSTC 115-2410-H-033-015
 日期：2026-11-05
@@ -1832,4 +1832,18 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 #### 現行必要邊界與下一步
 
 本輪並未確認新的 GAS 寫入能力。先前 RELEASE_TOOL_BLOCKED 仍未確認解除，現有 lifecycle 仍僅 CHECK；不得因規格精簡、刪除舊工具、重新命名、其他 runner 或改換入口而重送或規避特定被拒操作。適用持續性授權是未來正常發布的設計要求，不是現有授權證據。已核實的唯讀、來源、證據、產品功能可重用；不再拆分相同核心。正式營運狀態仍 OPEN=false、CONSENT_READY=false、FORMAL_READY=false、LIVE_INTAKE_ENABLED=false；不擅自變更研究個資、正式資料、真人信、REC、核定研究程序、角色權限或 E2 禁招與不自動啟用要求。原測試與安全守門仍在現有程式中；本節僅修正其施工效力與後續設計，不代表程式已改、發布已解除或 UI 已驗收。
+
+### 70-S.51｜2026-11-18 使用者正式核定：Study1 V2 全新發布架構 V1.0
+
+**效力與範圍**：使用者正式採用前輪設計提案（進度 commit 4855ae3fa5d072e93dd5af0857600c5da05de4d9），遵循 §70-S.50 十三條，優先於先前相衝突的自訂發布實作與流程，包括 §70-S.47–49。不恢復已於 ce9478eb 淘汰的四個舊 V2 客戶端、兩個遠端工作流及專屬舊發布 CI；保留原 Git 歷史、產品、共用純來源／證據／CHECK、必要產品測試、唯一 V2 Repo、Script ID、既有正式部署 ID/網址與資料、V1 封存。本輪正式核定架構與文件同步，不推定實際遠端發布許可、OAuth 有效性、正式研究啟用或歷史工具拒絕解除。
+
+- **唯一技術方案**：Google 官方 Apps Script API 與 Google 官方 Node.js Client Library（由成熟函式庫管理 OAuth/HTTP），單一 GitHub Actions 發布程序；沿用原 main、現行產品及必要 CI、Git 版本與 Google 版本化部署。僅新增真正必要的發布整合邏輯及一個工作流，不另建 clasp 平行發布、自訂 OAuth/HTTP client、多套發布模式、一次性事件、伺服器、其他網站、重複驗證器。非必要固定歷史 SHA、檔數、版號、前置模式、測試數及逐次自訂核准均不繼承。
+- **當期來源**：raw gas/appsscript.json 仍為 ANYONE/USER_DEPLOYING 基準，sameSiteCandidate() 產生 ANYONE_ANONYMOUS 同站候選，現有 CHECK receipt releaseAuthorized=false，不能將原目錄直接發布或把候選當已核定。以當期唯一可審、可演進的完整來源及其實際 digest 為準，重用既有組裝與產品測試；第一個完整發布版本須維持非 OWNER 拒絕、可信 TEST 隔離與清除、真人收件關閉。舊候選限制依新契約調整須有相應產品正負測，不僅關掉拒絕；不再額外拆分 source/evidence/CHECK，也不把目前 30 檔當永久門檻。一般本地產品施工不以發布權限為前置。
+- **最短正常生命週期**（平台實際允許且具適用授權後）：開發與受影響測試 → 當期 main 完整來源／核對唯一原 Script 及原正式部署、現行版本和回復基準 → 原 HEAD 來源更新（projects.updateContent 是完整覆蓋，先核對受影響 HEAD 觸發器）→ 建立不可變版本（projects.versions.create）→ 同一原既有部署改指新版本（projects.deployments.update）→ 直接回讀實際來源、版本、原 ID/URL/ACL 及真實 UI。必要 GET 使用原生 API；不用每次盤點全部歷史。部署程序不新增/刪除 GAS 專案、部署、歷史版本、觸發器或研究資料，不改所有權。可回復性依前一已驗證版本與 Git 歷史；適用授權內 rollback 只更新原部署指向已驗證前版，必要時另評估 HEAD/觸發器影響及相容性，不宣稱程式回復等於資料回復。GitHub 原生 concurrency 串行，不任意中止正在遠端異動的工作；結果不明先核實狀態、不盲重送。
+- **最小平台權限**：Google Cloud client 的 Apps Script API 啟用、使用者 Apps Script API 存取允許、原部署具管理權的使用者 OAuth，發布所需 scope https://www.googleapis.com/auth/script.projects（來源、版本）及 https://www.googleapis.com/auth/script.deployments（部署）；唯讀時使用相應 readonly scope，無須為發布額外取得 Gmail/Sheets/Drive 全域資料權限。不使用 service account，優先確認現有 OAuth 是否適用，不擅自新建或改 Cloud project/部署者/ownership；External/Testing refresh token 通常七日，應確認實際設定／有效期而非反覆自訂授權。scope 非單一 Script 限定，以唯一目標核對避免跨站。憑證僅置平台原生 Secrets，不輸出或存 repo。GitHub Actions contents: read、受控 main；帳戶方案支援時可用原生 Environment 隔離，無須自行建立授權系統。持續性授權成立後例行發布不另增逐次核准，實際平台權限／限制不能以規格取代。
+- **驗收分層**：API 的發布帳號權限不同於產品 OWNER 身分。匿名 USER_DEPLOYING 下訪客 active email 可能空白，不能以 effective user 當訪客；須以真實 OWNER、匿名拒絕及同案 TEST 功能驗收證明，不以合成 CI 代替。REC/PI 不作一般開發與非真人技術部署前置；正式研究資料、通知、真人啟用及四旗標、E2 界線依 §70-S.46/50 保持。既有部署及正式網址未於本輪異動。
+- **現況與最短實作路徑**：截至核定前 main 4855ae3f，lifecycle 仍只有 CHECK，舊發布入口都已移除；既有 OAuth 是否有效、原部署者管理權與實際平台發布允許未核實，先前 RELEASE_TOOL_BLOCKED 未確認解除。只需確認真正必要的原部署權限、OAuth/API 可用與實際平台新允許證據、適用持續性授權；若已具備，不另增人為核准。沒有具體新允許證據及適用權限前，不實作或執行受阻遠端寫入路徑（包括可執行發布工作流、憑證接入或替代入口），不重送、不規避原拒絕；不可因此停掉獨立允許的當期 E1 產品來源、OWNER 驗證與報名預約簽署工程。條件成立後集中完成單一發布整合、必要同版正負測、原部署更新與真實功能驗收，不重做既有核心、不新增平行流程。
+- **官方依據**（已於前輪技術設計查證）：[Apps Script deployments](https://developers.google.com/apps-script/concepts/deployments)、[Apps Script API REST](https://developers.google.com/apps-script/api/reference/rest/)、[updateContent](https://developers.google.com/apps-script/api/reference/rest/v1/projects/updateContent)、[API enablement](https://developers.google.com/apps-script/api/how-tos/enable)、[API concepts](https://developers.google.com/apps-script/api/concepts/)、[OAuth 2.0](https://developers.google.com/identity/protocols/oauth2)、[Session](https://developers.google.com/apps-script/reference/base/session)、[GitHub environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)、[GitHub concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)。這些是技術能力文件，非本帳號或執行環境之許可證據。
+
+本次只同步正式規格與 AGENTS.md 及原進度主檔；不新增發布程式/工作流、接入憑證、叫用遠端 GAS、修改產品/資料、排程或 V1。原每小時排程設定同步另依明確授權，沿用唯一 ID/頻率/啟停，不新增排程。
 
