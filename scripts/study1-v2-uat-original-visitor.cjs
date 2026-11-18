@@ -846,7 +846,8 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  const profileScript=slice(' const profileStatus=m=>',' const clearApproval=()=>')
   .replace(/el\('e1Profile/g,"pel('e1FormalProfile").replace(/\bclear\(/g,'clearNode(')
   .replace("local(v).replace('T',' ')","localInput(v).replace('T',' ')")
-  .replace("status('個案來源或權限已改變，請重整原名單。');","text(status,'個案來源或權限已改變，請重整原名單。');");
+  .replace("closeProfile();status('個案來源或權限已改變，請重整原名單。');","clear();text(status,'個案來源或權限已改變，請重整原名單。');")
+  .replace("resetProfilePdf();profileStatus('私人 PDF 未核實；請重新查詢個案，不提供下載。');","clear();text(status,'私人 PDF 未核實；請重新查詢個案，不提供下載。');");
  const formalController=once(sameSiteFormalWorkspaceController.toString(),'/* FORMAL_PROFILE_CONTROLLER */',
   "const pel=id=>document.getElementById(id);const clearNode=n=>{n.textContent='';};let profile=null,profileEpoch=0,profileUrl=null;\n"+profileScript);
  const formalMarkup='<main><p><a href="<?= siteAppUrl + \'?view=admin\' ?>" target="_top">返回隔離 TEST 工作區</a></p>'+formalPanel+formalDocuments+'</main>';

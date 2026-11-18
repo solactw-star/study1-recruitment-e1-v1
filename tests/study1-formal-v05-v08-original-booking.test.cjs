@@ -1202,6 +1202,47 @@ test('same-site formal B04 reuses original profile and signed PDF, rejects stale
  assert.throws(()=>h.ctx.study1OwnerE1ProfilePdf(req),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);
  assert.equal(h.mutations.length,n);
 });
+test('same-site assembled B04 panel binds original profile and browser PDF hash, clears stale or denied results',async()=>{
+ const {h,a,z}=profileHarness(),c=addCaseConsent(h,a);
+ const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ vm.runInContext(get('Study1UatGasServices'),h.ctx);vm.runInContext(get('Study1FormalBooking'),h.ctx);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ h.props.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');
+ const doc=await require('../gas/Study1PdfLib.js').PDFDocument.create();for(let i=0;i<5;i++)doc.addPage().drawText('SYNTHETIC CASE ONLY '+i);
+ const bytes=Buffer.from(await doc.save());c.signedPdf.sha=crypto.createHash('sha256').update(bytes).digest('hex');
+ const orig=h.ctx.study1OwnerE1SignedPdfVerified_;
+ h.ctx.study1OwnerE1SignedPdfVerified_=entry=>({...orig(entry),base64:bytes.toString('base64'),bytes:bytes.length});
+ const html=get('AdminConsole'),start=html.indexOf('<? if (siteFormalWorkspace) { ?>'),end=html.indexOf('<? } else { ?>',start);
+ const panel=html.slice(start,end),nodes=new Map(),calls=[],revoked=[],created=[],pending=[];
+ const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},addEventListener(n,f){this[n]=f;}});
+ for(const m of panel.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ const el=k=>nodes.get('e1FormalWs'+k),pe=k=>nodes.get('e1FormalProfile'+k),profile=nodes.get('e1FormalProfile');
+ el('Status').value='ALL';el('Eligibility').value='ALL';
+ let fail,success,bad=false,defer=false,last;
+ const proxy=new Proxy({}, {get(_t,p){if(p==='withSuccessHandler')return f=>{success=f;return proxy;};if(p==='withFailureHandler')return f=>{fail=f;return proxy;};return (...args)=>{
+  calls.push({method:p,args});const s=success,f=fail,reply=()=>{try{let v=h.ctx[p](...args);
+   if(bad&&p==='study1OwnerE1ProfilePdf')v={...v,base64:Buffer.alloc(bytes.length,65).toString('base64')};
+   last=s(v);}catch(e){last=f(e);}};
+  if(defer&&p==='study1OwnerE1Profile')pending.push(reply);else reply();
+ };}});
+ const google={script:{run:proxy}},browserCrypto=crypto.webcrypto;
+ const URL={createObjectURL:b=>{created.push(b);return 'blob:formal-'+created.length;},revokeObjectURL:u=>revoked.push(u)};
+ for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:{getElementById:id=>nodes.get(id),createElement:make},google,window:{google,crypto:browserCrypto,addEventListener(){}},crypto:browserCrypto,URL,Blob,atob,Uint8Array});
+ const n=h.mutations.length;
+ const selectRow=id=>el('Rows').children.find(r=>r.children[0].textContent===id).children.at(-1).children[0].click();
+ await el('Load').click();selectRow(a.applicantId);assert.equal(profile.hidden,false);assert.match(pe('Summary').textContent,new RegExp(a.applicantId));assert.doesNotMatch(pe('Summary').textContent,new RegExp(z.applicantId));
+ pe('Tab').value='consent';pe('Tab').change();assert.equal(pe('Pdf').disabled,false);
+ pe('Pdf').click();await last;assert.equal(pe('Download').hidden,false);assert.equal(created.length,1);assert.deepEqual(Buffer.from(await created[0].arrayBuffer()),bytes);
+ pe('Tab').value='booking';pe('Tab').change();assert.equal(pe('Download').hidden,true);assert.equal(revoked.length,1);
+ pe('Tab').value='consent';pe('Tab').change();bad=true;pe('Pdf').click();await last;
+ assert.equal(pe('Download').hidden,true);assert.equal(profile.hidden,true);assert.equal(el('Rows').children.length,0);assert.equal(created.length,1);
+ bad=false;await el('Load').click();defer=true;selectRow(a.applicantId);selectRow(z.applicantId);
+ pending[1]();pending[0]();assert.match(pe('Summary').textContent,new RegExp(z.applicantId));assert.doesNotMatch(pe('Summary').textContent,new RegExp(a.applicantId));
+ el('Query').value=a.applicantId;el('Query').change();assert.equal(profile.hidden,true);assert.equal(pe('Summary').textContent,'');
+ defer=false;await el('Load').click();h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');selectRow(a.applicantId);
+ assert.equal(profile.hidden,true);assert.equal(el('Rows').children.length,0);
+ assert.ok(calls.every(r=>['study1OwnerE1Workspace','study1OwnerE1Profile','study1OwnerE1ProfilePdf'].includes(r.method)));assert.equal(h.mutations.length,n);
+});
 test('P0-B B04 same original B03 applicant, eight-source profile, reservation history and scope-limited contact',()=>{
  const {h,a,z}=profileHarness(),q=profileRequest(h,a.applicantId),n=h.mutations.length;
  h.tables.AuditLogs.rows.push(['AUD_TEST_A',ts(h.clock.now,-1000),'OWNER','owner@example.org','REVIEWED','APPLICANT',a.applicantId,'SECRET_RESULT','REQ_A']);

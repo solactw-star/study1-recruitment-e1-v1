@@ -237,6 +237,25 @@ test('same-site formal B10 original private index and byte verifier, E1 only, no
  for(const bad of [{...q,revision:1},{...q,version:'E2-V1'},{...q,sha256:'0'.repeat(64)},{...q,id:h.originalId}])assert.throws(()=>scope.study1ConsentVersionList(bad),/E1_DOCUMENT_PREVIEW/);
  const f=h.files.get(h.originalId);f.access='PUBLIC';assert.throws(()=>scope.study1ConsentVersionList(q),/私人權限/);f.access='PRIVATE';
  const saved=Buffer.from(f.bytes);f.bytes[30]^=1;assert.throws(()=>scope.study1ConsentVersionList(q),/雜湊/);f.bytes=saved;
+ // Exercise assembled B10 controls against the actual catalog and private-byte
+ // verifier above, not a canned catalog. No live RPC or external browser.
+ const html=get('AdminConsole'),start=html.indexOf('<section id="e1FormalPdf">'),end=html.indexOf('</section>',start);
+ const panel=html.slice(start,end),nodes=new Map(),created=[],revoked=[],calls=[];
+ const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},addEventListener(n,f){this[n]=f;}});
+ for(const m of panel.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ const el=k=>nodes.get('e1FormalPdf'+k);
+ let fail,success,corrupt=false;
+ const google={script:{run:new Proxy({}, {get(_t,p){if(p==='withSuccessHandler')return f=>{success=f;return google.script.run;};if(p==='withFailureHandler')return f=>{fail=f;return google.script.run;};return (...args)=>{
+  calls.push(p);try{let v=scope[p](...args);if(corrupt&&v.mode==='OWNER_E1_PDF_PREVIEW')v={...v,base64:Buffer.alloc(bytes.length,65).toString('base64')};success(v);}catch(e){fail(e);}
+ };}})}};
+ const URL={createObjectURL:b=>{created.push(b);return 'blob:private-'+created.length;},revokeObjectURL:u=>revoked.push(u)};
+ for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:{getElementById:id=>nodes.get(id),createElement:make},google,window:{google,crypto:crypto.webcrypto,addEventListener(){}},URL,Blob,atob,Uint8Array});
+ assert.ok(!el('Upload')&&!el('Select')&&!el('Source'));assert.equal(el('Preview').disabled,true);
+ await el('Read').click();assert.equal(el('Choose').children.length,1);assert.match(el('Detail').textContent,/SHA/);
+ await el('Preview').click();assert.equal(el('Review').hidden,false);assert.deepEqual(Buffer.from(await created[0].arrayBuffer()),bytes);
+ el('Choose').change();assert.equal(el('Review').hidden,true);assert.equal(revoked.length,1);
+ corrupt=true;await el('Preview').click();assert.equal(el('Review').hidden,true);assert.equal(el('Preview').disabled,true);assert.equal(created.length,1);
+ assert.ok(calls.every(p=>p==='study1ConsentVersionList'));
  const getFile=scope.DriveApp.getFileById;scope.DriveApp.getFileById=id=>{h.values.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');return getFile(id);};
  assert.throws(()=>scope.study1ConsentVersionList(q),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);scope.DriveApp.getFileById=getFile;
  assert.throws(()=>scope.study1ConsentVersionUpload({}),/PUBLIC_READ_ONLY/);
