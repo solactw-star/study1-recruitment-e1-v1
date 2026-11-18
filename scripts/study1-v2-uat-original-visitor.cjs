@@ -635,6 +635,10 @@ function sameSiteFormalBooking(source,restore=false){
   const head='function '+name+'(input){';
   source=once(source,head+(restore?gate:deny),head+(restore?deny:gate));
  }
+ const workspaceReturn="  return {mode:'OWNER_E1_WORKSPACE',experiment:'E1',revision:x.revision,asOfUtc:x.now,";
+ const previewReturn="  return {...project,canCommit:commitBlocker===null,commitBlocker,\n   approvalRef:approval?approval.approvalRef:null,approvalReason:approval?approval.reason:null};";
+ const readOnlyReturn="  return {...project,canCommit:false,commitBlocker:'FORMAL_WORKSPACE_READ_ONLY',approvalRef:null,approvalReason:null};";
+ for(const [before,after] of [[workspaceReturn,'  '+gate+'\n'+workspaceReturn],[previewReturn,'  '+gate+'\n'+readOnlyReturn]])source=once(source,restore?after:before,restore?before:after);
  return source;
 }
 function sameSiteFormalWorkspaceController(){
@@ -690,7 +694,7 @@ function sameSiteFormalWorkspaceController(){
   busy=true;const e=++epoch;controls();draftMsg('核對草稿…');
   try{const r=await new Promise((resolve,reject)=>google.script.run.withFailureHandler(reject).withSuccessHandler(resolve).study1OwnerE1SlotChangePreview(q));
    if(e!==epoch)return;
-   if(!r||r.mode!=='E1_SLOT_CHANGE_PREVIEW'||r.revision!==q.revision||r.action!==q.action||r.written!==false||r.actionAuthority!=='NONE'||r.preservesReservations!==true||r.requiresPiApproval!==true||!hex(r.proposal)||!r.after||r.after.slotId!==q.slotId||r.after.capacity!==q.capacity||r.after.startAtUtc!==q.startAtUtc||r.after.endAtUtc!==q.endAtUtc||r.after.locationCode!==q.locationCode)throw Error('FORMAL_PREVIEW_SOURCE');
+   if(!r||r.mode!=='E1_SLOT_CHANGE_PREVIEW'||r.revision!==q.revision||r.action!==q.action||r.written!==false||r.actionAuthority!=='NONE'||r.preservesReservations!==true||r.requiresPiApproval!==true||r.canCommit!==false||r.commitBlocker!=='FORMAL_WORKSPACE_READ_ONLY'||!hex(r.proposal)||!r.after||r.after.slotId!==q.slotId||r.after.capacity!==q.capacity||r.after.startAtUtc!==q.startAtUtc||r.after.endAtUtc!==q.endAtUtc||r.after.locationCode!==q.locationCode)throw Error('FORMAL_PREVIEW_SOURCE');
    draftMsg('預檢通過（未儲存）：'+r.after.slotId+'｜名額 '+r.after.capacity+'｜'+r.after.status+'；保留原預約，正式儲存未開放。');
   }catch(_){if(e===epoch){clear();text(status,'草稿或來源已變更／不允許，請重新查詢。');}}
   finally{busy=false;controls();}

@@ -948,7 +948,7 @@ test('same-site formal B02/B03 uses original isolated workspace, independent OWN
  assert.doesNotMatch(JSON.stringify(w),/example.org|otp_hmac|SLOT_E2/);
  assert.throws(()=>h.ctx.study1OwnerE1Workspace({...wsFilter,mode:'TEST'}),/FILTER_INVALID/);
  const q={action:'UPDATE',revision:w.revision,slotId:slot.slotId,startAtUtc:slot.startAtUtc,endAtUtc:slot.endAtUtc,capacity:2,locationCode:slot.locationCode};
- assert.equal(h.ctx.study1OwnerE1SlotChangePreview(q).written,false);
+ const preflight=h.ctx.study1OwnerE1SlotChangePreview(q);assert.equal(preflight.written,false);assert.equal(preflight.canCommit,false);assert.equal(preflight.commitBlocker,'FORMAL_WORKSPACE_READ_ONLY');
  assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,capacity:0}),/DRAFT_INVALID/);
  assert.throws(()=>h.ctx.study1OwnerE1SlotChangePreview({...q,slotId:h.S3}),/SCOPE_INVALID/);
  assert.throws(()=>h.ctx.study1OwnerE1SlotChangeCommit(q),/PUBLIC_READ_ONLY/);
@@ -957,6 +957,33 @@ test('same-site formal B02/B03 uses original isolated workspace, independent OWN
  assert.equal(h.mutations.length,n);
  h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');const after=opens;
  assert.throws(read,/FORMAL_WORKSPACE_READ_NOT_APPROVED/);assert.equal(opens,after);
+ h.props.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');
+ h.ctx.SpreadsheetApp.openById=id=>{h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');return orig(id);};
+ assert.throws(read,/FORMAL_WORKSPACE_READ_NOT_APPROVED/);assert.equal(h.mutations.length,n);
+});
+test('same-site formal B02/B03 actual assembled panel reads and previews using isolated original backend',async()=>{
+ const h=wsHarness(),a=h.person('A'),z=h.person('B');h.holdSlot(h.proof(a),h.S1);
+ const adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),files=adapter.sameSiteCandidate(),get=n=>files.find(f=>f.name===n).source;
+ vm.runInContext(get('Study1UatGasServices'),h.ctx);vm.runInContext(get('Study1FormalBooking'),h.ctx);
+ h.ctx.study1V2PublicRpcDeny_=()=>{throw Error('PUBLIC_READ_ONLY');};
+ h.props.set('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED','true');
+ const html=get('AdminConsole'),start=html.indexOf('<? if (siteFormalWorkspace) { ?>'),end=html.indexOf('<? } else { ?>',start);
+ assert.ok(start>=0&&end>start);const panel=html.slice(start,end),nodes=new Map(),calls=[];
+ const make=()=>({value:'',disabled:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},addEventListener(n,f){this[n]=f;}});
+ for(const m of panel.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ const el=k=>nodes.get('e1FormalWs'+k);
+ el('Status').value='ALL';el('Eligibility').value='ALL';
+ assert.ok(!el('Commit'));assert.ok(!nodes.has('siteTestClear'));assert.ok(!nodes.has('e1WsRows'));
+ let fail,success;
+ const proxy=new Proxy({}, {get(_t,p){if(p==='withSuccessHandler')return f=>{success=f;return proxy;};if(p==='withFailureHandler')return f=>{fail=f;return proxy;};return (...args)=>{calls.push({method:p,args});try{success(h.ctx[p](...args));}catch(e){fail(e);}};}});
+ const google={script:{run:proxy}};
+ for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:{getElementById:id=>nodes.get(id),createElement:make},google,window:{google,addEventListener(){}}});
+ const n=h.mutations.length;
+ await el('Load').click();assert.equal(el('Rows').children.length,2);assert.equal(el('Slots').children.length,2);assert.match(el('Slots').children[0].textContent,/SLOT_E1/);
+ el('Slots').children[0].children[8].children[0].click();el('DraftCap').value='2';await el('Preview').click();assert.match(el('DraftResult').textContent,/預檢通過（未儲存）/);
+ el('Query').value=z.applicantId;el('Query').change();assert.equal(el('Rows').children.length,0);await el('Load').click();assert.equal(el('Rows').children.length,1);
+ h.props.delete('STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED');await el('Load').click();assert.equal(el('Rows').children.length,0);assert.equal(el('Slots').children.length,0);assert.equal(el('Preview').disabled,true);
+ assert.ok(calls.every(c=>['study1OwnerE1Workspace','study1OwnerE1SlotChangePreview'].includes(c.method)));assert.equal(h.mutations.length,n);
 });
 test('P0-B recruitment source is the original Index; no write or public read of owner RPC',()=>{
  const h=wsHarness(),n=h.mutations.length;

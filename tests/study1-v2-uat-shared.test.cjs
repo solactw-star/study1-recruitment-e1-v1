@@ -657,7 +657,7 @@ test('same official site source routes preserve formal closure and require real 
  for(const text of [html,admin])for(const m of text.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);
  let active='',effective='',config=0,requests=0,maintenance=[],opened=[];
  const c=vm.createContext({Session:{getActiveUser:()=>({getEmail:()=>active}),getEffectiveUser:()=>({getEmail:()=>effective})},
-  HtmlService:{createTemplateFromFile(name){opened.push(name);return {evaluate(){return {name,mode:this.flowMode,siteOwner:this.siteOwner,setTitle(){return this;},addMetaTag(){return this;}};}}}},
+  HtmlService:{createTemplateFromFile(name){opened.push(name);return {evaluate(){return {name,mode:this.flowMode,siteOwner:this.siteOwner,siteFormalWorkspace:this.siteFormalWorkspace,setTitle(){return this;},addMetaTag(){return this;}};}}}},
   Utilities:{getUuid:()=> 'mock-only-uuid',DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
  for(const n of ['AdminSandbox','Study1PdfStampCore','Study1UatGasServices','Website'])vm.runInContext(get(n),c);
  const owner=vm.runInContext('STUDY1_ADMIN_OWNER_',c);
@@ -700,9 +700,14 @@ test('same official site source routes preserve formal closure and require real 
  }
  assert.equal(config,0);assert.equal(requests,0);assert.equal(maintenance.length,0);assert.ok(!opened.includes('AdminConsole'));
  active=owner;effective=owner;const page=c.doGet({parameter:{view:'apply',test:'1'}});assert.equal(page.mode,'GAS_UAT');assert.equal(page.name,'Study1Visitor');
- assert.equal(c.doGet({parameter:{view:'admin'}}).name,'AdminConsole');
+ assert.equal(c.doGet({parameter:{view:'admin'}}).siteFormalWorkspace,false);
  c.PropertiesService={getScriptProperties:()=>({getProperty:()=>null})};
  assert.throws(()=>c.doGet({parameter:{view:'admin',workspace:'formal'}}),/FORMAL_WORKSPACE_READ_NOT_APPROVED/);
+ const beforeFormal=config;
+ c.PropertiesService={getScriptProperties:()=>({getProperty:k=>k==='STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED'?'true':null})};
+ let formalChecks=0;c.study1OwnerE1WorkspaceGate_=()=>{formalChecks++;};
+ assert.equal(c.doGet({parameter:{view:'admin',workspace:'formal'}}).siteFormalWorkspace,true);assert.equal(formalChecks,1);assert.equal(config,beforeFormal);
+ delete c.study1OwnerE1WorkspaceGate_;
  assert.equal((await c.study1E1SyntheticUat({...testRequest,storeId:'OTHER'})).ok,false);
  assert.equal((await c.study1E1SyntheticUat({...testRequest,operation:'publish'})).ok,false);
  assert.equal(requests,0);
