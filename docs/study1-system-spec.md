@@ -1629,6 +1629,12 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 
 **保守遷移**：只有 OWNER 經實際原 GAS 安全驗證後，將 Script Properties `STUDY1_ECONSENT_MIGRATION_V2_APPROVED=true` 明確設為 true，才允許**下一次原有合格寫入時**將舊索引全部複製進 V2；本次 GitHub 提交不設定旗標、不執行正式資料遷移。尚未啟用時原 V1 全部保留，舊 12 筆／7,500 字元檢查繼續生效。一旦存在有效 V2 指標，不因移除旗標而降版；舊 V1 原始內容原封保留且每輪校驗 SHA，任何外部競寫都會被察覺並停止。若指標可能已提交但 GAS 回應不明，保留所有可能被引用的私人 PDF/事件檔，不自動清除或盲目重送。這是同一正式同意索引的 V2 儲存後端，不是另一份可獨立發放同意或招募資料的主檔。
 
+**ConsentRecords 單向對帳候選契約（2026-11-18，工程／合成限定）**：原 personal 工作簿的 ConsentRecords 九欄結構見本規格 1103 行所列既有表頭（不新增欄、表或第二主檔）。現行 V1/V2 同一電子同意索引管理同意 ID、綁定、狀態及證據引用，私人原 PDF/事件管理原始證據；Reservations/Notifications 各管自己的狀態。現行程式未將 ConsentRecords 接入建立／簽署／撤回、B04/B08/B10，尚無核准的正式同步或 status 語意契約。以索引及獨立核驗證據為比較基準，ConsentRecords 僅為待核對的來源；候選不讀寫真表、不由表逆推同意、不回填、不修復、不遷移，不影響原營運流程。
+
+- 候選只對 FORMAL_E1/E1 具有有效 binding HMAC、研究者預簽及已核驗完成證據的 CONFIRMED/WITHDRAWN 形成九欄比較值：id、binding.applicantId、binding.reservationId、documentVersion、documentSha、signedPdf.id、signedPdf.sha、原 SIGNATURE data.serverSignedAt（UTC ISO 毫秒；Sheet Date 只按確切 UTC instant 正規化）、原同意 state。status 精確 CONFIRMED/WITHDRAWN 僅為候選比較字彙，不宣稱舊表採此語意，不以預約狀態或通知替代。ISSUED/EXPLAINED/SIGNED 不要求完成列，若有列標記待查；E2/legacy 只標 scope，無對應索引的表列不得自動判為 E1 或刪除。
+- 最小內部比較函式 study1ConsentRecordsReconcile_ 只接受可信伺服器未來提供的兩次獨立同鎖快照（registry、九欄 sheet、同 revision 處理後的最小 evidence metadata）；比對完整內容防止同 revision 漂移，拒絕錯 schema、稀疏列、超上限（registry 3000、sheet 10000、evidence 3000）、重複/歧義 ID、錯 binding/預約重複、未核證據、孤立、缺列、欄位錯配。比較僅回傳 aggregate counts、field mismatch counts、revision，無 applicant/reservation/consent/Drive ID、SHA、token、簽署時間或 PDF 內容。證據 metadata 必須由獨立驗證器確認原 PDF/簽署/確認/撤回及來源 SHA，不可由 ConsentRecords 或客戶端自行提供。候選匹配不代表原始證據、預約、通知、正式一致性或 REC 已完成。
+- 本輪沒有任何 live adapter、RPC、UI 或 mutation gate 接線；未來另獲正式權責與讀取授權後，仍須以原 personal workbook ID、exact 九欄、公式檢查、ACL/來源、雙讀、同一 ScriptLock、獨立 PDF/事件證據與 V2 pointer/歷史防回放安全查核完整建立唯讀 adapter。現行比較函式的輸出永遠 formalSyncApproved=false、formalReady=false、sourceReadbackVerified=false、written=false；同鎖雙讀非外部 Sheets ACID/ABA 保證。正式資料處置與保存政策依 PI/REC 核准；未核准前禁止自動修補或開啟正式資料收件。
+
 **驗證與使用限制**：新增針對 V1 相容、>12 筆擴充、鎖、CAS、HMAC、SHA、ACL、來源父目錄、資料未遺失、寫前失敗及指標提交後不確定狀態的合成負測；保留全部既有 CI。即便新版 HEAD CI 通過，`REGISTRY_V2_LIVE_MIGRATED=false`、`GAS_DEPLOYED=false`、`UI_VERIFIED=false`，直到原 GAS 同 ID 備份／版本／遠端 SHA/manifest/ACL、OWNER 受控實測與正式指標的獨立回讀完成。真人收件繼續 `OPEN=false`、`CONSENT_READY=false`，E2 不開放；依 §70-S.31 的風險分級不得把程式與 CI 成功冒充營運就緒。
 
 

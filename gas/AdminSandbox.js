@@ -1314,3 +1314,154 @@ function study1EConsentSignedPdfCopy(token){if(typeof study1V2PublicRpcDeny_==='
   participantSignedPdfSha256:x.signedPdf.sha,dualSigned:true,
   base64:Utilities.base64Encode(bytes),mime:'application/pdf',bytes:bytes.length};
 }
+
+
+/** Candidate ONLY: reconcile the original nine-column ConsentRecords tab
+ * AGAINST the authoritative consent registry and independently verified
+ * evidence metadata. No RPC, live sheet reader, writer, migration, PDF
+ * download, repair, booking/notice decision or authority to use real data.
+ * A future authorized server adapter must obtain two independent snapshots
+ * under the same ScriptLock, enforce original workbook/headers/formula/ACL
+ * and verify the source PDF/events. Never accept these snapshots from a client.
+ * Comparisons return only aggregate counts; values never enter error messages.
+ */
+const STUDY1_CONSENT_RECORDS_HEADERS_=Object.freeze([
+ 'consent_id','applicant_id','reservation_id','pdf_template_version',
+ 'pre_signed_template_sha256','signed_pdf_file_id','signed_pdf_sha256',
+ 'signed_at_utc','status'
+]);
+function study1ConsentRecordsSnapshotShape_(x){
+ const fields=STUDY1_CONSENT_RECORDS_HEADERS_;
+ if(!x||!x.registry||!x.sheet||!x.proofs||
+    !Array.isArray(x.sheet.headers)||x.sheet.headers.length!==fields.length||
+    fields.some((h,i)=>x.sheet.headers[i]!==h)||
+    !Array.isArray(x.sheet.rows)||x.sheet.rows.length>10000||
+    !Array.isArray(x.proofs.records)||x.proofs.records.length>3000||
+    x.proofs.revision!==x.registry.revision)
+  throw Error('CONSENT_RECORDS_SNAPSHOT_INVALID');
+ const r=x.registry;
+ if(r.revision===0&&r.schemaVersion===1&&Array.isArray(r.records)&&r.records.length===0){}
+ else study1EConsentValidateRegistry_(r,STUDY1_ECONSENT_MAX_RECORDS_);
+ for(let i=0;i<x.sheet.rows.length;i++){
+  const row=x.sheet.rows[i];
+  if(!Array.isArray(row)||row.length!==fields.length)
+   throw Error('CONSENT_RECORDS_ROW_SHAPE_INVALID');
+  for(let j=0;j<fields.length;j++){
+   if(!Object.prototype.hasOwnProperty.call(row,j)||
+      !(typeof row[j]==='string'||(j===7&&
+       Object.prototype.toString.call(row[j])==='[object Date]'&&
+       Number.isFinite(row[j].getTime()))))
+    throw Error('CONSENT_RECORDS_ROW_SHAPE_INVALID');
+  }
+ }
+}
+function study1ConsentRecordsReconcile_(first,second,lock){
+ if(!lock||typeof lock.hasLock!=='function'||lock.hasLock()!==true)
+  throw Error('CONSENT_RECORDS_LOCK_REQUIRED');
+ study1ConsentRecordsSnapshotShape_(first);
+ study1ConsentRecordsSnapshotShape_(second);
+ if(JSON.stringify(first.registry)!==JSON.stringify(second.registry)||
+    JSON.stringify(first.proofs)!==JSON.stringify(second.proofs)||
+    !bookingReadOnlySameTab_(first.sheet,second.sheet))
+  throw Error('CONSENT_RECORDS_SOURCE_CHANGED');
+ const r=first.registry,rows=first.sheet.rows,proofs=first.proofs.records;
+ const idValid=v=>typeof v==='string'&&/^[-a-f0-9]{30,40}$/i.test(v);
+ const shaValid=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+ const refValid=v=>v&&typeof v.id==='string'&&/^[A-Za-z0-9_-]{15,100}$/.test(v.id)&&shaValid(v.sha);
+ const utc=v=>{
+  try{study1BindingUtc_(v);return v;}catch(_){return null;}
+ };
+ const rowUtc=v=>utc(Object.prototype.toString.call(v)==='[object Date]'?v.toISOString():v);
+ const registryMap=new Map(r.records.map(x=>[x.id,x]));
+ if(new Set(r.records.map(x=>x.id.toLowerCase())).size!==r.records.length)
+  throw Error('CONSENT_RECORDS_REGISTRY_ID_AMBIGUOUS');
+ const formal=r.records.filter(x=>x.channel==='FORMAL_E1'&&x.experiment==='E1');
+ const completed=x=>['CONFIRMED','WITHDRAWN'].includes(x.state);
+ const formalIds=new Set(formal.map(x=>x.id)),completeIds=new Set(formal.filter(completed).map(x=>x.id));
+ const stats={registryRecords:r.records.length,formalE1Records:formal.length,
+  completedCandidates:completeIds.size,notCompleted:formal.length-completeIds.size,
+  scopeConflicts:r.records.filter(x=>x.channel==='FORMAL_E1'&&x.experiment!=='E1').length,
+  sheetRows:rows.length,emptyRows:0,invalidIdRows:0,duplicateSheetIdGroups:0,
+  unclassifiedRows:0,outOfScopeRows:0,preCompletionRows:0,
+  missingCompletedRows:0,ambiguousCompletedRows:0,invalidBindingRecords:0,
+  ambiguousReservationRecords:0,unverifiedEvidenceRecords:0,
+  unexpectedProofs:0,duplicateProofGroups:0,matchedCompletedRows:0,mismatchedCompletedRows:0};
+ const mismatches={applicant_id:0,reservation_id:0,pdf_template_version:0,
+  pre_signed_template_sha256:0,signed_pdf_file_id:0,signed_pdf_sha256:0,signed_at_utc:0,status:0};
+ const sheetMap=new Map(),foldedSheet=new Map(),proofMap=new Map(),reservationCounts=new Map();
+ for(const row of rows){
+  if(row.every(v=>v==='')){stats.emptyRows++;continue;}
+  if(!idValid(row[0])){stats.invalidIdRows++;continue;}
+  const group=sheetMap.get(row[0])||[];group.push(row);sheetMap.set(row[0],group);
+  const folded=row[0].toLowerCase();foldedSheet.set(folded,(foldedSheet.get(folded)||0)+1);
+  if(!registryMap.has(row[0]))stats.unclassifiedRows++;
+  else if(!formalIds.has(row[0]))stats.outOfScopeRows++;
+  else if(!completeIds.has(row[0]))stats.preCompletionRows++;
+ }
+ stats.duplicateSheetIdGroups=[...foldedSheet.values()].filter(n=>n>1).length;
+ for(const proof of proofs){
+  if(!proof||!idValid(proof.consentId)||!completeIds.has(proof.consentId)){
+   stats.unexpectedProofs++;continue;
+  }
+  const group=proofMap.get(proof.consentId)||[];group.push(proof);proofMap.set(proof.consentId,group);
+ }
+ stats.duplicateProofGroups=[...proofMap.values()].filter(a=>a.length>1).length;
+ for(const x of formal){
+  const b=x.binding;
+  if(b&&typeof b.reservationId==='string')
+   reservationCounts.set(b.reservationId,(reservationCounts.get(b.reservationId)||0)+1);
+ }
+ for(const x of formal){
+  const b=x.binding;let bound=false;
+  try{
+   if(b){
+    study1BindingId_(b.applicantId);study1BindingId_(b.reservationId);study1BindingId_(b.slotId);
+    bound=x.researcherPresigned===true&&b.schemaVersion===1&&b.experiment==='E1'&&
+     shaValid(x.documentSha)&&typeof x.documentVersion==='string'&&
+     /^[A-Za-z0-9][A-Za-z0-9._-]{0,32}$/.test(x.documentVersion)&&
+     b.documentSha===x.documentSha&&b.documentVersion===x.documentVersion&&
+     shaValid(b.digest)&&study1BindingDigest_(b)===b.digest;
+   }
+  }catch(_){bound=false;}
+  if(!bound)stats.invalidBindingRecords++;
+  const ambiguous=!!(b&&reservationCounts.get(b.reservationId)>1);
+  if(ambiguous)stats.ambiguousReservationRecords++;
+  if(!completed(x))continue;
+  const group=sheetMap.get(x.id)||[],proofGroup=proofMap.get(x.id)||[];
+  if(!group.length)stats.missingCompletedRows++;
+  if((foldedSheet.get(x.id.toLowerCase())||0)>1)stats.ambiguousCompletedRows++;
+  const v=proofGroup.length===1?proofGroup[0]:null;
+  // Metadata must come from a trusted, independently verified server source.
+  // A match here cannot itself establish that a PDF/signature was verified.
+  const verified=!!(bound&&v&&v.verified===true&&
+   Object.keys(v).sort().join(',')==='bindingDigest,confirmationSha,consentId,documentSha,signatureSha,signedAtUtc,signedPdfSha,verified,withdrawalSha'&&
+   v.bindingDigest===b.digest&&v.documentSha===x.documentSha&&
+   refValid(x.signature)&&refValid(x.confirmation)&&refValid(x.signedPdf)&&refValid(x.participantSignedPdf)&&
+   x.participantSignedPdf.id===x.signedPdf.id&&x.participantSignedPdf.sha===x.signedPdf.sha&&
+   v.signatureSha===x.signature.sha&&v.confirmationSha===x.confirmation.sha&&v.signedPdfSha===x.signedPdf.sha&&
+   utc(v.signedAtUtc)&&
+   (x.state==='WITHDRAWN'?refValid(x.withdrawal)&&v.withdrawalSha===x.withdrawal.sha:
+    !x.withdrawal&&v.withdrawalSha===null));
+  if(!verified)stats.unverifiedEvidenceRecords++;
+  if(!bound||ambiguous||!verified||group.length!==1||foldedSheet.get(x.id.toLowerCase())!==1)
+   continue;
+  const row=group[0],expected=[x.id,b.applicantId,b.reservationId,x.documentVersion,x.documentSha,
+   x.signedPdf.id,x.signedPdf.sha,v.signedAtUtc,x.state];
+  let equal=true;
+  for(let j=1;j<expected.length;j++){
+   const actual=j===7?rowUtc(row[j]):row[j];
+   if(actual!==expected[j]){mismatches[STUDY1_CONSENT_RECORDS_HEADERS_[j]]++;equal=false;}
+  }
+  if(equal)stats.matchedCompletedRows++;
+  else stats.mismatchedCompletedRows++;
+ }
+ const review=['scopeConflicts','invalidIdRows','duplicateSheetIdGroups','unclassifiedRows',
+  'preCompletionRows','missingCompletedRows','ambiguousCompletedRows','invalidBindingRecords',
+  'ambiguousReservationRecords','unverifiedEvidenceRecords','unexpectedProofs',
+  'duplicateProofGroups','mismatchedCompletedRows'].some(k=>stats[k]>0);
+ if(lock.hasLock()!==true)throw Error('CONSENT_RECORDS_LOCK_LOST');
+ return {mode:'CANDIDATE_READ_ONLY',scope:'FORMAL_E1',registryRevision:r.revision,
+  result:review?'REVIEW_REQUIRED':completeIds.size?'CANDIDATE_FIELDS_MATCH':'NO_COMPLETED_CANDIDATES',
+  formalSyncApproved:false,formalReady:false,sourceReadbackVerified:false,
+  written:false,counts:stats,fieldMismatches:mismatches};
+}

@@ -527,3 +527,175 @@ for(const kind of ['upload','select','publish']){
   assert.equal(b.f.files.size,count);assert.equal(b.f.values.get(b.key),expected);
  });
 }
+
+
+// The original registry reader + binding HMAC and original typed tab
+// comparison run in this synthetic VM. No caller can open real Sheets/Drive.
+function reconciliationFixture(){
+ const f=build();
+ const hmac=f.scope.study1BindingHmac_;
+ for(const name of ['Study1EConsentBinding.js','BookingReadOnlySheet.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../gas',name),'utf8'),f.scope);
+ f.scope.study1BindingHmac_=hmac;
+ const sentinels={sheet:0,drive:0,property:0};
+ const header=['consent_id','applicant_id','reservation_id','pdf_template_version','pre_signed_template_sha256',
+  'signed_pdf_file_id','signed_pdf_sha256','signed_at_utc','status'];
+ const at='2026-11-18T02:00:00.000Z';
+ function make(i,state='CONFIRMED'){
+  const suffix=String(i).padStart(12,'0'),e=f.entry(i);
+  const b={schemaVersion:1,applicantId:'APP_PRIVATE_'+suffix,reservationId:'RSV_PRIVATE_'+suffix,
+   slotId:'SLOT_PRIVATE_1234',challengeId:'CHL_PRIVATE_'+suffix,screeningId:'SCR_PRIVATE_'+suffix,
+   experiment:'E1',documentSha:e.documentSha,documentVersion:e.documentVersion,
+   identityEvidenceSha:sha('identity'+i),eligibilityEvidenceSha:sha('eligible'+i),priorE1EvidenceSha:null,
+   verifiedAtUtc:'2026-11-18T01:50:00.000Z',otpUsedAtUtc:'2026-11-18T01:50:00.000Z',
+   holdUntilUtc:'2026-11-18T02:10:00.000Z',digest:''};
+  b.digest=f.scope.study1BindingDigest_(b);
+  const ref=(kind)=>({id:'PRIVATE_'+kind+'_'+suffix,sha:sha(kind+i)});
+  const x={...e,channel:'FORMAL_E1',researcherPresigned:true,binding:b,state,
+   signature:ref('SIG'),confirmation:ref('CONF'),signedPdf:ref('PDF'),participantSignedPdf:ref('PDF'),
+   withdrawal:state==='WITHDRAWN'?ref('WITHDRAW'):null};
+  if(!['CONFIRMED','WITHDRAWN'].includes(state)){
+   x.signature=null;x.confirmation=null;delete x.signedPdf;delete x.participantSignedPdf;
+  }
+  const row=[x.id,b.applicantId,b.reservationId,x.documentVersion,x.documentSha,
+   x.signedPdf?.id||'',x.signedPdf?.sha||'',at,state];
+  const proof={consentId:x.id,bindingDigest:b.digest,documentSha:x.documentSha,
+   signatureSha:x.signature?.sha,confirmationSha:x.confirmation?.sha,signedPdfSha:x.signedPdf?.sha,
+   signedAtUtc:at,verified:true,withdrawalSha:x.withdrawal?.sha||null};
+  return {x,row,proof};
+ }
+ const snap=(entries,rows,proofs,revision=2)=>({registry:{schemaVersion:1,revision,records:entries},
+  sheet:{headers:[...header],rows},proofs:{revision,records:proofs}});
+ const clone=x=>structuredClone(x);
+ const lock={hasLock:()=>true};
+ function check(x,y=clone(x),held=lock){
+  // Any new direct service access is a test failure. HMAC uses only the
+  // existing isolated synthetic key and the production digest function.
+  f.scope.SpreadsheetApp={openById:()=>{sentinels.sheet++;throw Error('FORBIDDEN_SHEET_IO');}};
+  const prev=f.scope.DriveApp,props=f.scope.PropertiesService;
+  f.scope.DriveApp=new Proxy({},{get(){sentinels.drive++;throw Error('FORBIDDEN_DRIVE_IO');}});
+  f.scope.PropertiesService={getScriptProperties(){sentinels.property++;throw Error('FORBIDDEN_PROPERTY_IO');}};
+  try{return f.scope.study1ConsentRecordsReconcile_(x,y,held);}
+  finally{f.scope.DriveApp=prev;f.scope.PropertiesService=props;
+   assert.deepEqual(sentinels,{sheet:0,drive:0,property:0});}
+ }
+ return {f,make,snap,clone,check,lock,sentinels,header};
+}
+test('RECONCILE actual V2 registry readback, completed/withdrawn metadata and exact nine columns are candidate-only',()=>{
+ const h=reconciliationFixture(),a=h.make(1),b=h.make(2,'WITHDRAWN'),pending=h.make(3,'ISSUED');
+ h.f.enable();
+ const next={schemaVersion:1,revision:2,records:[a.x,b.x,pending.x]};
+ h.f.scope.study1EConsentWrite_(h.f.legacy,next);
+ const actual=h.f.scope.study1EConsentRegistry_();
+ const snapshot=h.snap(actual.records,[a.row,b.row],[a.proof,b.proof],actual.revision);
+ const before=JSON.stringify(snapshot),pointer=h.f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ const result=h.check(snapshot);
+ assert.equal(result.result,'CANDIDATE_FIELDS_MATCH');assert.equal(result.counts.matchedCompletedRows,2);
+ assert.equal(result.counts.notCompleted,1);assert.equal(result.counts.missingCompletedRows,0);
+ assert.equal(result.formalSyncApproved,false);assert.equal(result.formalReady,false);assert.equal(result.sourceReadbackVerified,false);
+ assert.equal(result.written,false);assert.equal(JSON.stringify(snapshot),before);
+ assert.equal(h.f.values.get('STUDY1_ECONSENT_POINTER_V2'),pointer);
+ assert.equal(h.f.files.size,1);assert.equal(h.f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),h.f.legacyBytes);
+ assert.doesNotMatch(JSON.stringify(result),/APP_PRIVATE_|RSV_PRIVATE_|PRIVATE_PDF_|aaaaaaaa|signedAtUtc|tokenHash|base64/);
+});
+test('RECONCILE every projected field mismatch counted independently, no row contents exposed',()=>{
+ const h=reconciliationFixture(),a=h.make(1);
+ for(let j=1;j<9;j++){
+  const row=a.row.slice();row[j]=j===7?'2026-11-18T02:01:00.000Z':'WRONG_PRIVATE_VALUE';
+  const result=h.check(h.snap([a.x],[row],[a.proof]));
+  assert.equal(result.result,'REVIEW_REQUIRED');assert.equal(result.counts.mismatchedCompletedRows,1);
+  assert.equal(result.fieldMismatches[h.header[j]],1);
+  assert.equal(Object.values(result.fieldMismatches).reduce((s,n)=>s+n,0),1);
+  assert.doesNotMatch(JSON.stringify(result),/WRONG_PRIVATE_VALUE|APP_PRIVATE_|RSV_PRIVATE_|PRIVATE_PDF_/);
+ }
+});
+test('RECONCILE orphan, pending, known legacy/E2, invalid ID and duplicate case variants stay separate',()=>{
+ const h=reconciliationFixture(),a=h.make(1),pending=h.make(2,'ISSUED'),legacy=h.make(3),other=h.make(4);
+ delete legacy.x.channel;other.x.experiment='E2';other.x.channel='OTHER';
+ const orphan=h.make(5).row;
+ const bad=a.row.slice();bad[0]='NOT_AN_ID';
+ const variant=a.row.slice();variant[0]=a.row[0].toUpperCase();
+ const result=h.check(h.snap([a.x,pending.x,legacy.x,other.x],[a.row,variant,pending.row,legacy.row,other.row,orphan,bad,Array(9).fill('')],[a.proof]));
+ assert.equal(result.result,'REVIEW_REQUIRED');assert.equal(result.counts.duplicateSheetIdGroups,1);
+ assert.equal(result.counts.ambiguousCompletedRows,1);assert.equal(result.counts.matchedCompletedRows,0);
+ assert.equal(result.counts.unclassifiedRows,2);assert.equal(result.counts.outOfScopeRows,2);
+ assert.equal(result.counts.preCompletionRows,1);assert.equal(result.counts.invalidIdRows,1);
+ assert.equal(result.counts.emptyRows,1);assert.equal(result.counts.missingCompletedRows,0);
+});
+test('RECONCILE missing sheet row is review only; sheet-only record cannot create consent',()=>{
+ const h=reconciliationFixture(),a=h.make(1),other=h.make(2);
+ const result=h.check(h.snap([a.x],[other.row],[a.proof]));
+ assert.equal(result.counts.missingCompletedRows,1);assert.equal(result.counts.unclassifiedRows,1);
+ assert.equal(result.result,'REVIEW_REQUIRED');assert.equal(result.written,false);
+ assert.equal(h.f.files.size,0);
+});
+test('RECONCILE forged binding, wrong reservation and duplicate reservation references never match',()=>{
+ const h=reconciliationFixture(),a=h.make(1),b=h.make(2);
+ const changed=h.clone(a.x);changed.binding.applicantId='APP_WRONG_PRIVATE';
+ let result=h.check(h.snap([changed],[a.row],[a.proof]));
+ assert.equal(result.counts.invalidBindingRecords,1);assert.equal(result.counts.matchedCompletedRows,0);
+ b.x.binding.reservationId=a.x.binding.reservationId;
+ b.x.binding.digest=h.f.scope.study1BindingDigest_(b.x.binding);
+ b.row[2]=a.row[2];b.proof.bindingDigest=b.x.binding.digest;
+ result=h.check(h.snap([a.x,b.x],[a.row,b.row],[a.proof,b.proof]));
+ assert.equal(result.counts.ambiguousReservationRecords,2);assert.equal(result.counts.matchedCompletedRows,0);
+});
+test('RECONCILE missing, duplicate, forged or wrong-revision evidence never proves a completed record',()=>{
+ const h=reconciliationFixture(),a=h.make(1,'WITHDRAWN');
+ for(const proofs of [[],[a.proof,a.proof],[{...a.proof,verified:false}],
+  [{...a.proof,withdrawalSha:null}],[{...a.proof,signedPdfSha:'0'.repeat(64)}],
+  [{...a.proof,bindingDigest:'0'.repeat(64)}],[{...a.proof,signedAtUtc:'2026-02-30T02:00:00.000Z'}],
+  [{...a.proof,rawSignature:'DO_NOT_RETURN'}]]){
+  const result=h.check(h.snap([a.x],[a.row],proofs));
+  assert.equal(result.counts.unverifiedEvidenceRecords,1);assert.equal(result.counts.matchedCompletedRows,0);
+  assert.equal(result.result,'REVIEW_REQUIRED');assert.doesNotMatch(JSON.stringify(result),/DO_NOT_RETURN/);
+ }
+ const s=h.snap([a.x],[a.row],[a.proof]);s.proofs.revision--;
+ assert.throws(()=>h.check(s),/CONSENT_RECORDS_SNAPSHOT_INVALID/);
+});
+test('RECONCILE unsigned and empty are not consent completion; typed UTC Date accepted, local date rejected',()=>{
+ const h=reconciliationFixture(),a=h.make(1),pending=h.make(2,'ISSUED');
+ let result=h.check(h.snap([pending.x],[],[]));
+ assert.equal(result.result,'NO_COMPLETED_CANDIDATES');assert.equal(result.formalReady,false);
+ result=h.check(h.snap([],[],[],0));
+ assert.equal(result.result,'NO_COMPLETED_CANDIDATES');
+ const row=a.row.slice();row[7]=new Date(a.row[7]);
+ assert.equal(h.check(h.snap([a.x],[row],[a.proof])).counts.matchedCompletedRows,1);
+ row[7]='2026/11/18 10:00';
+ assert.equal(h.check(h.snap([a.x],[row],[a.proof])).fieldMismatches.signed_at_utc,1);
+});
+test('RECONCILE schema, row shape, duplicate registry IDs, evidence provenance and shared lock fail closed',()=>{
+ const h=reconciliationFixture(),a=h.make(1);
+ const valid=h.snap([a.x],[a.row],[a.proof]);
+ const bad=h.clone(valid);bad.sheet.headers[1]='wrong';assert.throws(()=>h.check(bad),/SNAPSHOT_INVALID/);
+ const sparse=h.clone(valid);delete sparse.sheet.rows[0][5];assert.throws(()=>h.check(sparse),/ROW_SHAPE_INVALID/);
+ const date=h.clone(valid);date.sheet.rows[0][7]=new Date(NaN);assert.throws(()=>h.check(date),/ROW_SHAPE_INVALID/);
+ const duplicate=h.snap([a.x,a.x],[a.row],[a.proof]);assert.throws(()=>h.check(duplicate),/索引不一致/);
+ const variant=h.clone(a.x);variant.id=a.x.id.toUpperCase();
+ assert.throws(()=>h.check(h.snap([a.x,variant],[a.row],[a.proof])),/REGISTRY_ID_AMBIGUOUS/);
+ assert.throws(()=>h.check(valid,h.clone(valid),{hasLock:()=>false}),/LOCK_REQUIRED/);
+ let calls=0;assert.throws(()=>h.check(valid,h.clone(valid),{hasLock:()=>++calls===1}),/LOCK_LOST/);
+});
+test('RECONCILE independent snapshots reject same-revision registry, sheet, evidence and typed date drift',()=>{
+ const h=reconciliationFixture(),a=h.make(1),x=h.snap([a.x],[a.row],[a.proof]);
+ for(const mutate of [s=>{s.registry.records[0].documentVersion='OTHER';},
+  s=>{s.sheet.rows[0][8]='WITHDRAWN';},s=>{s.proofs.records[0].signedAtUtc='2026-11-18T02:01:00.000Z';},
+  s=>{s.sheet.rows[0][7]=new Date(a.row[7]);}]){
+  const y=h.clone(x);mutate(y);assert.throws(()=>h.check(x,y),/SOURCE_CHANGED/);
+ }
+});
+test('RECONCILE 3000 synthetic completed records and 10000 row guard, tail mismatch not hidden',()=>{
+ const h=reconciliationFixture(),data=Array.from({length:3000},(_,i)=>h.make(i+1));
+ const s=h.snap(data.map(x=>x.x),data.map(x=>x.row),data.map(x=>x.proof));
+ const first=h.check(s);assert.equal(first.counts.matchedCompletedRows,3000);
+ s.sheet.rows[2999][6]='0'.repeat(64);
+ const last=h.check(s);assert.equal(last.counts.matchedCompletedRows,2999);assert.equal(last.fieldMismatches.signed_pdf_sha256,1);
+ s.sheet.rows=Array.from({length:10001},()=>Array(9).fill(''));
+ assert.throws(()=>h.check(s),/SNAPSHOT_INVALID/);
+});
+test('RECONCILE candidate is private internal helper with no RPC or automatic call site',()=>{
+ const matches=source.match(/study1ConsentRecordsReconcile_\s*\(/g)||[];
+ assert.equal(matches.length,1);
+ assert.match(source,/function study1ConsentRecordsReconcile_\(/);
+ assert.doesNotMatch(source,/function study1ConsentRecordsReconcile\(/);
+});
