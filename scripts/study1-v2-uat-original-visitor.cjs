@@ -527,7 +527,7 @@ function sameSiteDocumentController(){
   if(select.disabled||busy||!catalog||!verified)return;
   const d=verified,old=catalog;busy=true;catalog=null;clearPreview();controls();
   try{
-   const r=await rpc({operation:'documentSelect',version:d.version,activeSha:old.activeSha,expectedSha:old.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'});
+   const r=await rpc({operation:'documentSelect',version:d.version,targetSha:d.sha,activeSha:old.activeSha,expectedSha:old.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'});
    if(!r||r.formal!==false||r.scope!=='SYNTHETIC_CASES_ONLY'||r.activeSha!==d.sha||r.version!==d.version||r.remainingCases!==0)throw Error('UAT_DOCUMENT_SELECTION_UNKNOWN');
    await load();
    if(catalog.activeSha!==d.sha)throw Error('UAT_DOCUMENT_SELECTION_UNKNOWN');

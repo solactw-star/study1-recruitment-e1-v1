@@ -277,7 +277,7 @@ async function study1UatDocumentRequest_(request){
  try{
   study1AdminOwnerRequired_();
   const op=request.operation,keys=Object.keys(request).sort().join(',');
-  if(Array.isArray(request)||keys!==({documentCatalog:'operation',documentPreview:'operation,version',documentSelect:'activeSha,confirmation,expectedSha,operation,version'}[op]))return deny('UAT_REQUEST_REJECTED');
+  if(Array.isArray(request)||keys!==({documentCatalog:'operation',documentPreview:'operation,version',documentSelect:'activeSha,confirmation,expectedSha,operation,targetSha,version'}[op]))return deny('UAT_REQUEST_REJECTED');
   const snap=study1UatTrustedConfigSnapshot_(),{props,raw,approved}=snap;
   const key='STUDY1_E1_SYNTHETIC_UAT_V1',docs=await study1UatDocumentCatalog_();
   const current=docs.find(d=>d.hash===approved.sourceSha);
@@ -297,7 +297,7 @@ async function study1UatDocumentRequest_(request){
    study1UatStoreTransaction_(services,approved,null,{mode:'preview'});
    return {ok:true,value:{formal:false,...entry(doc),bytes:Utilities.base64Encode(doc.bytes.map(x=>x>127?x-256:x))}};
   }
-  if(request.confirmation!=='SELECT_TEST_DOCUMENT_ONLY'||request.activeSha!==current.hash||doc.hash===current.hash||
+  if(request.confirmation!=='SELECT_TEST_DOCUMENT_ONLY'||request.activeSha!==current.hash||request.targetSha!==doc.hash||doc.hash===current.hash||
    typeof request.expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedSha))return deny('UAT_REQUEST_REJECTED');
   const next=JSON.stringify({...JSON.parse(raw),sourceSha:doc.hash});
   services.selectDocument=sha=>{

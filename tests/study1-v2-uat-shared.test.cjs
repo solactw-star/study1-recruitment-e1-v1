@@ -401,14 +401,17 @@ test('private GAS operation contract completes booking and real five-page PDF th
  const cat=(await req({operation:'documentCatalog'})).value;assert.equal(cat.activeSha,original.hash);assert.equal(cat.cases,0);assert.equal(cat.documents.length,2);
  const preview=(await req({operation:'documentPreview',version:'UAT-SYNTHETIC-2'})).value;
  assert.equal(preview.sha,versions[1].hash);assert.equal(hash(Buffer.from(preview.bytes,'base64')),preview.sha);
- const selection={operation:'documentSelect',version:preview.version,activeSha:cat.activeSha,expectedSha:cat.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'};
- assert.equal((await req({...selection,storeId:id})).ok,false);assert.equal((await req({...selection,expectedSha:'0'.repeat(64)})).ok,false);assert.equal(propertyWrites,0);
- const beforeSelect=writes;const selected=await req(selection);assert.equal(selected.ok,true);assert.equal(selected.value.activeSha,preview.sha);assert.equal(propertyWrites,1);assert.equal(writes,beforeSelect);
+ const selection={operation:'documentSelect',version:preview.version,targetSha:preview.sha,activeSha:cat.activeSha,expectedSha:cat.snapshotSha,confirmation:'SELECT_TEST_DOCUMENT_ONLY'};
+ assert.equal((await req({...selection,storeId:id})).ok,false);assert.equal((await req({...selection,targetSha:original.hash})).ok,false);assert.equal((await req({...selection,expectedSha:'0'.repeat(64)})).ok,false);assert.equal(propertyWrites,0);
+ const beforeSelect=writes;const originalSet=props.setProperty;props.setProperty=()=>{throw Error('UNKNOWN');};
+ assert.equal((await req(selection)).error,'UAT_DOCUMENT_SELECTION_UNKNOWN');assert.equal(propertyWrites,0);assert.equal((await req({operation:'documentCatalog'})).value.activeSha,original.hash);
+ props.setProperty=originalSet;const selected=await req(selection);assert.equal(selected.ok,true);assert.equal(selected.value.activeSha,preview.sha);assert.equal(propertyWrites,1);assert.equal(writes,beforeSelect);
  assert.equal((await req(selection)).ok,false);assert.equal(propertyWrites,1);
+ const openBefore=opens;await assert.rejects(realm.study1UatGasOperation_({...config,gateSha:hash(newGate)},{gate:newGate,caseKey:'7'.repeat(64)},'start',{alias:'TEST_01',eligible:true},()=>{throw Error('UAT_DOCUMENT_CONFIG_CHANGED');}),/UAT_DOCUMENT_CONFIG_CHANGED/);assert.equal(opens,openBefore);assert.equal(writes,beforeSelect);
  const testKey='8'.repeat(64),call=(operation,payload={})=>req({operation,payload,gate:newGate,caseKey:testKey});
  assert.equal((await call('start',{alias:'TEST_01',eligible:true})).ok,true);
  const nonempty=(await req({operation:'documentCatalog'})).value;assert.equal(nonempty.cases,1);
- assert.equal((await req({...selection,version:'UAT-SYNTHETIC-1',activeSha:nonempty.activeSha,expectedSha:nonempty.snapshotSha})).error,'UAT_DOCUMENT_REQUIRES_EMPTY');assert.equal(propertyWrites,1);
+ assert.equal((await req({...selection,version:'UAT-SYNTHETIC-1',targetSha:original.hash,activeSha:nonempty.activeSha,expectedSha:nonempty.snapshotSha})).error,'UAT_DOCUMENT_REQUIRES_EMPTY');assert.equal(propertyWrites,1);
  assert.equal((await call('verify',{code:'12345678'})).ok,true);
  assert.equal((await call('hold',{slotId:'TEST_SLOT_1',requestId:'6'.repeat(32)})).ok,true);
  const chosen=(await call('document')).value;assert.equal(chosen.sha,preview.sha);assert.equal(chosen.version,preview.version);
@@ -787,6 +790,43 @@ test('same-site original copy draft and TEST workspace filters use only verified
  bad=true;await nodes.get('siteTestPreview').click();
  assert.equal(nodes.get('e1WsRows').children.length,0);assert.equal(nodes.get('e1WsSlots').children.length,0);
  assert.equal(nodes.get('siteTestClear').disabled,true);
+});
+
+test('OWNER B10 TEST PDF browser controls verify bytes and require current preview before selection',async()=>{
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[],revoked=[];
+ const realm=vm.createContext({Date,Uint8Array,Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
+ for(const p of ['gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
+ const docs=await realm.study1UatDocumentCatalog_(),entries=docs.map(d=>({version:d.layout.version,sha:d.hash,pageCount:5}));
+ const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text;},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){this[n]=f;}});
+ for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ assert.ok(!nodes.has('e1PdfFile'));assert.ok(!nodes.has('e1PdfSource'));
+ let active=entries[0].sha,cases=0,badPdf=false,unknown=false;
+ const snapshot='f'.repeat(64);
+ const reply=r=>{
+  requests.push(JSON.parse(JSON.stringify(r)));
+  if(r.operation==='documentCatalog')return {formal:false,activeSha:active,documents:entries,snapshotSha:snapshot,cases};
+  if(r.operation==='documentPreview'){const i=entries.findIndex(d=>d.version===r.version);return {formal:false,...entries[i],bytes:Buffer.from(badPdf?docs[1-i].bytes:docs[i].bytes).toString('base64')};}
+  if(r.operation==='documentSelect'){
+   assert.equal(r.confirmation,'SELECT_TEST_DOCUMENT_ONLY');assert.equal(r.expectedSha,snapshot);assert.equal(r.activeSha,active);assert.equal(r.targetSha,entries.find(d=>d.version===r.version).sha);
+   active=r.targetSha;
+   if(unknown)throw Error('result unknown');
+   return {formal:false,scope:'SYNTHETIC_CASES_ONLY',version:r.version,activeSha:active,remainingCases:0};
+  }
+  throw Error('unexpected');
+ };
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1E1SyntheticUat(r){try{s({ok:true,value:reply(r)});}catch(e){f(e);}}};}};}}}};
+ const doc={getElementById:id=>nodes.get(id),createElement:()=>make()},win={google,crypto:crypto.webcrypto,addEventListener(){}};
+ for(const m of markup.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:doc,window:win,google,Uint8Array,Blob,atob,URL:{createObjectURL:()=> 'blob:test-pdf',revokeObjectURL:u=>revoked.push(u)}});
+ const load=nodes.get('e1PdfRead'),choice=nodes.get('e1PdfChoose'),preview=nodes.get('e1PdfReview'),ack=nodes.get('e1PdfChooseAttest'),select=nodes.get('e1PdfSelect'),link=nodes.get('siteTestPdfLink');
+ assert.equal(select.disabled,true);await select.click();assert.equal(requests.length,0);await load.click();
+ choice.value=entries[1].version;choice.change();badPdf=true;await preview.click();assert.equal(link.hidden,true);ack.checked=true;ack.change();assert.equal(select.disabled,true);
+ badPdf=false;await preview.click();assert.equal(link.hidden,false);assert.equal(select.disabled,true);ack.checked=true;ack.change();assert.equal(select.disabled,false);
+ unknown=true;await select.click();assert.equal(select.disabled,true);assert.equal(link.hidden,true);assert.match(nodes.get('e1PdfStatus').textContent,/不重送/);
+ await select.click();assert.equal(requests.filter(r=>r.operation==='documentSelect').length,1);
+ unknown=false;await load.click();assert.equal(choice.value,entries[1].version);
+ choice.value=entries[0].version;choice.change();await preview.click();ack.checked=true;ack.change();await select.click();
+ assert.equal(active,entries[0].sha);assert.match(nodes.get('e1PdfStatus').textContent,/已回讀/);
+ cases=1;await load.click();choice.value=entries[1].version;choice.change();await preview.click();ack.checked=true;ack.change();assert.equal(select.disabled,true);assert.ok(revoked.length>0);
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{
