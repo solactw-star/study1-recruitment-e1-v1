@@ -799,7 +799,8 @@ function study1EConsentRegistry_(){
  * private file SHA/ACL/readback check. A thrown error after that commit is
  * ambiguous: preserve the snapshot and signed files; the next read recovers.
  */
-function study1EConsentWrite_(old,next){
+function study1EConsentWrite_(old,next,historyCommit){
+ if(historyCommit!==undefined&&typeof historyCommit!=='function')throw Error('E1_HISTORY_INTERNAL_HOOK_INVALID');
  if(next.revision!==old.revision+1||
     next.schemaVersion!==1||!Array.isArray(next.records)||
     next.records.length>STUDY1_ECONSENT_MAX_RECORDS_)
@@ -821,6 +822,7 @@ function study1EConsentWrite_(old,next){
  // explicit owner-controlled enablement; an existing V2 can never downgrade.
  if(!pointerBefore&&
     props.getProperty(STUDY1_ECONSENT_MIGRATE_APPROVED_)!=='true'){
+  if(historyCommit)throw Error('E1_HISTORY_V2_MIGRATION_NOT_APPROVED');
   if(next.records.length>STUDY1_ECONSENT_LEGACY_MAX_RECORDS_||
      payload.length>7500)
    throw Error('電子同意索引容量不足，停止收件');
@@ -870,6 +872,16 @@ function study1EConsentWrite_(old,next){
   pointer.sha256,pointer.legacySha256]);
  const ptrRaw=JSON.stringify(pointer);
  if(ptrRaw.length>7500)throw Error('E1_REGISTRY_V2_POINTER_OVERFLOW');
+ // An optional INTERNAL candidate hook advances an independent anchor after
+ // snapshot readback but BEFORE the local pointer. No existing caller uses it.
+ // Any uncertain append stops without retry; staged evidence is preserved.
+ if(historyCommit){
+  historyCommit({pointerRaw:ptrRaw,bytes:payloadBytes.length,previousPointerRaw:pointerBefore,legacyRaw});
+  if(lock.hasLock()!==true||
+     props.getProperty(STUDY1_ECONSENT_REGISTRY_)!==legacyRaw||
+     props.getProperty(STUDY1_ECONSENT_POINTER_V2_)!==pointerBefore)
+   throw Error('E1_HISTORY_POINTER_COMMIT_BLOCKED');
+ }
  props.setProperty(STUDY1_ECONSENT_POINTER_V2_,ptrRaw);
  if(props.getProperty(STUDY1_ECONSENT_POINTER_V2_)!==ptrRaw||
     JSON.stringify(study1EConsentRegistry_())!==payload)
@@ -1618,4 +1630,209 @@ function study1OwnerConsentRecordsPreflight_(){
  }finally{
   if(held){try{lock.releaseLock();}catch(_){throw Error('CONSENT_PREFLIGHT_LOCK_LOST');}}
  }
+}
+
+
+/** Candidate independent anchor protocol. No real provider, RPC, flag,
+ * automatic bootstrap, recovery, deletion or production call site.
+ * The server-injected provider MUST supply fresh authenticated state from an
+ * independently administered append-only CAS store (not Drive/Script
+ * Properties or a locally signed historical receipt). No provider exists in
+ * this repository. The tests implement that contract in isolated memory.
+ * The local hashes detect inconsistent chains, NOT replay by that provider.
+ */
+const STUDY1_HISTORY_SCOPE_='STUDY1_E1_REGISTRY_V2_HISTORY_V1';
+const STUDY1_HISTORY_MAX_ENTRIES_=10000; // candidate metadata bound, not retention policy
+const STUDY1_HISTORY_PAGE_MAX_=24;
+const STUDY1_HISTORY_PAGE_BYTES_=25000000;
+function study1EConsentHistoryHex_(s){return typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);}
+function study1EConsentHistoryGuard_(lock){
+ if(!lock||typeof lock.hasLock!=='function'||lock.hasLock()!==true)
+  throw Error('E1_HISTORY_LOCK_REQUIRED');
+}
+function study1EConsentHistoryGenesis_(baseRevision,legacySha256){
+ if(!Number.isSafeInteger(baseRevision)||baseRevision<0||
+    !study1EConsentHistoryHex_(legacySha256))throw Error('E1_HISTORY_BASE_INVALID');
+ return study1EConsentHash_(JSON.stringify([STUDY1_HISTORY_SCOPE_,baseRevision,legacySha256]));
+}
+function study1EConsentHistoryReceiptHash_(e,baseRevision,legacySha256){
+ return study1EConsentHash_(JSON.stringify([STUDY1_HISTORY_SCOPE_,baseRevision,legacySha256,
+  e.revision,e.fileId,e.sha256,e.bytes,e.pointerSha256,e.prevSha256]));
+}
+function study1EConsentHistoryHeadToken_(h){
+ return study1EConsentHash_(JSON.stringify([h.scope,h.schemaVersion,h.baseRevision,
+  h.legacySha256,h.revision,h.count,h.tipSha256]));
+}
+/** Validate exact manifest structure, continuity, unique files, and head.
+ * Authentication/freshness of provider.read() is an external prerequisite.
+ */
+function study1EConsentHistoryValidate_(state,legacyRaw){
+ const h=state&&state.head,entries=state&&state.entries;
+ if(!state||Object.keys(state).sort().join(',')!=='entries,head'||!h||
+    Object.keys(h).sort().join(',')!=='baseRevision,count,legacySha256,revision,schemaVersion,scope,tipSha256'||
+    h.schemaVersion!==1||h.scope!==STUDY1_HISTORY_SCOPE_||
+    !Number.isSafeInteger(h.baseRevision)||h.baseRevision<0||
+    !Number.isSafeInteger(h.revision)||!Number.isSafeInteger(h.count)||
+    h.count<0||h.count>STUDY1_HISTORY_MAX_ENTRIES_||
+    !Array.isArray(entries)||entries.length!==h.count||
+    h.revision!==h.baseRevision+h.count||
+    !study1EConsentHistoryHex_(h.tipSha256)||h.legacySha256!==study1EConsentHash_(legacyRaw||''))
+  throw Error('E1_HISTORY_ANCHOR_INVALID');
+ let legacyRevision=0;
+ if(legacyRaw){
+  let legacy;try{legacy=JSON.parse(legacyRaw);}catch(_){throw Error('E1_HISTORY_BASE_INVALID');}
+  study1EConsentValidateRegistry_(legacy,STUDY1_ECONSENT_LEGACY_MAX_RECORDS_);
+  legacyRevision=legacy.revision;
+ }
+ if(h.baseRevision!==legacyRevision)throw Error('E1_HISTORY_BASE_INVALID');
+ let tip=study1EConsentHistoryGenesis_(h.baseRevision,h.legacySha256);
+ const files=new Set();
+ for(let i=0;i<entries.length;i++){
+  const e=entries[i];
+  if(!e||Object.keys(e).sort().join(',')!=='bytes,fileId,pointerSha256,prevSha256,receiptSha256,revision,sha256'||
+     e.revision!==h.baseRevision+i+1||
+     typeof e.fileId!=='string'||!/^[A-Za-z0-9_-]{15,150}$/.test(e.fileId)||files.has(e.fileId)||
+     !Number.isSafeInteger(e.bytes)||e.bytes<50||e.bytes>STUDY1_ECONSENT_MAX_BYTES_V2_||
+     !study1EConsentHistoryHex_(e.sha256)||!study1EConsentHistoryHex_(e.pointerSha256)||
+     e.prevSha256!==tip||
+     e.receiptSha256!==study1EConsentHistoryReceiptHash_(e,h.baseRevision,h.legacySha256))
+   throw Error('E1_HISTORY_RECEIPT_INVALID');
+  files.add(e.fileId);tip=e.receiptSha256;
+ }
+ if(tip!==h.tipSha256)throw Error('E1_HISTORY_HEAD_MISMATCH');
+ return state;
+}
+function study1EConsentHistoryProviderRead_(provider,legacyRaw){
+ if(!provider||typeof provider.read!=='function')
+  throw Error('E1_HISTORY_PROVIDER_REQUIRED');
+ // Materialize the independently acquired state; never retain mutable
+ // aliases into provider memory while comparing two reads.
+ let state;
+ try{state=JSON.parse(JSON.stringify(provider.read()));}
+ catch(_){throw Error('E1_HISTORY_PROVIDER_UNAVAILABLE');}
+ return study1EConsentHistoryValidate_(state,legacyRaw);
+}
+function study1EConsentHistoryPointerMatch_(state,raw,legacyRaw){
+ if(!state.head.count){
+  if(raw!==null&&raw!==undefined)throw Error('E1_HISTORY_UNANCHORED_EXISTING_POINTER');
+  return null;
+ }
+ if(typeof raw!=='string'||!raw)throw Error('E1_HISTORY_POINTER_MISSING');
+ const p=study1EConsentPointerV2_(raw,legacyRaw);
+ const e=state.entries[state.entries.length-1];
+ if(p.revision!==state.head.revision||p.fileId!==e.fileId||p.sha256!==e.sha256||
+    study1EConsentHash_(raw)!==e.pointerSha256)
+  throw Error('E1_HISTORY_POINTER_REPLAY_OR_DIVERGENCE');
+ return p;
+}
+function study1EConsentHistorySnapshot_(e,legacySha256){
+ // Anchor file IDs, not names, identify committed history. The original
+ // reader independently rechecks PRIVATE/MIME/parent/size/raw SHA/revision.
+ const check=()=>{
+  const f=DriveApp.getFileById(e.fileId);
+  if(!f||f.getId()!==e.fileId||typeof f.isTrashed!=='function'||f.isTrashed()!==false||
+     f.getSize()!==e.bytes)throw Error('E1_HISTORY_SNAPSHOT_INVALID');
+ };
+ try{
+  check();
+  const result=study1EConsentReadV2_({fileId:e.fileId,revision:e.revision,sha256:e.sha256,legacySha256});
+  check();return result;
+ }catch(_){throw Error('E1_HISTORY_SNAPSHOT_INVALID');}
+}
+function study1EConsentHistoryContext_(provider,lock){
+ study1EConsentHistoryGuard_(lock);
+ const props=PropertiesService.getScriptProperties();
+ const legacyRaw=props.getProperty(STUDY1_ECONSENT_REGISTRY_);
+ const raw=props.getProperty(STUDY1_ECONSENT_POINTER_V2_);
+ const state=study1EConsentHistoryProviderRead_(provider,legacyRaw);
+ const pointer=study1EConsentHistoryPointerMatch_(state,raw,legacyRaw);
+ const registry=pointer?study1EConsentHistorySnapshot_(state.entries[state.entries.length-1],state.head.legacySha256):
+  (legacyRaw?JSON.parse(legacyRaw):{schemaVersion:1,revision:0,records:[]});
+ const again=study1EConsentHistoryProviderRead_(provider,legacyRaw);
+ study1EConsentHistoryGuard_(lock);
+ if(study1EConsentHistoryHeadToken_(again.head)!==study1EConsentHistoryHeadToken_(state.head)||
+    props.getProperty(STUDY1_ECONSENT_REGISTRY_)!==legacyRaw||
+    props.getProperty(STUDY1_ECONSENT_POINTER_V2_)!==raw)
+  throw Error('E1_HISTORY_SOURCE_CHANGED');
+ return {state,registry,raw,legacyRaw};
+}
+function study1EConsentHistoryRead_(provider,lock){
+ return study1EConsentHistoryContext_(provider,lock).registry;
+}
+/** Stage with original writer, CAS append to independent store, then pointer.
+ * An advanced anchor with an old/missing pointer is deliberately blocked.
+ * Never roll back the anchor, blindly retry, delete staged files, or heal
+ * from the locally stored pointer. Recovery requires separately authorized
+ * independent reconciliation, not this candidate.
+ */
+function study1EConsentHistoryWrite_(old,next,provider,lock){
+ study1EConsentHistoryGuard_(lock);
+ if(!provider||typeof provider.append!=='function')throw Error('E1_HISTORY_PROVIDER_REQUIRED');
+ const before=study1EConsentHistoryContext_(provider,lock),h=before.state.head;
+ const expected=study1EConsentHistoryHeadToken_(h);
+ if(JSON.stringify(before.registry)!==JSON.stringify(old))throw Error('E1_HISTORY_SOURCE_CHANGED');
+ if(h.count>=STUDY1_HISTORY_MAX_ENTRIES_)throw Error('E1_HISTORY_MANIFEST_CAPACITY');
+ let committed=null;
+ const written=study1EConsentWrite_(old,next,stage=>{
+  study1EConsentHistoryGuard_(lock);
+  if(stage.previousPointerRaw!==before.raw||stage.legacyRaw!==before.legacyRaw)
+   throw Error('E1_HISTORY_SOURCE_CHANGED');
+  const p=study1EConsentPointerV2_(stage.pointerRaw,stage.legacyRaw);
+  if(p.revision!==h.revision+1)throw Error('E1_HISTORY_REVISION_INVALID');
+  const e={revision:p.revision,fileId:p.fileId,sha256:p.sha256,bytes:stage.bytes,
+   pointerSha256:study1EConsentHash_(stage.pointerRaw),prevSha256:h.tipSha256};
+  e.receiptSha256=study1EConsentHistoryReceiptHash_(e,h.baseRevision,h.legacySha256);
+  study1EConsentHistorySnapshot_(e,h.legacySha256);
+  const proposed={head:{...h,count:h.count+1,revision:p.revision,tipSha256:e.receiptSha256},
+   entries:before.state.entries.concat([e])};
+  study1EConsentHistoryValidate_(proposed,before.legacyRaw);
+  // append MUST enforce atomic compare-and-append at the independent store.
+  // Never assume a failed/ambiguous response means no append occurred.
+  try{provider.append(expected,JSON.parse(JSON.stringify(e)));}
+  catch(_){throw Error('E1_HISTORY_ANCHOR_COMMIT_UNKNOWN');}
+  let after;
+  try{after=study1EConsentHistoryProviderRead_(provider,before.legacyRaw);}
+  catch(_){throw Error('E1_HISTORY_ANCHOR_COMMIT_UNKNOWN');}
+  if(study1EConsentHistoryHeadToken_(after.head)!==study1EConsentHistoryHeadToken_(proposed.head))
+   throw Error('E1_HISTORY_ANCHOR_COMMIT_UNKNOWN');
+  committed=study1EConsentHistoryHeadToken_(after.head);
+  study1EConsentHistoryGuard_(lock);
+ });
+ const after=study1EConsentHistoryContext_(provider,lock);
+ if(!committed||study1EConsentHistoryHeadToken_(after.state.head)!==committed||
+    JSON.stringify(after.registry)!==JSON.stringify(written))
+  throw Error('E1_HISTORY_COMMIT_READBACK_UNKNOWN');
+ return written;
+}
+/** Bounded history audit. The manifest is complete relative to the trusted
+ * anchor; no filename-based bootstrap or claim about unanchored staged files.
+ * Each page is exact, consecutive, byte-bounded and pinned to a head token.
+ * A partial page is never a complete-history verification. External writes/
+ * ABA and deletion after verification remain outside the guarantee.
+ */
+function study1EConsentHistoryAuditPage_(provider,lock,offset,expectedHead){
+ const first=study1EConsentHistoryContext_(provider,lock),h=first.state.head;
+ const token=study1EConsentHistoryHeadToken_(h);
+ if(!Number.isSafeInteger(offset)||offset<0||offset>h.count||
+    (offset!==0&&expectedHead!==token)||(expectedHead!==null&&expectedHead!==token))
+  throw Error('E1_HISTORY_AUDIT_CURSOR_INVALID');
+ let end=offset,bytes=0;
+ const inventory=[];
+ while(end<h.count&&end-offset<STUDY1_HISTORY_PAGE_MAX_){
+  const e=first.state.entries[end];
+  if(bytes+e.bytes>STUDY1_HISTORY_PAGE_BYTES_)break;
+  study1EConsentHistoryGuard_(lock);
+  study1EConsentHistorySnapshot_(e,h.legacySha256);
+  inventory.push({revision:e.revision,bytes:e.bytes,status:'SHA_PRIVATE_SOURCE_MATCH'});
+  bytes+=e.bytes;end++;
+ }
+ const second=study1EConsentHistoryContext_(provider,lock);
+ if(study1EConsentHistoryHeadToken_(second.state.head)!==token||
+    second.raw!==first.raw||second.legacyRaw!==first.legacyRaw)
+  throw Error('E1_HISTORY_SOURCE_CHANGED');
+ return {mode:'ISOLATED_HISTORY_CANDIDATE',headToken:token,headRevision:h.revision,
+  expectedSnapshots:h.count,offset,nextOffset:end,verifiedSnapshots:inventory.length,
+  verifiedBytes:bytes,inventory,hasMore:end<h.count,
+  wholeHistoryVerifiedInThisCall:offset===0&&end===h.count&&h.count>0,
+  formalAnchorVerified:false,formalReady:false,written:false};
 }

@@ -15,7 +15,7 @@ function build({diskDir=null}={}){
    if(key==='STUDY1_ECONSENT_POINTER_V2'&&onPointerWrite)onPointerWrite();
   }};
  const proxy=data=>({
-  getId:()=>data.id,getSize:()=>data.diskSize??data.bytes.length,
+  getId:()=>data.id,isTrashed:()=>data.trashed===true,getSize:()=>data.diskSize??data.bytes.length,
   getUrl:()=> 'https://drive.google.com/file/d/'+data.id+'/view',
   setTrashed:value=>{data.trashed=value;},
   getMimeType:()=>data.mime,getSharingAccess:()=>data.access,
@@ -337,7 +337,7 @@ test('RETENTION repeated revisions and ambiguous V2 commit retain historic signa
 });
 // Characterization, not a security pass: valid old pointers are not a
 // monotonic external anchor, and non-current history is not scanned on read.
-test('RETENTION known gap: valid historical pointer rollback and missing inactive snapshot are not detected',t=>{
+test('RETENTION known gap in UNANCHORED original reader: pointer rollback and inactive deletion undetected',t=>{
  const f=build();f.enable();grow(f,2,2);
  const earlier=f.values.get('STUDY1_ECONSENT_POINTER_V2'),earlyId=JSON.parse(earlier).fileId;
  grow(f,3,3);const latest=f.values.get('STUDY1_ECONSENT_POINTER_V2');
@@ -866,4 +866,159 @@ test('PREFLIGHT original provider errors and release errors are redacted; no arb
  assert.throws(()=>y.check(),e=>e.message==='CONSENT_PREFLIGHT_LOCK_LOST');
  assert.equal((source.match(/study1OwnerConsentRecordsPreflight_\s*\(/g)||[]).length,1);
  assert.doesNotMatch(source,/function study1OwnerConsentRecordsPreflight\(/);
+});
+
+
+// Independent in-memory provider: separate state from the GAS mock
+// properties/Drive. It is a protocol test double, not real WORM or a service.
+function historyFixture(){
+ const f=build(),c=f.scope,lock={hasLock:()=>true};
+ const scope='STUDY1_E1_REGISTRY_V2_HISTORY_V1',legacySha256=sha(f.legacyBytes);
+ let state={head:{schemaVersion:1,scope,baseRevision:1,legacySha256,revision:1,count:0,
+  tipSha256:sha(JSON.stringify([scope,1,legacySha256]))},entries:[]};
+ const clone=x=>JSON.parse(JSON.stringify(x));
+ const token=h=>sha(JSON.stringify([h.scope,h.schemaVersion,h.baseRevision,h.legacySha256,h.revision,h.count,h.tipSha256]));
+ const controls={read:null,append:null,reads:0,appends:0};
+ const provider={read:()=>{controls.reads++;if(controls.read)return controls.read(clone(state));return clone(state);},
+  append:(expected,e)=>{
+   controls.appends++;
+   if(expected!==token(state.head)||e.revision!==state.head.revision+1||e.prevSha256!==state.head.tipSha256)
+    throw Error('independent CAS refused');
+   const commit=()=>{state={head:{...state.head,revision:e.revision,count:state.head.count+1,tipSha256:e.receiptSha256},
+    entries:state.entries.concat(clone(e))};};
+   if(controls.append)return controls.append(commit,clone(e));
+   commit();
+  }};
+ f.enable();
+ const read=()=>c.study1EConsentHistoryRead_(provider,lock);
+ const write=(old,next)=>c.study1EConsentHistoryWrite_(old,next,provider,lock);
+ const grow=()=>{const old=read();return write(old,{...old,revision:old.revision+1,records:old.records.concat(f.entry(old.revision+1))});};
+ const audit=(offset=0,expected=null)=>c.study1EConsentHistoryAuditPage_(provider,lock,offset,expected);
+ return {f,c,lock,provider,controls,read,write,grow,audit,state:()=>clone(state),token:()=>token(state.head)};
+}
+test('HISTORY anchored original writer appends continuous independent receipts before pointer and retains legacy',()=>{
+ const h=historyFixture(),key='STUDY1_ECONSENT_POINTER_V2';
+ h.f.onPointerWrite(()=>{const p=JSON.parse(h.f.values.get(key));assert.equal(h.state().head.revision,p.revision);});
+ h.grow();h.grow();h.grow();
+ const s=h.state();assert.equal(s.head.count,3);assert.equal(s.head.revision,4);
+ assert.equal(h.controls.appends,3);assert.equal(h.read().revision,4);
+ for(const e of s.entries){const f=h.f.files.get(e.fileId);assert.equal(e.sha256,sha(f.bytes));assert.equal(e.bytes,f.bytes.length);}
+ assert.equal(h.f.values.get('STUDY1_ECONSENT_PRIVATE_V1'),h.f.legacyBytes);
+ const audit=h.audit();assert.equal(audit.wholeHistoryVerifiedInThisCall,true);assert.equal(audit.verifiedSnapshots,3);
+ assert.equal(audit.formalAnchorVerified,false);assert.equal(audit.written,false);
+ assert.doesNotMatch(JSON.stringify(audit.inventory),/V2_PRIVATE_FILE|aaaaaaaa|tokenHash/);
+});
+test('HISTORY legitimate old HMAC pointer replay, pointer removal and same-revision pointer substitution blocked',()=>{
+ const h=historyFixture(),key='STUDY1_ECONSENT_POINTER_V2';h.grow();
+ const old=h.f.values.get(key);h.grow();const latest=h.f.values.get(key);
+ h.f.values.set(key,old);assert.throws(()=>h.read(),/POINTER_REPLAY_OR_DIVERGENCE/);
+ const prior=JSON.parse(h.f.files.get(JSON.parse(old).fileId).bytes);
+ assert.throws(()=>h.write(prior,{...prior,revision:prior.revision+1}),/POINTER_REPLAY_OR_DIVERGENCE/);
+ assert.equal(h.controls.appends,2);assert.equal(h.f.files.size,2);
+ h.f.values.delete(key);assert.throws(()=>h.read(),/POINTER_MISSING/);
+ const p=JSON.parse(latest),other='PRIVATE_ALTERNATE_FILE_01';
+ h.f.files.set(other,{...h.f.files.get(p.fileId),id:other});
+ p.fileId=other;p.hmac=h.c.study1BindingHmac_(['STUDY1_ECONSENT_POINTER_V2',p.revision,p.fileId,p.sha256,p.legacySha256]);
+ h.f.values.set(key,JSON.stringify(p));assert.throws(()=>h.read(),/POINTER_REPLAY_OR_DIVERGENCE/);
+ h.f.values.set(key,latest);assert.equal(h.read().revision,3);
+});
+test('HISTORY inactive snapshot missing, tampered, trashed, wrong parent, ACL or MIME rejects history audit',()=>{
+ for(const mutate of [(h,e)=>h.f.files.delete(e.fileId),(h,e)=>h.f.files.get(e.fileId).bytes[0]^=1,
+  (h,e)=>h.f.files.get(e.fileId).trashed=true,(h,e)=>h.f.files.get(e.fileId).parentId='OTHER',
+  (h,e)=>h.f.files.get(e.fileId).access='PUBLIC',(h,e)=>h.f.files.get(e.fileId).mime='text/plain']){
+  const h=historyFixture();h.grow();h.grow();mutate(h,h.state().entries[0]);
+  assert.equal(h.read().revision,3); // tip-read does not claim full history
+  assert.throws(()=>h.audit(),/E1_HISTORY_SNAPSHOT_INVALID/);
+  assert.equal(h.controls.appends,2);
+ }
+});
+test('HISTORY malformed, truncated, reordered, duplicate or altered manifest refused without write',()=>{
+ for(const alter of [s=>{s.entries.pop();},s=>{s.entries.reverse();},
+  s=>{s.entries[1].fileId=s.entries[0].fileId;},s=>{s.entries[0].bytes++;},
+  s=>{s.head.tipSha256='0'.repeat(64);},s=>{s.head.baseRevision=0;},
+  s=>{s.head.scope='OTHER';},s=>{s.head.legacySha256='0'.repeat(64);}]) {
+  const h=historyFixture();h.grow();h.grow();h.controls.read=s=>{alter(s);return s;};
+  assert.throws(()=>h.read(),/E1_HISTORY_(ANCHOR_INVALID|BASE_INVALID|RECEIPT_INVALID|HEAD_MISMATCH)/);
+  assert.equal(h.controls.appends,2);assert.equal(h.f.files.size,2);
+ }
+});
+test('HISTORY existing unanchored V2 never auto-bootstraps; legacy drift and missing provider blocked',()=>{
+ const h=historyFixture(),key='STUDY1_ECONSENT_PRIVATE_V1';
+ const old=h.f.scope.study1EConsentRegistry_();
+ h.f.scope.study1EConsentWrite_(old,{...old,revision:2,records:old.records.concat(h.f.entry(2))});
+ assert.throws(()=>h.read(),/UNANCHORED_EXISTING_POINTER/);assert.equal(h.controls.appends,0);
+ const z=historyFixture();z.f.values.set(key,JSON.stringify({...z.f.legacy,revision:2}));
+ assert.throws(()=>z.read(),/ANCHOR_INVALID/);
+ assert.throws(()=>z.c.study1EConsentHistoryRead_(null,z.lock),/PROVIDER_REQUIRED/);
+});
+test('HISTORY staged snapshot retained on CAS refusal, no-op append or lost reply before append; no pointer commit',()=>{
+ for(const action of [()=>{throw Error('CAS conflict');},()=>{},()=>{throw Error('network lost');}]){
+  const h=historyFixture();h.grow();const before=h.f.values.get('STUDY1_ECONSENT_POINTER_V2');
+  h.controls.append=action;
+  assert.throws(()=>h.grow(),/ANCHOR_COMMIT_UNKNOWN/);
+  assert.equal(h.f.values.get('STUDY1_ECONSENT_POINTER_V2'),before);
+  assert.equal(h.state().head.revision,2);assert.equal(h.read().revision,2);
+  assert.equal(h.f.files.size,2);assert.ok([...h.f.files.values()].every(x=>!x.trashed));
+  assert.equal(h.controls.appends,2); // no implicit resend
+ }
+});
+test('HISTORY lost reply after independent append blocks divergence; both snapshots retained and no blind retry',()=>{
+ const h=historyFixture();h.grow();const before=h.f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ h.controls.append=commit=>{commit();throw Error('lost reply after append');};
+ assert.throws(()=>h.grow(),/ANCHOR_COMMIT_UNKNOWN/);
+ assert.equal(h.f.values.get('STUDY1_ECONSENT_POINTER_V2'),before);assert.equal(h.state().head.revision,3);
+ assert.throws(()=>h.read(),/POINTER_REPLAY_OR_DIVERGENCE/);
+ assert.throws(()=>h.grow(),/POINTER_REPLAY_OR_DIVERGENCE/);
+ assert.equal(h.controls.appends,2);assert.equal(h.f.files.size,2);
+ assert.ok([...h.f.files.values()].every(x=>!x.trashed));
+});
+test('HISTORY lost pointer response after commit is recovered only by fresh anchored read, not repeated write',()=>{
+ const h=historyFixture();h.grow();const old=h.read();
+ h.f.onPointerWrite(()=>{throw Error('lost local response');});
+ assert.throws(()=>h.write(old,{...old,revision:3,records:old.records.concat(h.f.entry(3))}),/lost local response/);
+ h.f.onPointerWrite(null);
+ assert.equal(h.read().revision,3);assert.equal(h.audit().verifiedSnapshots,2);
+ assert.throws(()=>h.write(old,{...old,revision:3}),/SOURCE_CHANGED/);
+ assert.equal(h.controls.appends,2);assert.equal(h.f.files.size,2);
+});
+test('HISTORY local concurrent change after external append blocks pointer commit, no deletion',()=>{
+ const h=historyFixture();h.grow();const before=h.f.values.get('STUDY1_ECONSENT_POINTER_V2');
+ h.controls.append=commit=>{commit();h.f.values.delete('STUDY1_ECONSENT_POINTER_V2');};
+ assert.throws(()=>h.grow(),/POINTER_COMMIT_BLOCKED/);
+ assert.equal(h.state().head.revision,3);assert.equal(h.f.values.has('STUDY1_ECONSENT_POINTER_V2'),false);
+ assert.throws(()=>h.read(),/POINTER_MISSING/);assert.equal(h.f.files.size,2);
+ assert.ok([...h.f.files.values()].every(x=>!x.trashed));assert.ok(before);
+});
+test('HISTORY page cursor pinned to head, no false complete claim or skip; byte and count bounded',()=>{
+ const h=historyFixture();for(let i=0;i<25;i++)h.grow();
+ const first=h.audit();assert.equal(first.verifiedSnapshots,24);assert.equal(first.nextOffset,24);
+ assert.equal(first.hasMore,true);assert.equal(first.wholeHistoryVerifiedInThisCall,false);
+ assert.throws(()=>h.audit(24,null),/AUDIT_CURSOR_INVALID/);
+ const last=h.audit(24,first.headToken);assert.equal(last.verifiedSnapshots,1);assert.equal(last.hasMore,false);
+ assert.equal(last.wholeHistoryVerifiedInThisCall,false);
+ h.grow();assert.throws(()=>h.audit(24,first.headToken),/AUDIT_CURSOR_INVALID/);
+ const z=historyFixture();
+ for(let i=0;i<6;i++){const old=z.read(),entry={...z.f.entry(i+2),padding:'x'.repeat(4200000)};
+  z.write(old,{...old,revision:old.revision+1,records:[entry]});}
+ const page=z.audit();assert.equal(page.verifiedSnapshots,5);assert.ok(page.verifiedBytes<=25000000);assert.equal(page.hasMore,true);
+});
+test('HISTORY lost lock, provider unavailable or provider drift is fail closed; migration switch not bypassed',()=>{
+ const h=historyFixture();h.grow();
+ assert.throws(()=>h.c.study1EConsentHistoryRead_(h.provider,{hasLock:()=>false}),/LOCK_REQUIRED/);
+ h.controls.read=()=>{throw Error('private provider payload');};assert.throws(()=>h.read(),/^Error: E1_HISTORY_PROVIDER_UNAVAILABLE$/);
+ const z=historyFixture();z.f.values.delete('STUDY1_ECONSENT_MIGRATION_V2_APPROVED');
+ assert.throws(()=>z.grow(),/MIGRATION_NOT_APPROVED/);assert.equal(z.controls.appends,0);assert.equal(z.f.files.size,0);
+ const x=historyFixture();x.grow();let reads=0;
+ x.controls.read=s=>{reads++;if(reads===2)s.head.tipSha256='0'.repeat(64);return s;};
+ assert.throws(()=>x.read(),/HEAD_MISMATCH/);
+});
+test('HISTORY trust boundary characterization: jointly replayed independent provider plus local pointer cannot be detected locally',()=>{
+ const h=historyFixture(),key='STUDY1_ECONSENT_POINTER_V2';h.grow();
+ const old=h.state(),raw=h.f.values.get(key);h.grow();
+ h.f.values.set(key,raw);h.controls.read=()=>old;
+ assert.equal(h.read().revision,2); // not a security pass: requires genuine provider freshness/immutability
+ assert.equal(h.state().head.revision,3);
+ assert.equal((source.match(/study1EConsentHistoryWrite_\s*\(/g)||[]).length,1);
+ assert.equal((source.match(/study1EConsentHistoryRead_\s*\(/g)||[]).length,1);
+ assert.equal((source.match(/study1EConsentHistoryAuditPage_\s*\(/g)||[]).length,1);
 });
