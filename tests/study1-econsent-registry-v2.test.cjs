@@ -377,10 +377,22 @@ function b10Fixture(){
   assert.ok(remainder>=0);catalog.documents[0].url+='x'.repeat(remainder);
   assert.equal(JSON.stringify(planned(kind)).length,n);persist();
  };
+ const prepareBytes=(kind,n,title='測'.repeat(100))=>{
+  if(kind==='publish')catalog.current.E1=seed.id;
+  seed.title=title;
+  // Multiple real metadata titles produce sufficient Unicode overhead.
+  catalog.documents=Array.from({length:5},(_,i)=>i===0?seed:{...seed,
+   id:'PRIVATE_OTHER_PDF_'+String(i+1).padStart(5,'0'),version:'OTHER-'+String(i+1)});
+  const remaining=n-Buffer.byteLength(JSON.stringify(planned(kind)),'utf8');
+  assert.ok(remaining>=0);seed.url+='x'.repeat(remaining);
+  const payload=JSON.stringify(planned(kind));
+  assert.equal(Buffer.byteLength(payload,'utf8'),n);
+  assert.ok(payload.length<=7500);persist();
+ };
  const execute=kind=>kind==='upload'?f.scope.study1ConsentVersionUpload(input):
   kind==='select'?f.scope.study1ConsentVersionSelect({id:seed.id,expectedRevision:1}):
   f.scope.study1ConsentVersionPublication({id:seed.id,experiment:'E1',expectedRevision:1,confirmSha256:seed.sha256});
- return {f,key,doc,seed,catalog,prepare,execute,planned};
+ return {f,key,doc,seed,catalog,prepare,prepareBytes,execute,planned,persist};
 }
 for(const kind of ['upload','select','publish']){
  for(const n of [7499,7500,7501]){
@@ -402,13 +414,17 @@ for(const kind of ['upload','select','publish']){
   });
  }
 }
-test('RETENTION B10 7500 UTF-16 units can exceed byte quota: multibyte characterization',t=>{
+test('B10 UTF8 regression: prior 7500 units / 9900 bytes case is refused before property commit',t=>{
  const b=b10Fixture();b.prepare('upload',7500,true);
  const expected=JSON.stringify(b.planned('upload')),bytes=Buffer.byteLength(expected,'utf8');
- assert.equal(expected.length,7500);assert.ok(bytes>9000);
- b.execute('upload');
- assert.equal(b.f.values.get(b.key),expected);
- t.diagnostic('RETENTION_B10_MULTIBYTE '+JSON.stringify({codeUnits:expected.length,utf8Bytes:bytes,providerQuotaEnforced:false}));
+ assert.equal(expected.length,7500);assert.equal(bytes,9900);
+ const before=b.f.values.get(b.key);let writes=0;
+ b.f.onPropertyWrite(key=>{if(key===b.key)writes++;});
+ assert.throws(()=>b.execute('upload'),/UTF-8 8000 bytes/);
+ assert.equal(writes,0);assert.equal(b.f.values.get(b.key),before);
+ assert.equal(b.f.files.get(b.doc.id).trashed,true);
+ assert.equal(b.f.files.get(b.seed.id).trashed,undefined);
+ t.diagnostic('B10_UTF8_PREVIOUS_DEFECT_REFUSED '+JSON.stringify({codeUnits:expected.length,utf8Bytes:bytes,writes}));
 });
 test('RETENTION B10 upload response lost after index commit preserves both old and new referenced files',()=>{
  const b=b10Fixture();b.prepare('upload',7500);
@@ -420,3 +436,94 @@ test('RETENTION B10 upload response lost after index commit preserves both old a
  assert.equal(b.f.files.get(b.doc.id).trashed,undefined);
  assert.equal(sha(b.f.scope.study1ConsentDocumentBytes_(current.documents[1])),b.doc.sha256);
 });
+
+
+// Test each original mutation with exactly measured UTF-8 JSON; the old
+// 7499/7500/7501 ASCII-unit tests above remain unchanged.
+for(const kind of ['upload','select','publish']){
+ for(const n of [7999,8000,8001]){
+  test('B10 UTF8 '+kind+' exact '+n+' bytes with Chinese titles',()=>{
+   const b=b10Fixture();b.prepareBytes(kind,n);
+   const before=b.f.values.get(b.key);
+   const oldHashes=new Map([...b.f.files].map(([id,file])=>[id,sha(file.bytes)]));
+   let writes=0;b.f.onPropertyWrite(key=>{if(key===b.key)writes++;});
+   if(n>8000){
+    assert.throws(()=>b.execute(kind),/UTF-8 8000 bytes/);
+    assert.equal(writes,0);assert.equal(b.f.values.get(b.key),before);
+    if(kind==='upload')assert.equal(b.f.files.get(b.doc.id).trashed,true);
+   }else{
+    const result=b.execute(kind),payload=JSON.stringify(result);
+    assert.equal(Buffer.byteLength(payload,'utf8'),n);
+    assert.ok(payload.length<=7500);assert.equal(writes,1);
+    assert.equal(b.f.values.get(b.key),payload);
+    if(kind==='upload')assert.equal(b.f.files.get(b.doc.id).trashed,undefined);
+   }
+   for(const [id,hash] of oldHashes){
+    assert.equal(sha(b.f.files.get(id).bytes),hash);
+    assert.equal(b.f.files.get(id).trashed,undefined);
+   }
+  });
+ }
+}
+test('B10 UTF8 exact encoder parity for Chinese, mixed scripts, emoji, escapes and lone surrogate JSON',()=>{
+ const {f}=b10Fixture();
+ for(const title of ['ABC','中文','Café','αβ','🙂','🇹🇼','𠮷','e\u0301','"\\\n\t','\ud800','\udc00','中🙂A']){
+  const next={title,version:'TEST'};
+  const payload=f.scope.study1ConsentCatalogPayload_(next);
+  assert.equal(payload,JSON.stringify(next));
+  assert.equal(f.scope.study1ConsentCatalogUtf8Bytes_(payload),Buffer.byteLength(payload,'utf8'));
+ }
+});
+test('B10 UTF8 old oversize catalog remains readable; no-op leaves it alone and mutation fails closed',()=>{
+ const b=b10Fixture();b.prepareBytes('publish',8200);
+ const before=b.f.values.get(b.key);assert.ok(Buffer.byteLength(before,'utf8')>8000);
+ let writes=0;b.f.onPropertyWrite(key=>{if(key===b.key)writes++;});
+ const read=b.f.scope.study1ConsentVersionList();
+ assert.equal(read.documents.length,5);
+ assert.equal(sha(b.f.scope.study1ConsentDocumentBytes_(read.documents[0])),b.seed.sha256);
+ assert.equal(JSON.stringify(b.f.scope.study1ConsentVersionSelect({id:b.seed.id,expectedRevision:1})),before);
+ assert.throws(()=>b.execute('publish'),/UTF-8 8000 bytes/);
+ assert.equal(writes,0);assert.equal(b.f.values.get(b.key),before);
+ assert.ok([...b.f.files.values()].every(x=>!x.trashed));
+});
+test('B10 UTF8 unpublish uses the same guard: shrinking to 8000 allowed, still oversize rejected',()=>{
+ for(const target of [8000,8001]){
+  const b=b10Fixture();b.prepareBytes('publish',target+String(b.seed.id).length-2);
+  b.catalog.published.E1=b.seed.id;
+  const next={...b.catalog,revision:2,published:{E1:null,E2:null}};
+  // Tune to the final serialized payload after clearing the selected ID.
+  const n=Buffer.byteLength(JSON.stringify(next),'utf8');
+  if(n>target)b.seed.url=b.seed.url.slice(0,-(n-target));
+  else b.seed.url+='x'.repeat(target-n);
+  assert.equal(Buffer.byteLength(JSON.stringify(next),'utf8'),target);b.persist();
+  const before=b.f.values.get(b.key);let writes=0;
+  b.f.onPropertyWrite(key=>{if(key===b.key)writes++;});
+  const input={id:null,experiment:'E1',expectedRevision:1,confirmSha256:''};
+  if(target===8000){
+   assert.equal(b.f.scope.study1ConsentVersionPublication(input).published.E1,null);
+   assert.equal(writes,1);
+  }else{
+   assert.throws(()=>b.f.scope.study1ConsentVersionPublication(input),/UTF-8 8000 bytes/);
+   assert.equal(writes,0);assert.equal(b.f.values.get(b.key),before);
+  }
+  assert.ok([...b.f.files.values()].every(x=>!x.trashed));
+ }
+});
+for(const kind of ['upload','select','publish']){
+ test('B10 UTF8 '+kind+' response lost at exact 8000 bytes preserves evidence and stale retry fails',()=>{
+  const b=b10Fixture();b.prepareBytes(kind,8000);
+  const expected=JSON.stringify(b.planned(kind));let writes=0;
+  b.f.onPropertyWrite(key=>{if(key===b.key){writes++;throw Error('synthetic response lost after catalog commit');}});
+  assert.throws(()=>b.execute(kind),/response lost/);
+  b.f.onPropertyWrite(null);
+  const read=b.f.scope.study1ConsentVersionRead_();
+  assert.equal(JSON.stringify(read),expected);assert.equal(read.revision,2);assert.equal(writes,1);
+  for(const doc of read.documents){
+   assert.equal(sha(b.f.scope.study1ConsentDocumentBytes_(doc)),doc.sha256);
+   assert.equal(b.f.files.get(doc.id).trashed,undefined);
+  }
+  const count=b.f.files.size;
+  assert.throws(()=>b.execute(kind),/變更|衝突|已更新/);
+  assert.equal(b.f.files.size,count);assert.equal(b.f.values.get(b.key),expected);
+ });
+}

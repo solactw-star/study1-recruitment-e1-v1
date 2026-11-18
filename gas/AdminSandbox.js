@@ -441,6 +441,32 @@ function adminChangeTestBooking(input){if(typeof study1V2PublicRpcDeny_==='funct
  * Only the authenticated OWNER can list, upload or select a document version. */
 const STUDY1_CONSENT_DOC_FOLDER_='1hILv03gCFN9VZkNqcFx3fnlwBsKHKdYU';
 const STUDY1_CONSENT_DOC_INDEX_='STUDY1_CONSENT_DOCUMENT_INDEX_V1';
+// Retain the original 7500 UTF-16-unit guard. The additional 8000-byte
+// project safety ceiling is deliberately below Google's 9 KB/value quota.
+// Count the exact serialized JSON (including escapes and surrogate pairs),
+// without relying on a network call or a separate encoding of raw titles.
+const STUDY1_CONSENT_DOC_MAX_UNITS_=7500;
+const STUDY1_CONSENT_DOC_MAX_UTF8_BYTES_=8000;
+function study1ConsentCatalogUtf8Bytes_(text){
+ let bytes=0;
+ for(let i=0;i<text.length;i++){
+  const c=text.charCodeAt(i);
+  if(c<=0x7f)bytes++;
+  else if(c<=0x7ff)bytes+=2;
+  else if(c>=0xd800&&c<=0xdbff&&i+1<text.length&&
+    text.charCodeAt(i+1)>=0xdc00&&text.charCodeAt(i+1)<=0xdfff){bytes+=4;i++;}
+  else bytes+=3;
+ }
+ return bytes;
+}
+function study1ConsentCatalogPayload_(next){
+ const payload=JSON.stringify(next);
+ if(payload.length>STUDY1_CONSENT_DOC_MAX_UNITS_)
+  throw Error('同意書版本索引容量不足（7500 字元上限）');
+ if(study1ConsentCatalogUtf8Bytes_(payload)>STUDY1_CONSENT_DOC_MAX_UTF8_BYTES_)
+  throw Error('同意書版本索引容量不足（UTF-8 8000 bytes 上限）');
+ return payload;
+}
 function study1ConsentVersionRead_(){
  const raw=PropertiesService.getScriptProperties().getProperty(STUDY1_CONSENT_DOC_INDEX_);
  if(!raw)return {schemaVersion:1,revision:0,documents:[],current:{E1:null,E2:null},published:{E1:null,E2:null}};
@@ -527,8 +553,7 @@ function study1ConsentVersionUpload(input){if(typeof study1V2PublicRpcDeny_==='f
   study1ConsentDocumentBytes_(entry);
   const next={schemaVersion:1,revision:current.revision+1,
    documents:current.documents.concat([entry]),current:{...current.current},published:{...current.published}};
-  const payload=JSON.stringify(next);
-  if(payload.length>7500)throw Error('文件索引容量不足，未接受新版本');
+  const payload=study1ConsentCatalogPayload_(next);
   const prop=PropertiesService.getScriptProperties();
   indexCommitAttempted=true;
   prop.setProperty(STUDY1_CONSENT_DOC_INDEX_,payload);
@@ -566,8 +591,7 @@ function study1ConsentVersionSelect(input){if(typeof study1V2PublicRpcDeny_==='f
   // public routes, existing signed records or the formal intake switch.
   const next={...current,revision:current.revision+1,
    current:{...current.current,[entry.experiment]:entry.id}};
-  const payload=JSON.stringify(next),prop=PropertiesService.getScriptProperties();
-  if(payload.length>7500)throw Error('同意書版本索引容量不足');
+  const payload=study1ConsentCatalogPayload_(next),prop=PropertiesService.getScriptProperties();
   prop.setProperty(STUDY1_CONSENT_DOC_INDEX_,payload);
   if(prop.getProperty(STUDY1_CONSENT_DOC_INDEX_)!==payload)throw Error('同意書版本選用回讀失敗');
   return next;
@@ -623,8 +647,7 @@ function study1ConsentVersionPublication(input){if(typeof study1V2PublicRpcDeny_
   }else if(input.confirmSha256!=='')throw Error('停止提供時不應附帶文件雜湊');
   const after={...before,revision:before.revision+1,
    published:{...before.published,[input.experiment]:input.id}};
-  const payload=JSON.stringify(after);
-  if(payload.length>7500)throw Error('公開文件索引容量不足');
+  const payload=study1ConsentCatalogPayload_(after);
   const prop=PropertiesService.getScriptProperties();
   prop.setProperty(STUDY1_CONSENT_DOC_INDEX_,payload);
   if(prop.getProperty(STUDY1_CONSENT_DOC_INDEX_)!==payload)

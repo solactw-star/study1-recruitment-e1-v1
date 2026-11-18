@@ -1636,6 +1636,8 @@ D8 main合併、GAS原同ID同步、公開部署及最終開收件的逐層權�
 
 **既有功能保留**：`study1ConsentVersionUpload`、`study1ConsentVersionSelect`、`study1EConsentOwnerList`、`study1EConsentOwnerSignedPdfDownload` 原 ID／原程式沿用，不再建第二套檔案管理或後台。E1 的研究者事先於正式 PDF 簽名並勾選 OWNER 確認後，上傳／選用時要在原私人 Drive 再核對 PDF 原始檔 MIME、尺寸、原父資料夾、PRIVATE ACL、完整 SHA；未標研究者預簽的 E1 檔不能選為正式來源。上傳來源索引提交後結果不明時保留可能已被引用的 PDF，禁止錯誤清除。正式 E1 由報名本人在最後步驟補簽，不以研究者逐筆第二次簽名或手動建立邀請作正常前提。
 
+**B10 文件目錄寫入容量（2026-11-18 安全修正）**：原 `STUDY1_CONSENT_DOCUMENT_INDEX_V1` 維持 24 版本及 7,500 UTF-16 code units 上限；三個原寫入入口（upload/select/publication 含停止提供）共用完整 `JSON.stringify` UTF-8 8,000 bytes 上限，低於 Google 官方 Properties 單值 9 KB 限制（https://developers.google.com/apps-script/guides/services/quotas），為保守工程防護而非 Google 配額值或正式容量認證。超過任一上限拒絕寫入，不改舊目錄；新上傳僅在尚未嘗試目錄提交時得清除該新檔，已嘗試提交而結果不明必須保留可能引用的文件。既有語義合法超限目錄仍可唯讀查核，無實質寫入的 no-op 不改目錄；任何實際修改（含停止提供）須使新目錄符合雙上限，否則阻斷並由 OWNER 依獨立安全處置授權處理，不自動刪除、縮短或另建目錄。正式營運/保存期限、實際配額、REC、遠端 GAS 與部署另驗。
+
 **OWNER 狀態分流**：同意紀錄 `CONFIRMED` 只代表完整 PDF／事件證據已存，**不能代表**原 `Reservations` 已獨立確認；後台新增 OWNER 專用唯讀核對原 `Slots`／`Reservations`，沿用既有 read-only double snapshot + schema/status驗證、ScriptLock 和權限，按同意紀錄修訂版回傳 E1 各筆 `CONFIRMED/HELD/EXPIRED/CANCELLED/UNKNOWN`。只有來源同一申請者、同一 slot、唯一 reservation、有效 CONFIRMED timestamp 才顯示真正成立。若 GET 失敗／原來源矛盾／版本不同，顯示「預約未核實」，不得以已簽 PDF 推定成立。本人簽署後的完整 PDF 只能 OWNER 在通過既有 PDF 事件、私人 ACL、原 SHA 查核後下載；不顯示原 Drive fileId/URL；撤回紀錄需依既有處理流程，不能刪除歷史證據。
 
 **營運控制**：原舊邀請／研究人員逐筆說明／第二簽介面保留在程式供歷史相容，但不在 E1 正式工作區顯示；不得由此開啟 E2、憑證核身、Demo 或正式收件。V2 同意索引仍需獨立 OWNER 核定遷移，未授權時關閉。本節只授權 PR 程式與測試，不能因 CI PASS 宣稱 GAS、REC、PI 核定時段或公開 E1 真 UI 已通過。
