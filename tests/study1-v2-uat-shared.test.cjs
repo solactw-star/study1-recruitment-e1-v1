@@ -433,9 +433,9 @@ test('private GAS operation contract completes booking and real five-page PDF th
  assert.equal((await req({...noticeSend,alias:'TEST_02',expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,1);
  await op2('verify',{code:'12345678'});await op2('hold',{slotId:'TEST_SLOT_2',requestId:'7'.repeat(32)});
  const signed3=await op2('sign',{...sign,requestId:'8'.repeat(32),sourceSha:chosen.sha});assert.equal(signed3.ok,true);
- realm.MailApp.sendEmail=()=>{sends++;throw Error('provider receipt ambiguous');};p=await audit();
+ realm.MailApp.sendEmail=()=>{sends++;failFlush=true;throw Error('provider receipt ambiguous');};p=await audit();
  const second={...noticeSend,alias:'TEST_02',expectedSha:p.snapshotSha};
- assert.equal((await req(second)).value.noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');assert.equal(sends,2);
+ assert.equal((await req(second)).error,'UAT_NOTICE_OUTCOME_UNKNOWN');failFlush=false;assert.equal(sends,2);
  p=await audit();assert.equal(p.cases[1].noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');
  assert.equal((await req({...second,expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,2);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
@@ -849,6 +849,37 @@ test('OWNER B10 TEST PDF browser controls verify bytes and require current previ
  choice.value=entries[0].version;choice.change();await preview.click();ack.checked=true;ack.change();await select.click();
  assert.equal(active,entries[0].sha);assert.match(nodes.get('e1PdfStatus').textContent,/已回讀/);
  cases=1;await load.click();choice.value=entries[1].version;choice.change();await preview.click();ack.checked=true;ack.change();assert.equal(select.disabled,true);assert.ok(revoked.length>0);
+});
+
+test('OWNER B08 notification controls fail closed and require independent audit after unknown result',async()=>{
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
+ const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){this[n]=f;}});
+ for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ const pending={alias:'TEST_01',bookingStatus:'CONFIRMED',noticeStatus:'NOT_QUEUED',queuedAtUtc:null,acceptedAtUtc:null};
+ const unknown={alias:'TEST_02',bookingStatus:'CONFIRMED',noticeStatus:'UNKNOWN_REQUIRES_STAFF_REVIEW',queuedAtUtc:'2026-11-18T01:00:00.000Z',acceptedAtUtc:null};
+ let cases=[pending,unknown],bad=false;
+ const snapshot='a'.repeat(64);
+ const reply=r=>{
+  requests.push(JSON.parse(JSON.stringify(r)));
+  if(r.operation==='noticeAudit')return {formal:bad,scope:'SYNTHETIC_CASES_ONLY',readOnly:true,snapshotSha:snapshot,cases};
+  if(r.operation==='noticeSend'){
+   assert.equal(r.alias,'TEST_01');assert.equal(r.expectedSha,snapshot);assert.equal(r.confirmation,'SEND_TEST_NOTICE_ONLY');
+   cases=[{...unknown,alias:'TEST_01'},unknown];throw Error('result unknown');
+  }
+  throw Error('unexpected');
+ };
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1E1SyntheticUat(r){try{s({ok:true,value:reply(r)});}catch(e){f(e);}}};}};}}}};
+ const doc={getElementById:id=>nodes.get(id),createElement:()=>make()},window={google,addEventListener(){},confirm(){return false;}};
+ for(const m of markup.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:doc,window,google});
+ const read=nodes.get('e1OpsRead'),pick=nodes.get('siteNoticeAlias'),ack=nodes.get('siteNoticeAck'),send=nodes.get('siteNoticeSend'),out=nodes.get('e1OpsResults'),status=nodes.get('e1OpsStatus');
+ assert.equal(send.disabled,true);await send.click();assert.equal(requests.length,0);
+ await read.click();assert.equal(pick.children.length,1);assert.match(out.textContent,/結果未知，禁止重送/);
+ pick.value='TEST_02';pick.change();ack.checked=true;ack.change();assert.equal(send.disabled,true);
+ pick.value='TEST_01';pick.change();assert.equal(send.disabled,true);ack.checked=true;ack.change();assert.equal(send.disabled,false);
+ await send.click();assert.equal(send.disabled,true);assert.equal(out.textContent,'');assert.match(status.textContent,/不重送/);
+ await send.click();assert.equal(requests.filter(r=>r.operation==='noticeSend').length,1);
+ await read.click();assert.equal(pick.children.length,0);assert.equal(send.disabled,true);
+ bad=true;await read.click();assert.equal(out.textContent,'');assert.equal(send.disabled,true);assert.match(status.textContent,/未核實/);
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{
