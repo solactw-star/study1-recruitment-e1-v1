@@ -1,6 +1,18 @@
 name: Study1 V2 release
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [preflight, publish]
+        default: preflight
+        required: true
+      expected_head_sha:
+        description: HEAD source SHA-256 from the reviewed preflight
+        type: string
+      expected_version:
+        description: Original deployment version from the reviewed preflight
+        type: string
 
 permissions:
   contents: read
@@ -9,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  preflight:
+  release:
     if: github.repository == 'solactw-star/study1-recruitment-e1-v1' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +33,12 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts --no-save --package-lock=false @googleapis/script@16.0.1
       - run: node --test tests/study1-v2-release-core.test.cjs tests/study1-v2-uat-shared.test.cjs tests/study1-v2-public-readonly.test.cjs
-      - name: Verify original V2 GAS deployment with read-only API calls
+      - name: Verify the selected commit is still main
+        run: test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+      - name: Preflight and optionally update the original V2 deployment
         run: node scripts/study1-v2-apps-script.cjs
         env:
           V2_GAS_CLASPRC_JSON: ${{ secrets.V2_GAS_CLASPRC_JSON }}
+          V2_RELEASE_MODE: ${{ inputs.mode }}
+          V2_EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+          V2_EXPECTED_VERSION: ${{ inputs.expected_version }}
