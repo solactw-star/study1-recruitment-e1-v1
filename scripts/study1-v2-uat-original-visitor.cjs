@@ -332,21 +332,76 @@ function sameSiteCleanupController(){
  const workspace=Boolean(query&&statusFilter&&slotFilter&&dateFilter&&caseRows&&slotRows);
  const local=s=>new Date(s).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false});
  const localDate=s=>new Date(s).toLocaleDateString('sv-SE',{timeZone:'Asia/Taipei'});
- const rows=(target,data)=>{
+ const rows=(target,data,openCase)=>{
   target.textContent='';
   for(const values of data){
    const tr=document.createElement('tr');
    for(const value of values){const td=document.createElement('td');td.textContent=String(value);tr.appendChild(td);}
+   if(openCase){const td=document.createElement('td'),btn=document.createElement('button');btn.type='button';btn.textContent='查看個案';btn.addEventListener('click',()=>openCase(values[0]));td.appendChild(btn);tr.appendChild(td);}
    target.appendChild(tr);
   }
  };
+ const profileBox=el('e1Profile'),profileStatus=el('e1ProfileStatus'),profileSummary=el('e1ProfileSummary'),profileTab=el('e1ProfileTab'),profileContent=el('e1ProfileContent'),profileOrder=el('e1ProfileOrder'),profileTimeline=el('e1ProfileTimeline'),profileBack=el('e1ProfileBack');
+ const hasProfile=[profileBox,profileStatus,profileSummary,profileTab,profileContent,profileOrder,profileTimeline,profileBack].every(Boolean);
+ let profile=null,profileEpoch=0;
+ const closeProfile=()=>{
+  profileEpoch++;profile=null;
+  if(!hasProfile)return;
+  profileBox.hidden=true;profileStatus.textContent='';profileSummary.textContent='';profileContent.textContent='';profileTimeline.textContent='';
+  profileTab.disabled=true;profileOrder.disabled=true;
+ };
+ const noticeLabels={NOT_QUEUED:'尚無通知紀錄',PROVIDER_ACCEPTED_NOT_DELIVERED:'服務商接受（非送達證明）',UNKNOWN_REQUIRES_STAFF_REVIEW:'結果未知，禁止重送'};
+ const field=(parent,k,v)=>{const p=document.createElement('p');p.textContent=k+'：'+(v??'—');parent.appendChild(p);};
+ const review=p=>p.noticeStatus==='UNKNOWN_REQUIRES_STAFF_REVIEW'?'核對 TEST 信箱及 outbox，禁止重送':p.otpStatus==='EMAIL_EXPIRED'?'Email OTP 已逾期，不推定寄達':p.bookingStatus==='EXPIRED'?'暫留逾期，未成立預約':p.bookingStatus==='CONFIRMED'&&p.noticeStatus==='NOT_QUEUED'?'預約已確認，尚無通知；由 B08 獨立操作': '無另行推定的異常；僅供查核';
+ const time=v=>v?local(v):'—';
+ const drawProfile=()=>{
+  if(!profile||!hasProfile)return;
+  const p=profile;profileContent.textContent='';
+  const f=(k,v)=>field(profileContent,k,v);
+  switch(profileTab.value){
+   case 'eligibility':f('資格','僅合成 TEST 自陳符合，不代表 REC 正式資格核實');break;
+   case 'booking':f('預約狀態',labels[p.bookingStatus]);f('場次',p.slot?.id);f('開始',time(p.slot?.startAtUtc));f('結束',time(p.slot?.endAtUtc));f('暫留期限',time(p.slot?.holdUntilUtc));f('出席','未核實');break;
+   case 'consent':f('完整 PDF',p.pdfStatus==='STORED_SHA_VERIFIED'?'已保存，儲存位元組 SHA 一致（非本次逐頁重解析）':'無已簽副本');f('來源 SHA',p.sourceSha);f('簽署副本 SHA',p.signedSha);f('簽署時間',time(p.signedAtUtc));break;
+   case 'notices':f('通知',noticeLabels[p.noticeStatus]);f('建立時間',time(p.queuedAtUtc));f('接受時間',time(p.acceptedAtUtc));f('人工查核',review(p));break;
+   default:f('虛構代碼',p.alias);f('OTP',otpLabels[p.otpStatus]);f('Email OTP 期限',time(p.otpExpiresAtUtc));f('限制','不呈現姓名、聯絡資料、驗證碼或憑證；不代表本人身分證明');break;
+  }
+ };
+ const drawTimeline=()=>{
+  if(!profile||!hasProfile)return;profileTimeline.textContent='';
+  const p=profile,events=[[p.signedAtUtc,'TEST PDF 簽署','consent'],[p.queuedAtUtc,'TEST 通知建立','notices'],[p.acceptedAtUtc,'寄件服務接受（非送達）','notices']].filter(e=>e[0]);
+  events.sort((a,b)=>profileOrder.value==='old'?a[0].localeCompare(b[0]):b[0].localeCompare(a[0]));
+  for(const [at,label,tab] of events){const li=document.createElement('li'),btn=document.createElement('button');btn.type='button';btn.textContent=time(at)+'｜'+label;btn.addEventListener('click',()=>{if(profile!==p)return;profileTab.value=tab;drawProfile();});li.appendChild(btn);profileTimeline.appendChild(li);}
+ };
+ const openProfile=async alias=>{
+  if(!hasProfile||busy||!visibleSnapshot)return;
+  const baseline=visibleSnapshot,row=baseline.cases.find(c=>c.alias===alias);
+  if(!row)return;
+  closeProfile();const epoch=profileEpoch;profileBox.hidden=false;profileStatus.textContent='核對同一 TEST 案件…';
+  const validTime=x=>x===null||iso(x);
+  try{
+   const p=await new Promise((resolve,reject)=>google.script.run.withFailureHandler(reject).withSuccessHandler(r=>r?.ok===true?resolve(r.value):reject(Error('UAT_PROFILE'))).study1E1SyntheticUat({operation:'caseProfile',alias,expectedSha:baseline.snapshotSha}));
+   if(epoch!==profileEpoch||visibleSnapshot!==baseline)return;
+   if(!exact(p,['formal','scope','readOnly','snapshotSha','alias','eligibility','otpStatus','otpExpiresAtUtc','bookingStatus','slot','pdfStatus','sourceSha','signedSha','signedAtUtc','noticeStatus','queuedAtUtc','acceptedAtUtc'])||p.formal!==false||p.scope!=='SYNTHETIC_CASES_ONLY'||p.readOnly!==true||p.snapshotSha!==baseline.snapshotSha||p.alias!==row.alias||p.eligibility!=='TEST_ELIGIBLE_ASSERTED'||p.otpStatus!==row.otpStatus||p.bookingStatus!==row.state||
+    !validTime(p.otpExpiresAtUtc)||(p.otpStatus.startsWith('EMAIL_')!==(p.otpExpiresAtUtc!==null))||
+    (row.slotId===null?p.slot!==null:!exact(p.slot,['id','startAtUtc','endAtUtc','holdUntilUtc'])||p.slot.id!==row.slotId||!iso(p.slot.holdUntilUtc)||!baseline.slots.some(s=>s.slotId===p.slot.id&&s.startAtUtc===p.slot.startAtUtc&&s.endAtUtc===p.slot.endAtUtc))||
+    (p.slot===null?p.sourceSha!==null:!hex(p.sourceSha))||
+    (row.pdfSaved?p.pdfStatus!=='STORED_SHA_VERIFIED'||!hex(p.signedSha)||p.signedSha===p.sourceSha||!iso(p.signedAtUtc):p.pdfStatus!=='NO_SIGNED_COPY'||p.signedSha!==null||p.signedAtUtc!==null)||
+    !Object.hasOwn(noticeLabels,p.noticeStatus)||(p.noticeStatus==='NOT_QUEUED'?p.queuedAtUtc!==null||p.acceptedAtUtc!==null:!row.pdfSaved||!iso(p.queuedAtUtc)||p.queuedAtUtc<p.signedAtUtc||(p.noticeStatus==='PROVIDER_ACCEPTED_NOT_DELIVERED'?!iso(p.acceptedAtUtc)||p.acceptedAtUtc<p.queuedAtUtc:p.acceptedAtUtc!==null)))throw Error('UAT_PROFILE');
+   profile=p;for(const [k,v] of [['個案',p.alias],['資格','合成 TEST 自陳'],['OTP',otpLabels[p.otpStatus]],['預約',labels[p.bookingStatus]],['PDF',row.pdfSaved?'儲存 SHA 已核對':'無已簽副本'],['通知',noticeLabels[p.noticeStatus]],['異常查核',review(p)]])field(profileSummary,k,v);
+   profileStatus.textContent='同一 TEST 快照已核對；唯讀，不代表即時狀態或完整歷史。';profileTab.value='basic';profileTab.disabled=false;profileOrder.value='new';profileOrder.disabled=false;drawProfile();drawTimeline();
+  }catch(_){if(epoch===profileEpoch){closeProfile();profileBox.hidden=false;profileStatus.textContent='個案來源、權限或名單已變更；請重新載入名單核對。';}}
+ };
+ if(hasProfile){profileBack.addEventListener('click',closeProfile);profileTab.addEventListener('change',drawProfile);profileOrder.addEventListener('change',drawTimeline);
+  for(const id of ['siteNoticeSend','e1PdfSelect']){const n=el(id);if(n)n.addEventListener('click',closeProfile);}
+  window.addEventListener('pagehide',closeProfile);
+ }
  const renderWorkspace=()=>{
-  if(!workspace)return;
+  closeProfile();if(!workspace)return;
   if(!visibleSnapshot){rows(caseRows,[]);rows(slotRows,[]);return;}
   const p=visibleSnapshot,search=String(query.value||'').trim().toUpperCase();
   const filtered=p.cases.filter(c=>(!search||c.alias.includes(search))&&
    (statusFilter.value==='ALL'||c.state===statusFilter.value)&&(!slotFilter.value||c.slotId===slotFilter.value));
-  rows(caseRows,filtered.map(c=>[c.alias,otpLabels[c.otpStatus],c.slotId||'未選時段',labels[c.state],c.pdfSaved?'已保存':'無']));
+  rows(caseRows,filtered.map(c=>[c.alias,otpLabels[c.otpStatus],c.slotId||'未選時段',labels[c.state],c.pdfSaved?'已保存':'無']),hasProfile?openProfile:null);
   const shown=p.slots.filter(s=>!dateFilter.value||localDate(s.startAtUtc)===dateFilter.value);
   rows(slotRows,shown.map(s=>[local(s.startAtUtc)+' – '+local(s.endAtUtc),s.slotId,s.bookable?'可預約':'不可預約',
    s.capacity,p.cases.filter(c=>c.slotId===s.slotId&&c.state==='HELD').length,
@@ -592,6 +647,14 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
  const copyScript=once(copyController,'withSuccessHandler(r=>{','withSuccessHandler(response=>{const r=response?.ok===true?response.value:null;');
  const caseTable=slice('<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>代碼</th><th>姓名</th><th>信箱驗證</th>','<div id="e1Profile"');
  const slotTable=slice('<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th>','<h3>場次變更預檢及核定後儲存</h3>');
+ const profile=slice('<div id="e1Profile"','<h3>場次與名額（臺灣時間）</h3>')
+  .replace('參與者完整資料','TEST 個案詳細資料（OWNER 唯讀）')
+  .replace('<option value="basic">基本與聯絡</option>','<option value="basic">虛構代碼與 OTP</option>')
+  .replace('<option value="execution">研究執行</option>','').replace('<option value="administration">行政紀錄</option>','').replace('<option value="history">操作歷程</option>','')
+  .replace('<option value="booking">預約出席</option>','<option value="booking">預約</option>')
+  .replace('<button id="e1ProfilePdf" type="button" hidden disabled>核對並取得完整私人 PDF</button><a id="e1ProfileDownload" hidden download rel="noopener noreferrer">下載已驗證完整 PDF</a>','')
+  .replace('原始紀錄時間軸（臺灣時間）','可核實 TEST 事件（臺灣時間）')
+  .replace('僅呈現原欄位及精確目標稽核，非完整不可變歷史；沒有來源的事件不推定。','僅呈現現存簽署、通知建立與服務商接受時間；不推定其他事件或完整歷史。');
  const statusOptions=['ALL','OTP','SLOTS','HELD','CONFIRMED','CANCELLED','EXPIRED'].map((v,i)=>'<option value="'+v+'">'+['全部','待驗證','待選時段','暫留','已確認','已取消','已逾期'][i]+'</option>').join('');
  const filters='<div class="booking-filter-grid">'+
   slice('<div><label for="e1WsQuery">','<div><label for="e1WsStatus">').replace('姓名或參與者代碼','虛構測試代碼')+
@@ -599,7 +662,7 @@ function sameSiteAdmin(source=read('gas/AdminConsole.html')){
   '<div><label for="e1WsSlotFilter">場次</label><select id="e1WsSlotFilter"><option value="">全部</option></select></div></div>';
  section=once(section,'<main>','<main>'+copy);
  section=once(section,'<h3>測試報名與預約名單</h3>','<h3>TEST 參與者名單（非正式研究資料）</h3>'+filters+
-  caseTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>代碼</th><th>信箱驗證</th><th>場次</th><th>預約</th><th>同意 PDF</th></tr></thead>'));
+  caseTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>代碼</th><th>信箱驗證</th><th>場次</th><th>預約</th><th>同意 PDF</th><th>個案</th></tr></thead>')+profile);
  section=once(section,'<h3>測試場次與剩餘名額（臺灣時間）</h3>','<h3>測試場次與剩餘名額（臺灣時間）</h3>'+
   slice('<label for="e1WsDate">','<div class="booking-table-wrap"><table class="booking-table"><thead><tr><th>日期時間</th><th>場次／地點</th>')+
   slotTable.replace(/<thead>[\s\S]*?<\/thead>/,'<thead><tr><th>日期時間</th><th>場次</th><th>狀態</th><th>容量</th><th>暫留</th><th>確認</th><th>剩餘</th></tr></thead>')+

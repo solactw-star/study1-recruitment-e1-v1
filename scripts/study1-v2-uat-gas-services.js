@@ -326,8 +326,19 @@ function study1UatNoticeRequest_(request){
   return {ok:true,value:study1UatStoreTransaction_(services,approved,null,send?{mode:'notice_send',alias:request.alias,expectedSha:request.expectedSha}:{mode:'notice_audit'})};
  }catch(e){const safe=['UAT_NOTICE_OUTCOME_UNKNOWN','UAT_NOTICE_NOT_SENDABLE','UAT_CLEANUP_STALE_PREVIEW'];return {ok:false,error:safe.includes(e?.message)?e.message:'UAT_REQUEST_REJECTED'};}
 }
+function study1UatProfileRequest_(request){
+ try{
+  study1AdminOwnerRequired_();
+  if(Array.isArray(request)||Object.keys(request).sort().join(',')!=='alias,expectedSha,operation'||
+   !/^TEST_(0[1-9]|1[0-2])$/.test(request.alias)||typeof request.expectedSha!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedSha))throw Error('UAT_REQUEST_REJECTED');
+  const approved=study1UatTrustedConfig_(),services=study1UatStoreServices_(approved.storeId);
+  services.checkCurrentConfig=()=>{study1AdminOwnerRequired_();if(JSON.stringify(study1UatTrustedConfig_())!==JSON.stringify(approved))throw Error('UAT_DOCUMENT_CONFIG_CHANGED');};
+  return {ok:true,value:study1UatStoreTransaction_(services,approved,null,{mode:'profile',alias:request.alias,expectedSha:request.expectedSha})};
+ }catch(e){return {ok:false,error:e?.message==='UAT_PROFILE_STALE'?'UAT_PROFILE_STALE':'UAT_REQUEST_REJECTED'};}
+}
 async function study1UatControlledRequest_(request){
  const deny=()=>({ok:false,error:'UAT_REQUEST_REJECTED'});
+ if(request?.operation==='caseProfile')return study1UatProfileRequest_(request);
  if(['noticeAudit','noticeSend'].includes(request?.operation))return study1UatNoticeRequest_(request);
  if(['documentCatalog','documentPreview','documentSelect'].includes(request?.operation))return study1UatDocumentRequest_(request);
  if(request?.operation==='recruitmentDraft'){

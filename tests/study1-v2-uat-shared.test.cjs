@@ -438,6 +438,18 @@ test('private GAS operation contract completes booking and real five-page PDF th
  assert.equal((await req(second)).error,'UAT_NOTICE_OUTCOME_UNKNOWN');failFlush=false;assert.equal(sends,2);
  p=await audit();assert.equal(p.cases[1].noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');
  assert.equal((await req({...second,expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,2);
+ // B04 projection is locked to the same B03 snapshot, zero mutation or send.
+ const beforeProfile=writes;
+ const profile=(alias,expectedSha=p.snapshotSha)=>req({operation:'caseProfile',alias,expectedSha});
+ const one=(await profile('TEST_01')).value,two=(await profile('TEST_02')).value;
+ assert.equal(one.alias,'TEST_01');assert.equal(one.eligibility,'TEST_ELIGIBLE_ASSERTED');assert.equal(one.otpStatus,'SIMULATED_VERIFIED');
+ assert.equal(one.bookingStatus,'CONFIRMED');assert.equal(one.slot.id,'TEST_SLOT_1');assert.equal(one.pdfStatus,'STORED_SHA_VERIFIED');assert.equal(one.signedSha,signed2.sha);
+ assert.equal(one.noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');assert.equal(two.noticeStatus,'UNKNOWN_REQUIRES_STAFF_REVIEW');assert.equal(two.slot.id,'TEST_SLOT_2');assert.equal(two.signedSha,signed3.value.sha);
+ assert.doesNotMatch(JSON.stringify(one),/tokenHash|caseId|holdKey|signKey|inkSha|owner@example|"pdf":/);
+ assert.equal((await profile('TEST_12')).ok,false);assert.equal((await profile('REAL_PERSON')).ok,false);
+ assert.equal((await profile('TEST_01','0'.repeat(64))).error,'UAT_PROFILE_STALE');
+ assert.equal((await req({operation:'caseProfile',alias:'TEST_01',expectedSha:p.snapshotSha,storeId:id})).ok,false);
+ assert.equal(writes,beforeProfile);assert.equal(sends,2);
  assert.ok(!JSON.stringify(matrix).includes(gate));assert.ok(!JSON.stringify(matrix).includes(keyA));
 });
 
@@ -678,6 +690,7 @@ test('same official site source routes preserve formal closure and require real 
   assert.equal((await c.study1E1SyntheticUat({operation:'recruitmentDraft'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'documentCatalog'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'noticeAudit'})).ok,false);
+  assert.equal((await c.study1E1SyntheticUat({operation:'caseProfile',alias:'TEST_01',expectedSha:'a'.repeat(64)})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'noticeSend'})).ok,false);
   assert.equal((await c.study1E1SyntheticUat({operation:'documentSelect'})).ok,false);
   assert.equal(c.study1SiteTestCleanup({mode:'preview'}).ok,false);
@@ -880,6 +893,32 @@ test('OWNER B08 notification controls fail closed and require independent audit 
  await send.click();assert.equal(requests.filter(r=>r.operation==='noticeSend').length,1);
  await read.click();assert.equal(pick.children.length,0);assert.equal(send.disabled,true);
  bad=true;await read.click();assert.equal(out.textContent,'');assert.equal(send.disabled,true);assert.match(status.textContent,/未核實/);
+});
+
+test('B04 case detail uses current list snapshot, ignores late reply and denies mismatch',async()=>{
+ const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),pending=[];
+ // Multiple listeners matter: B04 invalidation must not replace B08 handler.
+ const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){const prev=this[n];this[n]=async()=>{if(prev)await prev();return f();};}});
+ const markup=adapter.sameSiteAdmin();for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
+ nodes.get('e1WsStatus').value='ALL';
+ const cases=['TEST_01','TEST_02'].map(alias=>({alias,state:'OTP',slotId:null,pdfSaved:false,otpStatus:'SIMULATED_PENDING'}));
+ const snapshotSha='a'.repeat(64),preview={formal:false,scope:'SYNTHETIC_CASES_ONLY',snapshotSha,counts:{cases:2,holds:0,confirmed:0,pdfs:0},cases,slots:[{slotId:'TEST_SLOT_1',startAtUtc:'2099-01-01T01:00:00.000Z',endAtUtc:'2099-01-01T02:00:00.000Z',capacity:1,occupied:0,remaining:1,bookable:true}]};
+ const google={script:{run:{withFailureHandler(f){return {withSuccessHandler(s){return {study1SiteTestCleanup(){s({ok:true,value:preview});},study1E1SyntheticUat(r){pending.push({r,s,f});}};}};}}}};
+ const doc={getElementById:id=>nodes.get(id),createElement:()=>make()},window={google,addEventListener(){},confirm(){return false;}};
+ for(const m of markup.matchAll(/<script>([\s\S]*?)<\/script>/g))vm.runInNewContext(m[1],{document:doc,window,google});
+ const detail=alias=>({formal:false,scope:'SYNTHETIC_CASES_ONLY',readOnly:true,snapshotSha,alias,eligibility:'TEST_ELIGIBLE_ASSERTED',otpStatus:'SIMULATED_PENDING',otpExpiresAtUtc:null,bookingStatus:'OTP',slot:null,pdfStatus:'NO_SIGNED_COPY',sourceSha:null,signedSha:null,signedAtUtc:null,noticeStatus:'NOT_QUEUED',queuedAtUtc:null,acceptedAtUtc:null});
+ const panel=nodes.get('e1Profile'),summary=nodes.get('e1ProfileSummary'),rows=nodes.get('e1WsRows');
+ await nodes.get('siteTestPreview').click();
+ const click=i=>rows.children[i].children.at(-1).children[0].click();
+ const late=click(0),newer=click(1);
+ assert.equal(pending[0].r.expectedSha,snapshotSha);assert.equal(pending[1].r.alias,'TEST_02');
+ pending[1].s({ok:true,value:detail('TEST_02')});await newer;assert.match(summary.textContent,/TEST_02/);
+ pending[0].s({ok:true,value:detail('TEST_01')});await late;assert.doesNotMatch(summary.textContent,/TEST_01/);
+ nodes.get('e1ProfileTab').value='eligibility';await nodes.get('e1ProfileTab').change();assert.match(nodes.get('e1ProfileContent').textContent,/不代表 REC/);
+ const wrong=click(0);pending[2].s({ok:true,value:detail('TEST_02')});await wrong;assert.equal(summary.textContent,'');assert.match(nodes.get('e1ProfileStatus').textContent,/重新載入/);
+ const drift=click(0);pending[3].s({ok:true,value:{...detail('TEST_01'),snapshotSha:'b'.repeat(64)}});await drift;assert.equal(summary.textContent,'');
+ const inFlight=click(0);await nodes.get('siteTestPreview').click();pending[4].s({ok:true,value:detail('TEST_01')});await inFlight;assert.equal(panel.hidden,true);assert.equal(summary.textContent,'');
+ assert.ok(!nodes.has('e1ProfilePdf'));assert.ok(!nodes.has('e1ProfileDownload'));
 });
 
 test('same-site post-release evidence checks original URL, immutable content and every other deployment without authorization or mutations',()=>{

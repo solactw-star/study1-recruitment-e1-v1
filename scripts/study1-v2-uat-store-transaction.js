@@ -36,6 +36,7 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
   const k=Object.keys(maintenance).sort().join(',');
   need((maintenance.mode==='preview'&&k==='mode')||
    (maintenance.mode==='notice_audit'&&k==='mode')||
+   (maintenance.mode==='profile'&&k==='alias,expectedSha,mode'&&/^TEST_(0[1-9]|1[0-2])$/.test(maintenance.alias)&&hex(maintenance.expectedSha,64))||
    (maintenance.mode==='notice_send'&&k==='alias,expectedSha,mode'&&/^TEST_(0[1-9]|1[0-2])$/.test(maintenance.alias)&&hex(maintenance.expectedSha,64)&&typeof services.sendTestNotice==='function')||
    (maintenance.mode==='reconcile'&&k==='mode'&&typeof services.checkReconcileConfig==='function')||
    (maintenance.mode==='select_document'&&k==='expectedSha,mode,nextSourceSha'&&hex(maintenance.expectedSha,64)&&
@@ -148,11 +149,29 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
     confirmed:live.filter(c=>c.state==='CONFIRMED').length,pdfs:live.filter(c=>c.pdf!=='').length};
    const snapshotSha=services.digest(Array.from(JSON.stringify([config.gateSha,config.sourceSha,slots,counts,initial.raw]),c=>c.charCodeAt(0)));
    need(hex(snapshotSha,64),'UAT_CLEANUP_DIGEST');
+   const effective=c=>c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state;
+   const otpStatus=c=>(c.emailOtp?'EMAIL_':'SIMULATED_')+(c.state==='CANCELLED'?'CANCELLED':
+     c.state!=='OTP'?'VERIFIED':c.emailOtp&&Date.parse(c.emailOtp.expiresAt)<=at?'EXPIRED':'PENDING');
+   const noticeStatus=c=>!c.bookingNotice?'NOT_QUEUED':c.bookingNotice.status==='PROVIDER_ACCEPTED'?'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW';
+   if(maintenance.mode==='profile'){
+    need(maintenance.expectedSha===snapshotSha,'UAT_PROFILE_STALE');
+    const c=live.find(x=>x.alias===maintenance.alias);need(c,'UAT_PROFILE_NOT_FOUND');
+    const slot=slots.find(s=>s[0]===c.slotId);
+    // Only explicit source facts; not an actual screening, identity or attendance assertion.
+    const value={formal:false,scope:'SYNTHETIC_CASES_ONLY',readOnly:true,snapshotSha,alias:c.alias,
+     eligibility:'TEST_ELIGIBLE_ASSERTED',otpStatus:otpStatus(c),otpExpiresAtUtc:c.emailOtp?.expiresAt||null,
+     bookingStatus:effective(c),slot:slot?{id:slot[0],startAtUtc:slot[1],endAtUtc:slot[2],holdUntilUtc:c.holdUntil}:null,
+     pdfStatus:c.state==='CONFIRMED'?'STORED_SHA_VERIFIED':'NO_SIGNED_COPY',
+     sourceSha:c.sourceSha||null,signedSha:c.signedSha||null,signedAtUtc:c.signedAt||null,
+     noticeStatus:noticeStatus(c),queuedAtUtc:c.bookingNotice?.queuedAtUtc||null,acceptedAtUtc:c.bookingNotice?.acceptedAtUtc||null};
+    need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
+    if(typeof services.checkCurrentConfig==='function')services.checkCurrentConfig();owned();
+    return value;
+   }
    // Mirror original B08 outbox semantics in the isolated case, never formal Notifications.
    if(maintenance.mode==='notice_audit'){
     need(equal(snapshot().raw,initial.raw),'UAT_STORE_CHANGED');
-    const cases=live.map(c=>({alias:c.alias,bookingStatus:c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state,
-     noticeStatus:!c.bookingNotice?'NOT_QUEUED':c.bookingNotice.status==='PROVIDER_ACCEPTED'?'PROVIDER_ACCEPTED_NOT_DELIVERED':'UNKNOWN_REQUIRES_STAFF_REVIEW',
+    const cases=live.map(c=>({alias:c.alias,bookingStatus:effective(c),noticeStatus:noticeStatus(c),
      queuedAtUtc:c.bookingNotice?.queuedAtUtc||null,acceptedAtUtc:c.bookingNotice?.acceptedAtUtc||null}));
     return {formal:false,scope:'SYNTHETIC_CASES_ONLY',readOnly:true,snapshotSha,cases};
    }
@@ -181,10 +200,6 @@ function study1UatStoreTransaction_(services,config,choose,maintenance){
    if(maintenance.mode==='preview'){
     // Owner maintenance projection: only validated synthetic aliases and
     // booking status, never hashes, keys, PDF bytes or stored raw rows.
-    const effective=c=>c.state==='HELD'&&Date.parse(c.holdUntil)<=at?'EXPIRED':c.state;
-    // Derive verification status only; presence of emailOtp never proves delivery.
-    const otpStatus=c=> (c.emailOtp?'EMAIL_':'SIMULATED_')+(c.state==='CANCELLED'?'CANCELLED':
-     c.state!=='OTP'?'VERIFIED':c.emailOtp&&Date.parse(c.emailOtp.expiresAt)<=at?'EXPIRED':'PENDING');
     const cases=live.map(c=>({alias:c.alias,state:effective(c),slotId:c.slotId||null,
      pdfSaved:c.state==='CONFIRMED',otpStatus:otpStatus(c)}));
     const slotSummary=slots.map(s=>{
