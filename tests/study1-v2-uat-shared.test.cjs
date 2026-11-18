@@ -832,7 +832,7 @@ test('OWNER B10 TEST PDF browser controls verify bytes and require current previ
  const realm=vm.createContext({Date,Uint8Array,Utilities:{DigestAlgorithm:{SHA_256:'SHA_256'},computeDigest:(_,b)=>Array.from(crypto.createHash('sha256').update(Buffer.from(b)).digest())}});
  for(const p of ['gas/Study1PdfLib.js','gas/Study1PdfStampCore.js','scripts/study1-v2-uat-session.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',p),'utf8'),realm);
  const docs=await realm.study1UatDocumentCatalog_(),entries=docs.map(d=>({version:d.layout.version,sha:d.hash,pageCount:5}));
- const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text;},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){this[n]=f;}});
+ const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text;},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){const prev=this[n];this[n]=(...args)=>Promise.all([prev?.(...args),f(...args)]);}});
  for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
  assert.ok(!nodes.has('e1PdfFile'));assert.ok(!nodes.has('e1PdfSource'));
  let active=entries[0].sha,cases=0,badPdf=false,unknown=false;
@@ -866,7 +866,7 @@ test('OWNER B10 TEST PDF browser controls verify bytes and require current previ
 
 test('OWNER B08 notification controls fail closed and require independent audit after unknown result',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),requests=[];
- const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){this[n]=f;}});
+ const markup=adapter.sameSiteAdmin(),make=()=>({value:'',checked:false,disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){const prev=this[n];this[n]=(...args)=>Promise.all([prev?.(...args),f(...args)]);}});
  for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
  const pending={alias:'TEST_01',bookingStatus:'CONFIRMED',noticeStatus:'NOT_QUEUED',queuedAtUtc:null,acceptedAtUtc:null};
  const unknown={alias:'TEST_02',bookingStatus:'CONFIRMED',noticeStatus:'UNKNOWN_REQUIRES_STAFF_REVIEW',queuedAtUtc:'2026-11-18T01:00:00.000Z',acceptedAtUtc:null};
@@ -898,7 +898,7 @@ test('OWNER B08 notification controls fail closed and require independent audit 
 test('B04 case detail uses current list snapshot, ignores late reply and denies mismatch',async()=>{
  const vm=require('node:vm'),adapter=require('../scripts/study1-v2-uat-original-visitor.cjs'),nodes=new Map(),pending=[];
  // Multiple listeners matter: B04 invalidation must not replace B08 handler.
- const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){const prev=this[n];this[n]=async()=>{if(prev)await prev();return f();};}});
+ const make=()=>({value:'',disabled:false,hidden:false,children:[],_text:'',set textContent(v){this._text=String(v);this.children=[];},get textContent(){return this._text+this.children.map(x=>x.textContent).join(' ');},appendChild(n){this.children.push(n);},removeAttribute(k){delete this[k];},addEventListener(n,f){const prev=this[n];this[n]=(...args)=>Promise.all([prev?.(...args),f(...args)]);}});
  const markup=adapter.sameSiteAdmin();for(const m of markup.matchAll(/id="([^"]+)"/g))nodes.set(m[1],make());
  nodes.get('e1WsStatus').value='ALL';
  const cases=['TEST_01','TEST_02'].map(alias=>({alias,state:'OTP',slotId:null,pdfSaved:false,otpStatus:'SIMULATED_PENDING'}));
