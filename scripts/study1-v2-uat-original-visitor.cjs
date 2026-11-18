@@ -431,6 +431,15 @@ function requireSameSiteSourceDelta(anonymous,result){
  }
  return sha;
 }
+const siteTestRpc = `async function study1E1SyntheticUat(request){
+ try{study1AdminOwnerRequired_();}catch(_){return {ok:false,error:"UAT_REQUEST_REJECTED"};}
+ return study1UatControlledRequest_(request);
+}
+function study1SiteTestCleanup(request){
+ return study1SiteTestCleanupRequest_(request);
+}
+`;
+
 function sameSiteCandidate(){
  const core=require('./study1-v2-release-source.cjs'),base=core.localSources();
  const prior=onlineCandidate(base),anonymous=core.anonymousReadOnlyCandidate(base);
@@ -457,8 +466,7 @@ function sameSiteCandidate(){
    study1UatTrustedConfig_();
    t.flowMode='GAS_UAT';
   }`);
-  source+='\nasync function study1E1SyntheticUat(request){\n try{study1AdminOwnerRequired_();}catch(_){return {ok:false,error:"UAT_REQUEST_REJECTED"};}\n return study1UatControlledRequest_(request);\n}\n';
-  source+='\nfunction study1SiteTestCleanup(request){\n return study1SiteTestCleanupRequest_(request);\n}\n';
+  source+='\n'+siteTestRpc;
   return {...f,source};
  });
  requireSameSiteSourceDelta(anonymous,result);core.closedWebsite(result);
@@ -468,6 +476,23 @@ function sameSiteCandidate(){
  let rejected=false;try{core.publicRpcSurface(result);}catch(_){rejected=true;}
  if(!rejected)throw Error('SAME_SITE_REQUIRES_RELEASE_REVIEW');
  return result;
+}
+
+// Apply the existing public RPC guard to the entire inherited RPC surface.
+// Recognize only the exact same-site wrappers, after binding all bytes to
+// this checkout, including the OWNER gate and the isolated store services.
+function requireSameSiteReleaseSource(files){
+ const core=require('./study1-v2-release-source.cjs');
+ const sourceSha=core.digest(files);
+ if(sourceSha!==core.digest(sameSiteCandidate()))throw Error('SAME_SITE_RELEASE_SOURCE_MISMATCH');
+ const inherited=files.map(f=>{
+  if(f.name!=='Website')return f;
+  if(!f.source.endsWith(siteTestRpc))throw Error('SAME_SITE_RELEASE_RPC_BOUNDARY');
+  return {...f,source:f.source.slice(0,-siteTestRpc.length)};
+ });
+ core.publicRpcSurface(inherited);
+ core.closedWebsite(files);
+ return sourceSha;
 }
 
 /* Evidence-only check for the later, independently authorized update of
@@ -523,4 +548,4 @@ function verifySameSiteReadback({before,after,priorDirect,currentDirect,newConte
   version:current.version,sourceSha256:target};
 }
 
-module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate,requireSameSiteSourceDelta,verifySameSiteReadback};
+module.exports={originalVisitor,gasController,onlineCandidate,sameSiteVisitor,sameSiteAdmin,sameSiteCleanupController,sameSiteCandidate,requireSameSiteSourceDelta,requireSameSiteReleaseSource,verifySameSiteReadback};
