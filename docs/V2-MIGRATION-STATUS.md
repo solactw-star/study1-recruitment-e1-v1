@@ -1,6 +1,14 @@
 # Study1 V2 建置與發布進度（更新 2026-11-19，Asia/Taipei）
 
-## 最新接續點｜2026-11-19 原部署第 11 版
+## 最新接續點｜2026-11-19 原部署第 12 版，正式來源資料待提供
+
+- 使用者已明確授權接續完成正式時段、研究者預簽 PDF 與收件啟用，不要求重複一般啟用授權；核准適用性與實際正式來源不能由工程代填。維持不進行功能測試、不碰 V1。
+- 本次唯讀原正式 Slots!A1:H1000 只有八欄表頭、0 筆場次；SystemConfig!A1:D30 的 OPEN／CONSENT_READY 仍為 false。原五頁 E1 PDF 第 4 頁研究者簽名及日期均空白，電子同意限制存取資料夾目前空白；未把該未簽 PDF 選為正式預簽來源。
+- 第 11 版缺少 SITE_RESOURCES_ 宣告。本次以私人 Script Property `STUDY1_V2_FORMAL_RESOURCES_V1` 保存既有兩本正式工作簿對應並重新載入回讀一致；公開程式只讀私人設定，原 adapters 的 exact ID 核對保留。程式提交 `35a3155561cea067c522a48ddc5c6f4c9af0334f`，原部署已更新第 12 版；[發布 44473293211](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44473293211) 成功，來源 SHA-256 `e371798746b1e6548a816375d641859f591a2d2491c29a874c6ad04a58f609f4`，HEAD／不可變版本／原部署直接回讀相符，未開啟收件。
+- 集中待提供：①首批正式日期、起訖時間、地點及每場名額；②研究者已簽名並填日期的完整 E1 PDF 連結；③PI／研究行政對線上報名、Email OTP、遠端電子同意與 Sheets／Drive 保存方式的適用核准確認人及依據；④已簽 PDF 副本連結有效時數（現行程式接受 1–720 小時）。剩餘技術屬性由工程在來源與核准齊備後配置，不將未執行的技術項目假填 VERIFIED=true。已提出一次集中問題，待回覆，不反覆要求相同操作。
+- 本次未手動執行功能測試、寄信、簽署或清除；既有發布工作流內建自動檢查照常執行。沒有寫正式資料列、修改四個收件旗標、PDF 來源／ACL 或 V1。以下第 11 版摘要為歷史接續點。
+
+## 前次接續點｜原部署第 11 版
 
 - 最新工程指令：正式規格 §70-S.52；AGENTS 與原每小時網站建置排程已同步，維持原頻率及啟用狀態。先交付正式 E1 功能、不主動新增或執行驗收測試。
 - 正式 E1 七步入口接線已提交 `e11e41cb1d51492e92c0cd804ccdc70095d75027` 並發布到原 V2 第 11 版；[發布 Run 44470828448](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470828448) 成功，官方 API 直接回讀 HEAD／不可變版本／原部署一致，來源 SHA-256 `3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865`。本次最後文件提交只更新進度，不需再次部署。
@@ -1292,3 +1300,12 @@
 - [官方唯讀預檢 44470508682](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470508682) main=e11e41c 成功；原始輸出 candidateSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865、headSha=86246ae72e7f670025773db0e5fe0779c8907bff03ededf941449be9a4481305、deployedVersion=10、deployedSourceSha 同舊 HEAD、mutationPerformed=false。沿用既有 V2_GAS_CLASPRC_JSON；未查看／輸出 Secret、未重建 OAuth。
 - [單次發布 44470828448](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470828448) Job 135379589283 成功，原始輸出 previousVersion=10、version=11、candidateSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865、mutationPerformed=true。official client 在成功輸出前直接核對 HEAD、不可變第 11 版及原部署指向，保留原 deployment ID AKfycbyfbWLyabMOd2y5LpUpyYzVTuoooeK_prZkmfWHhCTARZAFsfl2Ww9OBtlCQjUCkRQ／原 URL／ANYONE_ANONYMOUS／USER_DEPLOYING；未建立新部署或改其他版本。LAST_VERIFIED_STEP=OFFICIAL_API_HEAD_VERSION_11_ORIGINAL_DEPLOYMENT_READBACK_MATCH。
 - TEST、真人報名、Email、簽署、正式資料與清除 UI 本輪均未操作，未新增測試；既有發布工作流內建 node --test 自動步驟保留且執行，因此本次不可聲稱「任何測試都沒執行」。FUNCTIONAL_ACCEPTANCE=NOT_RUN_PER_USER_REQUEST；四旗標／正式 Sheets／Drive／場次／PDF／ACL／研究核准未異動、未碰 V1。BLOCKERS=正式全流程尚未驗收，真人啟用資料／適用核准與獨立啟用授權尚未於本輪確認；NEXT_ACTION=依使用者實際功能回饋修正，只有涉及真人收件／正式資料時才提出精確核准缺口，不再重複舊 OAuth／發布盤點。
+
+### 2026-11-19｜正式上線設定核對、私人資料表對應及原 V2 第 12 版
+- TASK_DOMAIN=Study1_V2_E1_LIVE_CONFIGURATION；SOURCE_ID/PATH=原 V2 Script 專案設定、原正式營運表 Slots／SystemConfig、既有 E1 五頁 PDF、電子同意限制存取資料夾、scripts/study1-v2-formal-entry.cjs；SOURCE_VERSION/SHA=main 起始 7d60e37c58f025f142e5c3e14d2ad4bbf5efa431，程式 35a3155561cea067c522a48ddc5c6f4c9af0334f；WRITE_OWNER=唯一 V2 原程式／Script 私人設定／原部署／本進度。最新指示已授權正式配置與收件啟用，但不得代填研究權責方尚未提供的場次、簽章或核准結論。
+- 唯讀證據：V2 設定原只有 SYNTHETIC_UAT 與 Turnstile hostname／secret／sitekey 四項；四個收件旗標與正式 slot registry／REC intake policy／remote consent policy／binding HMAC 均未設置，缺值為關閉，不能將原第 11 版發布當營運設定已完成。正式工作簿 metadata 可讀；Slots!A1:H1000 只有標頭，0 筆正式場次，非無權限錯誤。SystemConfig!A1:D30 的 OPEN／CONSENT_READY 為 false。沒有讀取 Applicants／Verification／Reservations 真人資料列。
+- 原同意書資料夾只有既有五頁 E1 PDF；電子同意限制存取子資料夾為空。內建瀏覽器唯讀檢視第 4 頁「十二、研究計畫主持人／研究人員簽名」，研究人員簽名與日期均空白；第 5 頁參與者簽名亦空白。不以 filename／既有私人 PDF 推定 researcherPresigned=true，不代簽、不發布／替換／變更 ACL。PI／研究行政適用核准與已簽副本期限仍待權責方提供，不重做 Google API／OAuth 盤點。
+- COMPLETED=PRIVATE_FORMAL_WORKBOOK_MAPPING_SAVED_AND_V12_PUBLISHED。原 GAS source 有 SITE_RESOURCES_ 的 exact identity guard，但沒有任何宣告，本次補為讀取私人 `STUDY1_V2_FORMAL_RESOURCES_V1`；只允許 personal／operations 兩欄與合法 ID 格式，缺值或不合法回傳 null，原資料層精確身分核對保留。不建立／搬移／複製／寫入 Sheets，不變更收件 gate。設定只新增該一筆映射，原四項保留；儲存後重新載入並比對兩本原工作簿一致，沒有輸出 Secret。
+- 平台自動審查曾拒絕將含正式 workbook ID 的新增程式提交公開 repo，原文「這會把含正式 Google Sheets 資源 ID 的程式碼提交到公開 GitHub repo，屬未明確授權的敏感資料外傳；應先移除或改用安全的既有設定注入方式。」該提交未執行。改為私人設定注入後提交成功；未繞過審查、未要求新增對外揭露授權、未提交被拒內容。
+- 官方唯讀預檢 [44472993241](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44472993241) 成功：candidateSha=e371798746b1e6548a816375d641859f591a2d2491c29a874c6ad04a58f609f4，headSha／deployedSourceSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865，deployedVersion=11，mutationPerformed=false。單次發布 [44473293211](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44473293211) Job 135387694795 成功，previousVersion=11、version=12、candidateSha 同本次目標、mutationPerformed=true；官方 client 成功輸出前核對 HEAD／不可變第 12 版／原部署指向與 ID／URL／ACL，一致才成功。既有 Secret 與 OAuth 沿用，未建立新部署。
+- LAST_VERIFIED_STEP=PRIVATE_PROPERTY_RELOAD_MATCH_AND_ORIGINAL_V12_SOURCE_READBACK；SYNC_STATUS=V12_DEPLOYED_LIVE_CONFIGURATION_PARTIAL；FUNCTIONAL_TESTS=NOT_RUN_MANUALLY，既有工作流自動檢查保留並執行，不宣稱完全零測試或正式功能驗收完成。BLOCKERS=OFFICIAL_SLOTS_EMPTY、RESEARCHER_PRESIGNED_PDF_MISSING、PI_SCOPE_CONFIRMATION_MISSING、SIGNED_COPY_LINK_HOURS_UNDECIDED；NEXT_ACTION=取得本輪已集中詢問的四項資料後配置原正式場次登錄／PDF／核准來源／必要安全設定，再依當時平台確認規則完成收件啟用。未發真人信、未寫正式資料列、未重建 OAuth、未碰 V1；不將一般啟用授權重問當阻塞，也不將工程自行設定視作 PI／REC 核准。
