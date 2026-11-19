@@ -152,6 +152,31 @@ test('OWNER TEST accepts only the exact deployed GAS iframe hostname and refuses
  assert.throws(()=>x.scope.study1UatTurnstileConfig_(),/BOT_PROTECTION_PROVIDER_NOT_READY/);
  assert.equal(x.calls,0);
 });
+test('Isolated intake requires Siteverify before creating a case or sending OTP and rejects token replay',async()=>{
+ const x=harness();
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-uat-gas-services.js'),'utf8'),x.scope);
+ const cache=new Map();let created=0;
+ x.scope.CacheService={getScriptCache:()=>({get:k=>cache.get(k),put:(k,v)=>cache.set(k,v)})};
+ x.scope.study1PdfDigest_=value=>sha(Buffer.from(value));
+ x.scope.study1UatTrustedConfig_=()=>({storeId:'ISOLATED'});
+ x.scope.study1UatGasOperation_=async(config,access,operation,payload,check,verifyHuman)=>{
+  assert.equal(config.storeId,'ISOLATED');assert.equal(Object.hasOwn(payload,'humanToken'),false);
+  verifyHuman();created++;return {stage:'OTP'};
+ };
+ const request={operation:'emailStart',gate:'a'.repeat(64),caseKey:'b'.repeat(64),
+  payload:{alias:'TEST_01',eligible:true}};
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).error,'UAT_TURNSTILE_REQUIRED');
+ assert.equal(created,0);assert.equal(x.calls,0);
+ request.payload.humanToken=x.request.humanToken;
+ x.replies.push({success:true,hostname:'script.google.com',action:'study1_e1_owner_test',challenge_ts:new Date().toISOString()});
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).ok,true);
+ assert.equal(created,1);assert.equal(x.calls,1);
+ assert.equal((await x.scope.study1UatControlledRequest_({...request,caseKey:'c'.repeat(64)})).error,'UAT_TURNSTILE_REUSED');
+ assert.equal(created,1);assert.equal(x.calls,1);
+ cache.clear();x.replies.push({success:false,'error-codes':['timeout-or-duplicate']});
+ assert.equal((await x.scope.study1UatControlledRequest_(request)).error,'timeout-or-duplicate');
+ assert.equal(created,1);assert.deepEqual(x.reads,[]);
+});
 test('Bogus, absent and overlength human tokens fail before Siteverify',()=>{
  const x=harness();
  for(const token of ['',undefined,'a'.repeat(2049),'<script>alert(1)</script>']){

@@ -409,7 +409,10 @@ test('private GAS operation contract completes booking and real five-page PDF th
  assert.equal((await req(selection)).ok,false);assert.equal(propertyWrites,1);
  const openBefore=opens;await assert.rejects(realm.study1UatGasOperation_({...config,gateSha:hash(newGate)},{gate:newGate,caseKey:'7'.repeat(64)},'start',{alias:'TEST_01',eligible:true},()=>{throw Error('UAT_DOCUMENT_CONFIG_CHANGED');}),/UAT_DOCUMENT_CONFIG_CHANGED/);assert.equal(opens,openBefore);assert.equal(writes,beforeSelect);
  const testKey='8'.repeat(64),call=(operation,payload={})=>req({operation,payload,gate:newGate,caseKey:testKey});
- assert.equal((await call('start',{alias:'TEST_01',eligible:true})).ok,true);
+ realm.CacheService={getScriptCache:()=>({get:()=>null,put:()=>{}})};
+ realm.study1UatTurnstileConfig_=()=>({host:'TEST_HOST'});
+ realm.study1UatTurnstileSiteverify_=()=>{};
+ assert.equal((await call('start',{alias:'TEST_01',eligible:true,humanToken:'SYNTHETIC_TOKEN_FOR_UNIT_TESTS_12345678'})).ok,true);
  const nonempty=(await req({operation:'documentCatalog'})).value;assert.equal(nonempty.cases,1);
  assert.equal((await req({...selection,version:'UAT-SYNTHETIC-1',targetSha:original.hash,activeSha:nonempty.activeSha,expectedSha:nonempty.snapshotSha})).error,'UAT_DOCUMENT_REQUIRES_EMPTY');assert.equal(propertyWrites,1);
  assert.equal((await call('verify',{code:'12345678'})).ok,true);
@@ -429,7 +432,7 @@ test('private GAS operation contract completes booking and real five-page PDF th
  p=await audit();assert.equal(p.cases[0].noticeStatus,'PROVIDER_ACCEPTED_NOT_DELIVERED');
  assert.equal((await req({...noticeSend,expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,1);
  const key2='6'.repeat(64),op2=(operation,payload={})=>req({operation,payload,gate:newGate,caseKey:key2});
- await op2('start',{alias:'TEST_02',eligible:true});p=await audit();
+ await op2('start',{alias:'TEST_02',eligible:true,humanToken:'SYNTHETIC_TOKEN_FOR_UNIT_TESTS_SECOND'});p=await audit();
  assert.equal((await req({...noticeSend,alias:'TEST_02',expectedSha:p.snapshotSha})).error,'UAT_NOTICE_NOT_SENDABLE');assert.equal(sends,1);
  await op2('verify',{code:'12345678'});await op2('hold',{slotId:'TEST_SLOT_2',requestId:'7'.repeat(32)});
  const signed3=await op2('sign',{...sign,requestId:'8'.repeat(32),sourceSha:chosen.sha});assert.equal(signed3.ok,true);
@@ -558,6 +561,7 @@ test('original seven-step GAS controller uses narrow RPC, blocks ambiguous mutat
  vm.runInContext('('+gasController.toString()+')();',ctx);
  const click=id=>el(id).listeners.click();
  el('uatGate').value='a'.repeat(64);el('testAlias').value='TEST_01';el('fictionalEligible').checked=true;
+ el('siteTurnstileToken').value='VALID_TEST_TOKEN_'+'a'.repeat(32);
  await click('chooseE1');await click('screenNext');assert.equal(el('step-otp').hidden,false);
  el('otpInput').value='bad';await click('otpVerify');assert.deepEqual(calls,['start']);
  el('otpInput').value='12345678';await click('otpVerify');assert.equal(el('step-slots').hidden,false);
