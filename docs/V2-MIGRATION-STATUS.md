@@ -1,6 +1,15 @@
 # Study1 V2 建置與發布進度（更新 2026-11-19，Asia/Taipei）
 
-## 最新接續點｜2026-11-19 原部署第 12 版，正式來源資料待提供
+## 最新接續點｜2026-11-19 原部署第 12 版，正式場次與 72 小時已保存
+
+- 使用者已提供正式場次、預簽 PDF 資料夾、明確確認「依建議，確認一律核准」、副本 72 小時，並補充 13:00–14:00 休息；不得再沿用下方歷史「四項全缺」或重問一般核准／期限。
+- 已在原 Slots!A2:H4 寫入並回讀三場：2026-12-07 臺灣時間 09:00–11:00、11:00–13:00、14:00–16:00，各 1 人、828 研究室。13:00–14:00 未建立場次，未建立測試或參與者預約。
+- 原 V2 私人 Script Properties 已儲存 72 小時及其核准、intake／資料使用／正式 Sheets／Email OTP 核發與核驗／booking 的使用者核准，另存本輪明確授權及休息時間的私人紀錄；重新載入逐值比對一致，原五項設定保留。這些是使用者核准，不是假報功能已測通過；四個正式收件開關仍未設定為 true。
+- 新提供五頁 PDF 第 4 頁已見研究者手寫簽名，但日期仍空白；已集中詢問實際預簽日期與填入該欄之授權，尚未代填／改檔／選作正式預簽來源。原新 PDF 目前允許知道連結者編輯，正式系統後續須取獨立私人副本並綁實際 bytes／SHA，不能直接信任可變來源；本輪未改原檔或其權限。已建立核可證書的私人參照副本，metadata 回讀為 owner-only，原證書不變。
+- 實際 OWNER 編輯器導覽失敗：由 Google 帳戶選單給出的研究室帳戶連結開啟原 V2 後，Google 回傳「400. 發生錯誤。」「伺服器無法處理格式錯誤的要求，請勿重試。目前無法提供更明確的錯誤資訊。」未繞過 OWNER 驗證、不以其他帳戶代行 OWNER 專屬準備／啟用。其餘可獨立設定已完成。
+- 尚未執行正式來源綁定／HMAC 與 OTP 金鑰準備／PDF 選用與簽署位置固定／剩餘技術設定或收件開啟；不將同意與來源資料到位推定為技術已完成。保持原第 12 版，本輪未重部署、未做功能測試、未寄信、未簽署或碰 V1。接續需補妥預簽日期及恢復 OWNER 可正常開啟原專案，之後繼續配置並只作設定回讀；最終公開啟用另遵循平台當次確認要求。
+
+## 前次接續點｜原部署第 12 版與缺件核對（歷史）
 
 - 使用者已明確授權接續完成正式時段、研究者預簽 PDF 與收件啟用，不要求重複一般啟用授權；核准適用性與實際正式來源不能由工程代填。維持不進行功能測試、不碰 V1。
 - 本次唯讀原正式 Slots!A1:H1000 只有八欄表頭、0 筆場次；SystemConfig!A1:D30 的 OPEN／CONSENT_READY 仍為 false。原五頁 E1 PDF 第 4 頁研究者簽名及日期均空白，電子同意限制存取資料夾目前空白；未把該未簽 PDF 選為正式預簽來源。
@@ -1309,3 +1318,12 @@
 - 平台自動審查曾拒絕將含正式 workbook ID 的新增程式提交公開 repo，原文「這會把含正式 Google Sheets 資源 ID 的程式碼提交到公開 GitHub repo，屬未明確授權的敏感資料外傳；應先移除或改用安全的既有設定注入方式。」該提交未執行。改為私人設定注入後提交成功；未繞過審查、未要求新增對外揭露授權、未提交被拒內容。
 - 官方唯讀預檢 [44472993241](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44472993241) 成功：candidateSha=e371798746b1e6548a816375d641859f591a2d2491c29a874c6ad04a58f609f4，headSha／deployedSourceSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865，deployedVersion=11，mutationPerformed=false。單次發布 [44473293211](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44473293211) Job 135387694795 成功，previousVersion=11、version=12、candidateSha 同本次目標、mutationPerformed=true；官方 client 成功輸出前核對 HEAD／不可變第 12 版／原部署指向與 ID／URL／ACL，一致才成功。既有 Secret 與 OAuth 沿用，未建立新部署。
 - LAST_VERIFIED_STEP=PRIVATE_PROPERTY_RELOAD_MATCH_AND_ORIGINAL_V12_SOURCE_READBACK；SYNC_STATUS=V12_DEPLOYED_LIVE_CONFIGURATION_PARTIAL；FUNCTIONAL_TESTS=NOT_RUN_MANUALLY，既有工作流自動檢查保留並執行，不宣稱完全零測試或正式功能驗收完成。BLOCKERS=OFFICIAL_SLOTS_EMPTY、RESEARCHER_PRESIGNED_PDF_MISSING、PI_SCOPE_CONFIRMATION_MISSING、SIGNED_COPY_LINK_HOURS_UNDECIDED；NEXT_ACTION=取得本輪已集中詢問的四項資料後配置原正式場次登錄／PDF／核准來源／必要安全設定，再依當時平台確認規則完成收件啟用。未發真人信、未寫正式資料列、未重建 OAuth、未碰 V1；不將一般啟用授權重問當阻塞，也不將工程自行設定視作 PI／REC 核准。
+
+### 2026-11-19｜首批正式場次、休息時間與 72 小時／使用者核准設定
+- TASK_DOMAIN=Study1_V2_E1_OFFICIAL_SLOT_AND_APPROVAL_CONFIGURATION；SOURCE_ID/PATH=原 Slots!A1:H5、原 V2 Script Properties、使用者本輪提供的 E1 PDF、Google OWNER 帳戶導覽；SOURCE_VERSION/SHA=main 636f0b876301b3049a9fa7e828ab5d15ce642a9b／原部署第 12 版；WRITE_OWNER=使用者明確授權的原正式 Slots 與 V2 私人設定、本進度主檔。使用者提供「12/07，09:00~16:00，地點828研究室，每場2小時，名額1」「依建議，確認一律核准」「72小時」，後續補充「13:00~14:00休息」。日期以當期 2026 年、Asia/Taipei 處理。
+- COMPLETED=THREE_OFFICIAL_SLOTS_AND_72H_APPROVALS_SAVED。寫前 Slots metadata／CellData 確認原八欄標頭、目標三列空白且無 validation／公式；單次 updateCells 只寫 A2:H4，保留格式／其他工作表與資料。回讀三場 UTC 起訖為 01:00–03:00、03:00–05:00、06:00–08:00，各 capacity=1、location_code=828研究室、status=OPEN，created_by=USER_APPROVED_20261119，updated_at_utc=2026-11-19T07:01:19.000Z。這是場次建立，不是預約或功能測試；正式總收件仍關閉。
+- 原私人屬性新增並逐值回讀：STUDY1_E1_PDF_COPY_ACCESS_HOURS=72、STUDY1_E1_PDF_COPY_ACCESS_HOURS_APPROVED=true、STUDY1_E1_INTAKE_APPROVED=true、STUDY1_PARTICIPANT_DATA_USE_APPROVED=true、STUDY1_ECONSENT_LIVE_SHEETS_APPROVED=true、STUDY1_PARTICIPANT_EMAIL_ISSUE_APPROVED=true、STUDY1_PARTICIPANT_EMAIL_VERIFY_APPROVED=true、STUDY1_E1_BOOKING_APPROVED=true；STUDY1_E1_LAUNCH_AUTHORIZATION_V1 私人紀錄本輪原確認、三場／休息時間／72h、預簽日期仍待確認及不做功能測試。重新載入後 propertyCount=14、全部九項新增設定相符、原私人工作簿對應存在；OPEN／CONSENT_READY／FORMAL_READY／LIVE_INTAKE_ENABLED 未新增為 true。未輸出或改動 Turnstile Secret，未重建 OAuth。
+- 文件唯讀核對：新 PDF 5 頁／432368 bytes，第 4 頁見研究者簽名但日期欄空白；已發一次針對實際預簽日期與代填日期授權的問題，未收到即不代填、不選用。metadata 顯示來源具有 anyone writer，不能直接當不可變正式簽署來源。已複製原核可證書到既有私人網站資料夾並回讀 90157 bytes、原父資料夾、僅 user owner 權限；未改原證書、原 PDF 或分享權限。未將新來源／私人副本 ID 或筆跡寫入公開 repo。
+- OWNER 實際阻擋：目前內建預設 Google 帳戶為原專案可編輯帳戶；Google 帳戶選單提供研究室 solac.tw@gmail.com 的原 V2 專案連結，開啟後導向 /u/2/ 原專案，頁面原文「400. 發生錯誤。」「伺服器無法處理格式錯誤的要求，請勿重試。目前無法提供更明確的錯誤資訊。」未重試寫入、不調低 OWNER guard、不用 effective user 冒充訪客；因此尚未執行 OWNER 專屬正式準備或啟用。
+- LAST_VERIFIED_STEP=ORIGINAL_SLOTS_AND_PRIVATE_APPROVAL_PROPERTIES_READBACK_MATCH；SYNC_STATUS=OFFICIAL_SLOTS_AND_72H_CONFIGURED_INTAKE_STILL_CLOSED；BLOCKERS=RESEARCHER_SIGNATURE_DATE_MISSING、OWNER_EDITOR_GOOGLE_HTTP_400；NEXT_ACTION=取得實際預簽日期並補妥正式 PDF、恢復研究室 OWNER 原專案編輯器後，完成私人固定 PDF／layout／核准來源綁定、slot registry HMAC／正式 OTP key 與其他必要技術屬性，再作設定回讀及平台要求之最終當次收件確認。這些技術步驟仍未完成，不能把 user-approved=true 冒充 VERIFIED。一般核准、場次、休息時間及72h已獲授權，不重問。
+- 本輪未做任何功能／寄信／簽署／預約測試，未手動觸發 CI／發布，未開真人收件、未讀寫真人資料列、未碰 V1。正式程式／GAS HEAD／部署保持第12版；只提交實際設定及阻塞證據，不提交未執行的本地設定工具草稿。
