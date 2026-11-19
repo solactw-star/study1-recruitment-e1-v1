@@ -14,6 +14,20 @@ const liveReadiness="if(!study1V2FormalEntryOpen_())return {ready:false,experime
 const closedConfig="function getPublicConfig(){return {open:false,consentReady:false,contact:SITE_CONTACT_,mode:'CLOSED_INFORMATION'};}";
 const liveConfig="function getPublicConfig(){const ready=study1ParticipantReadiness().ready===true;return {open:ready,consentReady:ready,contact:SITE_CONTACT_,mode:ready?'FORMAL_E1':'CLOSED_INFORMATION'};}";
 const helpers=`
+/** Private V2 configuration only; the original adapters still verify exact
+ * workbook identity. Missing/malformed configuration disables formal reads.
+ * No Sheet creation, migration, mutation or intake enablement occurs here. */
+var SITE_RESOURCES_=(function(){
+ try{
+  const raw=PropertiesService.getScriptProperties().getProperty('STUDY1_V2_FORMAL_RESOURCES_V1');
+  if(typeof raw!=='string'||raw.length>500)return null;
+  const resources=JSON.parse(raw);
+  if(!resources||Array.isArray(resources)||
+     Object.keys(resources).sort().join(',')!=='operations,personal'||
+     ![resources.personal,resources.operations].every(id=>typeof id==='string'&&/^[A-Za-z0-9_-]{15,100}$/.test(id)))return null;
+  return Object.freeze(resources);
+ }catch(_){return null;}
+})();
 /** Formal E1 entry only; never changes properties or authorizes OWNER RPCs. */
 function study1V2FormalEntryOpen_(){
  const p=PropertiesService.getScriptProperties();
