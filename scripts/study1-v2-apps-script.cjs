@@ -1,8 +1,9 @@
 'use strict';
 
 const {auth, script} = require('@googleapis/script');
-const {SID, fileData, verifyRemote} = require('./study1-v2-release-source.cjs');
+const {SID, fileData, verifyRemote, digest} = require('./study1-v2-release-source.cjs');
 const {sameSiteCandidate, requireSameSiteReleaseSource} = require('./study1-v2-uat-original-visitor.cjs');
+const formalEntry = require('./study1-v2-formal-entry.cjs');
 
 const deploymentId = 'AKfycbyfbWLyabMOd2y5LpUpyYzVTuoooeK_prZkmfWHhCTARZAFsfl2Ww9OBtlCQjUCkRQ';
 const deployedUrl = 'https://script.google.com/macros/s/' + deploymentId + '/exec';
@@ -32,8 +33,13 @@ function originalDeployment(deployment) {
 }
 
 async function release() {
-  const files = fileData(sameSiteCandidate());
-  const candidateSha = requireSameSiteReleaseSource(files);
+  const base = sameSiteCandidate();
+  requireSameSiteReleaseSource(base);
+  const files = fileData(formalEntry.apply(base));
+  // Restore only the exact reviewed formal RPC edits before validating the
+  // inherited OWNER/TEST and denied administrative surface. No global bypass.
+  requireSameSiteReleaseSource(formalEntry.restore(files));
+  const candidateSha = digest(files);
   let saved;
   try {
     saved = JSON.parse(process.env.V2_GAS_CLASPRC_JSON || '');
