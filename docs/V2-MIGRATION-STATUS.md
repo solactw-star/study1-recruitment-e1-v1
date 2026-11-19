@@ -1259,3 +1259,12 @@
 - 線上 OWNER 驗收使用原部署、只登入研究室 OWNER 的既有無痕工作階段（Cloudflare/GAS 設定及 GitHub 提交均用內建瀏覽器）。Cloudflare 元件自動完成挑戰，取得真實 token，Siteverify 回覆面板「Siteverify 已通過」。同一 token 再送出，回覆原始錯誤 timeout-or-duplicate。
 - 另重新產生獨立且未使用的 token，等待 314 秒（超過 300 秒），頁面顯示「Token 已過期」。首次提交此過期 token，Siteverify 回覆原始錯誤 timeout-or-duplicate，與已使用 token 重送分別驗收。
 - COMPLETED=REAL_TURNSTILE_VALID_REPLAY_EXPIRED_TEST_VERIFIED；SYNC_STATUS=V9_ORIGINAL_DEPLOYMENT_AND_OWNER_TURNSTILE_RUNTIME_VERIFIED。解除本隔離 TEST 的 BOT_PROTECTION_PROVIDER_NOT_READY 阻塞。正式報名路徑尚未啟用，不能把本結果當作正式收件核准或正式 hostname/config 契約驗收。本輪無報名/預約/PDF 建立、無清除或真人信件；未開真人收件、未動正式資料、V1、REC 或正式核准旗標。其他正式資料、PI/REC、容量、歷史錨點 provider/接線等既有阻塞仍保留。
+
+### 2026-11-19｜第 10 版 Turnstile 接入隔離 E1 全流程與清除回讀完成
+
+- SOURCE_VERSION/SHA=96de5ea44c631d7811cc2df6d7bb53f68ed1ba9a。隔離 TEST 報名前取得 token，伺服器於原共用交易鎖及可信 TEST 設定下先 Siteverify，成功才建立案件並寄送研究室測試 OTP。缺 token、供應者拒絕、過期與重用均阻擋；以 ScriptCache 的 token 摘要抑制跨案件近期重送，Cloudflare Siteverify 持續為驗證依據。現有案件恢復走唯讀，不重送報名或郵件。55 項本機測試通過（含缺 token 零建立／零寄信、Siteverify 先於建立、跨案件重用拒絕、供應者過期拒絕及現有交易回歸）。
+- [發布 44446556105](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44446556105) completed/success，原部署由第 9 版改指第 10 版，原 HEAD 與不可變版本來源摘要均為 86246ae72e7f670025773db0e5fe0779c8907bff03ededf941449be9a4481305；原 ID/URL/ACL 回讀通過。先前表單未建立 run 的疑義經 GitHub 唯讀 API 完整清單確認後，才送出唯一新發布。
+- OWNER 線上負測未完成 Turnstile 時停於資格頁，回應「請先完成 Turnstile 驗證」。Cloudflare 本次顯示 CAPTCHA，取得使用者當次確認後完成挑戰，真實 token 隨同報名請求送伺服器 Siteverify。
+- 測前 TEST 區四項均 0。虛構 TEST_01 同案 UAT_53d646b3902e45757d884da4 經 Turnstile 成功後建立，研究室測試 Gmail 收件匣實際收到同案 Email OTP，首次驗證通過。舊合成場次已過期，僅將隔離 TEST 的 TEST_SLOT_1 改為未來合成場次，保留 gate、sourceSha、專用表及其他設定；同案唯讀重載後完成 HELD、五頁合成 PDF 虛構筆跡簽署及 CONFIRMED。再以原同案唯讀核對，完整 PDF 與 SHA 核實一致。
+- 清除前預覽只含本次 TEST_01，案件 1、有效暫留 0、預約 1、PDF 1，取得本次永久清除確認。瀏覽器偵測使用者操作期間暫停輸入，後台隨後顯示已核實清空，未重送清除。重新載入並僅執行唯讀預覽，確認案件 0、有效暫留 0、已確認預約 0、測試 PDF 0。
+- COMPLETED=TURNSTILE_GATED_E1_EMAIL_OTP_BOOKING_SYNTHETIC_PDF_CLEANUP_RUNTIME_VERIFIED；SYNC_STATUS=V10_ORIGINAL_DEPLOYMENT_AND_FULL_ISOLATED_FLOW_VERIFIED。Cloudflare/GAS 設定與 GitHub 提交採內建瀏覽器，OWNER 真 UI 沿用只登入研究室帳戶的無痕視窗。本次未開真人收件、未寫正式資料、未碰 V1；PI/REC、正式場次、正式預簽 PDF、正式資料與營運啟用等核准仍分別保留。
