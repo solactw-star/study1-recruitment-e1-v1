@@ -138,6 +138,20 @@ test('OWNER Turnstile TEST exposes only public widget config and preserves Sitev
  assert.equal(x.calls,3);
  assert.deepEqual(x.reads,[]);
 });
+test('OWNER TEST accepts only the exact deployed GAS iframe hostname and refuses siblings and test keys',()=>{
+ const x=harness();
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../scripts/study1-v2-uat-gas-services.js'),'utf8'),x.scope);
+ const host='n-bikgjwfitkyw6qa57cqln5w25u6mtbj6hlndpdy-0lu-script.googleusercontent.com';
+ x.props.set('STUDY1_E1_TURNSTILE_HOSTNAME',host);
+ assert.equal(x.scope.study1UatTurnstileConfig_().host,host);
+ assert.throws(()=>x.scope.study1ParticipantTurnstileConfig_(),/BOT_PROTECTION_PROVIDER_NOT_READY/);
+ x.props.set('STUDY1_E1_TURNSTILE_HOSTNAME','foreign-script.googleusercontent.com');
+ assert.throws(()=>x.scope.study1UatTurnstileConfig_(),/BOT_PROTECTION_PROVIDER_NOT_READY/);
+ x.props.set('STUDY1_E1_TURNSTILE_HOSTNAME',host);
+ x.props.set('STUDY1_E1_TURNSTILE_SECRET','1x0000000000000000000000000000000AA');
+ assert.throws(()=>x.scope.study1UatTurnstileConfig_(),/BOT_PROTECTION_PROVIDER_NOT_READY/);
+ assert.equal(x.calls,0);
+});
 test('Bogus, absent and overlength human tokens fail before Siteverify',()=>{
  const x=harness();
  for(const token of ['',undefined,'a'.repeat(2049),'<script>alert(1)</script>']){
