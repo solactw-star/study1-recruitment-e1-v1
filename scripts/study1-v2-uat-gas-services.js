@@ -122,7 +122,7 @@ function study1UatEmailOtpHash_(access,code){
  * Not an RPC or a web route. Configuration must be supplied by a trusted caller.
  * No live study records or email, no fallback to a different store.
  */
-async function study1UatGasOperation_(approved,access,operation,payload,checkCurrentConfig){
+async function study1UatGasOperation_(approved,access,operation,payload,checkCurrentConfig,verifyHuman){
  const need=(ok,msg)=>{if(!ok)throw Error(msg);};
  const hex=(s,n)=>typeof s==='string'&&s.length===n&&/^[a-f0-9]+$/.test(s);
  const keys={start:['alias','eligible'],emailStart:['alias','eligible'],verify:['code'],slots:[],hold:['slotId','requestId'],read:[],document:[],sign:['requestId','sourceSha','ink','read','agree'],copy:[],cancel:[]};
@@ -153,6 +153,7 @@ async function study1UatGasOperation_(approved,access,operation,payload,checkCur
   if(mine){need(mine.alias===payload.alias&&Boolean(mine.emailOtp)===emailMode,'UAT_CASE_BINDING');
    if(emailMode)throw Error('UAT_EMAIL_OTP_ALREADY_ISSUED');
    return unchanged(study1UatCaseView_(mine,approved.slots,at));}
+  if(verifyHuman)verifyHuman();
   const tokenHash=study1PdfDigest_(Array.from(access.caseKey,c=>c.charCodeAt(0)));
   const record={alias:payload.alias,caseId:'UAT_'+tokenHash.slice(0,24),tokenHash,state:'OTP',slotId:'',holdUntil:'',holdKey:'',sourceSha:'',signedSha:'',signKey:'',inkSha:'',signedAt:'',date:'',pdf:''};
   if(emailMode){record.emailOtp={expiresAt:new Date(at+300000).toISOString(),hash:study1UatEmailOtpHash_(access,code)};send=true;}
@@ -363,14 +364,33 @@ async function study1UatControlledRequest_(request){
  try{
   const approved=study1UatTrustedConfig_();
   const checkCurrent=()=>{if(JSON.stringify(study1UatTrustedConfig_())!==JSON.stringify(approved))throw Error('UAT_DOCUMENT_CONFIG_CHANGED');};
-  const value=await study1UatGasOperation_(approved,{gate:request.gate,caseKey:request.caseKey},request.operation,request.payload,checkCurrent);
+  const starting=['start','emailStart'].includes(request.operation);
+  let payload=request.payload,verifyHuman;
+  if(starting){
+   if(Object.keys(payload).sort().join(',')!=='alias,eligible,humanToken'||
+      typeof payload.humanToken!=='string'||payload.humanToken.length<25||
+      payload.humanToken.length>2048)throw Error('UAT_TURNSTILE_REQUIRED');
+   const token=payload.humanToken;
+   payload={alias:payload.alias,eligible:payload.eligible};
+   verifyHuman=()=>{
+    const cache=CacheService.getScriptCache();
+    const key='V2_UAT_TURNSTILE:'+study1PdfDigest_(Array.from(token,c=>c.charCodeAt(0)));
+    if(cache.get(key))throw Error('UAT_TURNSTILE_REUSED');
+    cache.put(key,'attempted',360);
+    study1UatTurnstileSiteverify_(study1UatTurnstileConfig_(),token);
+    checkCurrent();
+   };
+  }
+  const value=await study1UatGasOperation_(approved,{gate:request.gate,caseKey:request.caseKey},request.operation,payload,checkCurrent,verifyHuman);
   return {ok:true,value};
  }catch(e){
   // A thrown error may occur after a mutation or its flush. No automatic retry.
   // Distinguish only the explicitly verified unknown-write marker; do not leak
   // arbitrary service exceptions (they may contain resource identifiers).
   const safe=['UAT_WRITE_UNKNOWN_READ_CASE','UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN',
-   'UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID'];
+   'UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID',
+   'UAT_TURNSTILE_REQUIRED','UAT_TURNSTILE_REUSED','BOT_PROTECTION_REJECTED',
+   'BOT_PROTECTION_PROVIDER_NOT_READY','timeout-or-duplicate'];
   return {ok:false,error:safe.includes(e?.message)?e.message:'UAT_REQUEST_REJECTED'};
  }
 }

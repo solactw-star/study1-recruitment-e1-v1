@@ -47,7 +47,7 @@ function gasController(){
    google.script.run.withFailureHandler(()=>reject(Error('線上回應不明，請唯讀核對本案，勿重送')))
     .withSuccessHandler(r=>{
      if(!r||r.ok!==true||!Object.prototype.hasOwnProperty.call(r,'value')){
-      const known=['UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN','UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID'];
+      const known=['UAT_EMAIL_OTP_ALREADY_ISSUED','UAT_EMAIL_OTP_DELIVERY_UNKNOWN','UAT_EMAIL_OTP_USED','UAT_EMAIL_OTP_EXPIRED','UAT_EMAIL_OTP_INVALID','UAT_TURNSTILE_REQUIRED','UAT_TURNSTILE_REUSED','BOT_PROTECTION_REJECTED','BOT_PROTECTION_PROVIDER_NOT_READY','timeout-or-duplicate'];
       if(known.includes(r?.error)){settle(operation);reject(Error(r.error));return;}
       reject(Error('測試操作未確認，請唯讀核對本案，勿重送'));return;
      }
@@ -107,9 +107,12 @@ function gasController(){
  button('screenNext',async()=>{
   need(el('fictionalEligible').checked,'請確認只使用虛構身分');
   need(!caseKey,'已有本案，請使用唯讀核對，不另建案件');
+  const humanToken=el('siteTurnstileToken').value;
+  need(typeof humanToken==='string'&&humanToken.length>=25,'請先完成 Turnstile 驗證');
   const k=random(32);el('caseKey').value=k;await bind(k);
   const email=el('testEmailOtp').checked,op=email?'emailStart':'start';
-  const c=await call(op,{alias:el('testAlias').value,eligible:true});display(c);need(c.stage==='OTP','案件狀態不一致');settle(op);show('otp');
+  el('siteTurnstileToken').value='';
+  const c=await call(op,{alias:el('testAlias').value,eligible:true,humanToken});display(c);need(c.stage==='OTP','案件狀態不一致');settle(op);show('otp');
   el('uatOtpMode').textContent=email?'從研究室測試信箱取得八位驗證碼，五分鐘內有效。':'模擬驗證，不寄信。測試碼 12345678。';
   say(email?'寄信服務已接受，請到研究室測試信箱確認收件。':'模擬驗證碼為 12345678，不會寄信。');
  });
@@ -219,7 +222,9 @@ function originalVisitor(source=read('gas/Study1Visitor.html')){
  s=once(s,'<footer>Study1 · NSTC 115-2410-H-033-015｜正式報名以核准程序與公告為準</footer>','<footer>Study1 · 私人隔離驗收｜不是研究同意</footer>');
  const start=s.indexOf('<script>\n'),end=s.lastIndexOf('</script>');
  if(start<0||end<=start||s.indexOf('<script>',start+1)>=0)throw Error('UAT_ORIGINAL_CONTROLLER_ANCHOR');
- s=s.slice(0,start)+'<script>\n('+gasController.toString()+')();\n</script>'+s.slice(end+9);
+ s=s.replace('<button id="screenNext"','<button id="siteTurnstileLoad" type="button">載入報名前 Turnstile 挑戰</button><div id="siteTurnstileWidget"></div><input id="siteTurnstileToken" type="hidden"><button id="siteTurnstileVerify" type="button" hidden disabled>驗證</button><p id="siteTurnstileStatus" role="status"></p><button id="screenNext"');
+ const controllerStart=s.indexOf('<script>\n'),controllerEnd=s.lastIndexOf('</script>');
+ s=s.slice(0,controllerStart)+'<script>\n('+gasController.toString()+')();\n('+sameSiteTurnstileController.toString()+')();\n</script>'+s.slice(controllerEnd+9);
  if(/id="(?:formalContact|formalName|formalEmail|formalPhone|screenQuestions|chooseE2)"|study1FormalHoldSlot|study1ParticipantBegin/.test(s))throw Error('UAT_ORIGINAL_FORMAL_INPUT_REMAINS');
  return s;
 }
@@ -506,8 +511,9 @@ function sameSiteTurnstileController(){
   .withSuccessHandler(result=>result?.ok===true?resolve(result.value):reject(Error(result?.error||'UAT_TURNSTILE_RPC_FAILED')))
   .study1E1SyntheticUat(request));
  let token='',widget=null;
+ const intakeToken=document.getElementById('siteTurnstileToken');
  load.addEventListener('click',async()=>{
-  load.disabled=true;verify.disabled=true;token='';
+  load.disabled=true;verify.disabled=true;token='';if(intakeToken)intakeToken.value='';
   try{
    const config=await rpc({operation:'turnstileConfig'});
    if(!window.turnstile)await new Promise((resolve,reject)=>{
@@ -519,8 +525,9 @@ function sameSiteTurnstileController(){
    if(widget!==null)window.turnstile.remove(widget);
    widget=window.turnstile.render('#siteTurnstileWidget',{
     sitekey:config.siteKey,action:config.action,'refresh-expired':'manual',
-    callback:value=>{token=value;verify.disabled=false;say('Token 已取得。可立即驗證，或等待五分鐘後測試過期。');},
-    'expired-callback':()=>say('Token 已過期；可送出原 token 核對 Cloudflare 回覆。'),
+    callback:value=>{token=value;verify.disabled=false;if(intakeToken)intakeToken.value=value;
+     say(intakeToken?'Turnstile token 已取得；送出報名時由伺服器驗證。':'Token 已取得。可立即驗證，或等待五分鐘後測試過期。');},
+    'expired-callback':()=>{if(intakeToken)intakeToken.value='';say('Token 已過期；請重新載入挑戰。');},
     'error-callback':code=>say('Turnstile widget: '+code)
    });
   }catch(error){say(error.message);}
