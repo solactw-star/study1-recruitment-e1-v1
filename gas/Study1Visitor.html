@@ -562,6 +562,16 @@ if(typeof google!=='undefined'&&google.script&&google.script.run){
    el('formalExistingCase').hidden=!state.recoveryReady;
    el('formalRecoverySend').disabled=!state.recoveryReady;
    if(state.ready)mountHumanCheck_(result.siteKey);
+   if(state.ready){
+    document.title='Study1｜實驗一報名與預約';
+    el('stateE1').textContent='開放報名';
+    const screening=el('step-screen').querySelector('p.lead');
+    if(screening)screening.textContent='請依自身實際狀況完成資格自陳，再填寫聯絡方式與驗證電子郵件。';
+    const screeningHelp=el('step-screen').querySelector('p.help');
+    if(screeningHelp)screeningHelp.textContent='僅在資格自陳及人機驗證通過後建立本次申請；請勿重複送出。';
+    const otpHelp=el('step-otp').querySelector('p.lead');
+    if(otpHelp)otpHelp.textContent='請查收電子郵件中的八位驗證碼。驗證碼限時且只能使用一次；驗證後才能選擇時段。';
+   }
    if(note)note.textContent=state.ready?
     'Study1 研究報名｜實驗一報名服務目前顯示可受理，請先確認參與條件。':
     'Study1 研究報名｜目前尚未開放正式報名與簽署';

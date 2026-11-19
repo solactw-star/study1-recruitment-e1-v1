@@ -76,7 +76,8 @@ function study1ParticipantTurnstileConfig_(){
  if(typeof siteKey!=='string'||!/^[-A-Za-z0-9_]{20,100}$/.test(siteKey)||
     typeof secret!=='string'||!/^[-A-Za-z0-9_]{20,150}$/.test(secret)||
     typeof host!=='string'||
-    !['script.google.com','script.googleusercontent.com'].includes(host)||
+    !(['script.google.com','script.googleusercontent.com'].includes(host)||
+      /^n-[a-z0-9-]{10,160}-script\.googleusercontent\.com$/.test(host))||
     /^(?:1x|2x|3x)000000000000000000/.test(siteKey)||
     /^(?:1x|2x|3x)000000000000000000/.test(secret))
   throw Error('BOT_PROTECTION_PROVIDER_NOT_READY');
