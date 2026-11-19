@@ -1,4 +1,12 @@
-# Study1 V2 獨立移植狀態（2026-11-12，Asia/Taipei）
+# Study1 V2 建置與發布進度（更新 2026-11-19，Asia/Taipei）
+
+## 最新接續點｜2026-11-19 原部署第 11 版
+
+- 最新工程指令：正式規格 §70-S.52；AGENTS 與原每小時網站建置排程已同步，維持原頻率及啟用狀態。先交付正式 E1 功能、不主動新增或執行驗收測試。
+- 正式 E1 七步入口接線已提交 `e11e41cb1d51492e92c0cd804ccdc70095d75027` 並發布到原 V2 第 11 版；[發布 Run 44470828448](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470828448) 成功，官方 API 直接回讀 HEAD／不可變版本／原部署一致，來源 SHA-256 `3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865`。本次最後文件提交只更新進度，不需再次部署。
+- 重用原報名、Turnstile、Email OTP、原時段共鎖、預約、研究者預簽完整 PDF 的參與者最後簽署、私人已簽副本與通知核心；只將精確正常參與者 RPC 轉為受四旗標與原操作 gate 控制。OWNER／TEST 邊界及其他 RPC 拒絕保留。
+- 未新增測試、未手動執行功能／瀏覽器／寄信／清除驗收；既有 push CI 與發布工作流內建檢查照常自動執行，非「完全沒有任何測試執行」。目前正式全流程功能驗收待使用者回饋，不以第 10 版隔離 TEST 成功代替第 11 版正式營運驗收。
+- 本輪未啟用真人收件、未修改四旗標／正式資料／場次／PDF 設定，未重建 OAuth、未碰 V1。下一步只處理實際功能回饋；真人啟用須另有適用核准、正式來源設定與獨立啟用授權。以下為歷史記錄，舊阻塞與下一步不自動沿用。
 
 ## 定位
 - TASK_DOMAIN: Study1_E1_V2_CLONE
@@ -1276,3 +1284,11 @@
 - 官方發布 client 改為將原同站完整候選加上正式接線，恢復精確變更後再套用既有來源檢查；不全域解除拒絕、不更改 manifest、Script／部署／URL／ACL。Turnstile 正式設定接受 Script Properties 明確指定的 GAS iframe hostname，仍以 Siteverify 回傳 hostname 完全相等及 action=study1_e1_apply 驗證，不採任意 suffix 信任、不輸出 secret。首頁與報名文案依伺服器 ready 狀態顯示；四旗標未開仍不收件。
 - LAST_VERIFIED_STEP=GITHUB_UI_COMMITS_AND_FILE_BYTES_READBACK；截至 d69b8f 的六個已提交檔案逐位元組回讀一致；後續介面相容修正已由 GitHub 網頁提交 a489f9e。本地只組裝發布來源、確認可恢復繼承的權限檢查及計算 digest，來源 SHA-256=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865；未新增或手動執行測試／UAT／寄信／清除。提交自動 CI a132b73 的 minimal run 44468925902 成功；safety run 44468925833 失敗，原文包含「not ok 184 - Synthetic browser: gated seven-stage E1 intake -> human token -> email proof -> pending review」「ERR_ASSERTION」「expected: false」「actual: true」。原因為新增文案使用局部 node.querySelector，原模擬 DOM 不提供該方法；已改用現有 document.querySelector 契約，未刪或改測試，等待自動 CI 回讀。
 - SYNC_STATUS=FORMAL_SPEC_AGENTS_STATUS_AND_ORIGINAL_SCHEDULE_UPDATED_PENDING_FINAL_COMMIT_READBACK；部署接續當期官方工作流與既有 Secret 的唯讀預檢，發布結果另依實際 Run 回讀記錄，本項不宣稱已部署或功能驗收成功。BLOCKERS=FUNCTIONAL_ACCEPTANCE_NOT_RUN_BY_USER_REQUEST；真人啟用仍待適用核准、正式場次／預簽 PDF／資料設定及獨立啟用授權，未據本項讀寫或自行補造。NEXT_ACTION=回讀當期自動 CI 與原部署預檢，既有授權內發布並直接回讀；無真人／正式資料操作、無 OAuth 重建、未碰 V1。
+
+### 2026-11-19｜正式 E1 受控入口發布至原 V2 第 11 版
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_ENTRY_ORIGINAL_RELEASE；SOURCE_ID/PATH=§70-S.52、AGENTS.md、scripts/study1-v2-formal-entry.cjs、scripts/study1-v2-apps-script.cjs；SOURCE_VERSION/SHA=e11e41cb1d51492e92c0cd804ccdc70095d75027；WRITE_OWNER=唯一 V2 Repo／原 V2 部署／原排程；COMPLETED=INSTRUCTIONS_SYNCED_AND_FORMAL_ENTRY_PUBLISHED_V11；SYNC_STATUS=SPEC_AGENTS_STATUS_SCHEDULE_AND_ORIGINAL_DEPLOYMENT_READBACK_VERIFIED。
+- 正式規格與進度提交 df4187a3e1f50638bd77207c0114f0afd07e84c7、AGENTS d69b8f4678f296b741fba4fde02a61a3181cf0e9 已逐位元組回讀相符。原 cloud 排程完整重新導航回讀新版，先前 modal 舊文快取並非最終儲存失敗；名稱、每 1 小時、永不結束及啟用保留，未改其他排程／未建副本。
+- 自動 CI 剩餘失敗定位到歷史第 4 版重建使用現行 raw gas 檔案，原文「not ok 488 - historical immutable proof and module import do not depend on an unfinished development checkout」「expected: true」「actual: false」，另有 exact historical SHA 斷言失敗。未改／新增／刪除測試；將本次正式 UI 文案與 hostname 修正集中到正式發布接線層，raw 唯讀歷史基準由 eb1e5964d401d8cde615495c533574d345a7a202 保留，正式接線提交 e11e41c。組裝結果 digest 與調整前完全相同，沒有改功能或降低權限。eb1e596 的自動 safety CI 44470244422、minimal CI 44470244347 均成功；不將其當成 e11e41c 全部功能驗收。
+- [官方唯讀預檢 44470508682](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470508682) main=e11e41c 成功；原始輸出 candidateSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865、headSha=86246ae72e7f670025773db0e5fe0779c8907bff03ededf941449be9a4481305、deployedVersion=10、deployedSourceSha 同舊 HEAD、mutationPerformed=false。沿用既有 V2_GAS_CLASPRC_JSON；未查看／輸出 Secret、未重建 OAuth。
+- [單次發布 44470828448](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44470828448) Job 135379589283 成功，原始輸出 previousVersion=10、version=11、candidateSha=3da842ef4774dee8850920c303d792923730bab889abe889dd7cf9a87b437865、mutationPerformed=true。official client 在成功輸出前直接核對 HEAD、不可變第 11 版及原部署指向，保留原 deployment ID AKfycbyfbWLyabMOd2y5LpUpyYzVTuoooeK_prZkmfWHhCTARZAFsfl2Ww9OBtlCQjUCkRQ／原 URL／ANYONE_ANONYMOUS／USER_DEPLOYING；未建立新部署或改其他版本。LAST_VERIFIED_STEP=OFFICIAL_API_HEAD_VERSION_11_ORIGINAL_DEPLOYMENT_READBACK_MATCH。
+- TEST、真人報名、Email、簽署、正式資料與清除 UI 本輪均未操作，未新增測試；既有發布工作流內建 node --test 自動步驟保留且執行，因此本次不可聲稱「任何測試都沒執行」。FUNCTIONAL_ACCEPTANCE=NOT_RUN_PER_USER_REQUEST；四旗標／正式 Sheets／Drive／場次／PDF／ACL／研究核准未異動、未碰 V1。BLOCKERS=正式全流程尚未驗收，真人啟用資料／適用核准與獨立啟用授權尚未於本輪確認；NEXT_ACTION=依使用者實際功能回饋修正，只有涉及真人收件／正式資料時才提出精確核准缺口，不再重複舊 OAuth／發布盤點。
