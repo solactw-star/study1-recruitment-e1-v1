@@ -1,4 +1,5 @@
 'use strict';
+const sameDate=require('./study1-v2-same-date.cjs');
 // Formal E1 RPC integration. Building/publishing this source never enables
 // intake: all four live switches and the original operation gates must pass.
 const deny="if(typeof study1V2PublicRpcDeny_==='function')study1V2PublicRpcDeny_();";
@@ -83,4 +84,4 @@ function transform(files,reverse=false){
   return {...file,source};
  });
 }
-module.exports={apply:files=>transform(files),restore:files=>transform(files,true)};
+module.exports={apply:files=>sameDate.apply(transform(files)),restore:files=>transform(sameDate.restore(files),true)};
