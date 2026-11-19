@@ -407,6 +407,20 @@ function study1UatTurnstileSiteverify_(c,token){
   throw Error('BOT_PROTECTION_REJECTED');
  return ts;
 }
+function study1UatTurnstileConfig_(){
+ const props=PropertiesService.getScriptProperties();
+ const host=props.getProperty('STUDY1_E1_TURNSTILE_HOSTNAME');
+ if(host!=='n-bikgjwfitkyw6qa57cqln5w25u6mtbj6hlndpdy-0lu-script.googleusercontent.com')
+  return {...study1ParticipantTurnstileConfig_(),action:'study1_e1_owner_test'};
+ const siteKey=props.getProperty('STUDY1_E1_TURNSTILE_SITEKEY');
+ const secret=props.getProperty('STUDY1_E1_TURNSTILE_SECRET');
+ if(typeof siteKey!=='string'||!/^[-A-Za-z0-9_]{20,100}$/.test(siteKey)||
+    typeof secret!=='string'||!/^[-A-Za-z0-9_]{20,150}$/.test(secret)||
+    /^(?:1x|2x|3x)000000000000000000/.test(siteKey)||
+    /^(?:1x|2x|3x)000000000000000000/.test(secret))
+  throw Error('BOT_PROTECTION_PROVIDER_NOT_READY');
+ return {siteKey,secret,host,action:'study1_e1_owner_test'};
+}
 function study1UatTurnstileRequest_(request){
  const reject=error=>({ok:false,error});
  const verify=request.operation==='turnstileVerify';
@@ -415,7 +429,7 @@ function study1UatTurnstileRequest_(request){
  try{
   study1AdminOwnerRequired_();
   study1UatTrustedConfig_();
-  const config={...study1ParticipantTurnstileConfig_(),action:'study1_e1_owner_test'};
+  const config=study1UatTurnstileConfig_();
   if(!verify)return {ok:true,value:{siteKey:config.siteKey,action:config.action}};
   study1UatTurnstileSiteverify_(config,request.token);
   return {ok:true,value:{verified:true}};
