@@ -1250,3 +1250,12 @@
 - [單次發布 44431579013](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44431579013) completed/success。更新原 HEAD、建立第 8 版、原既有部署由第 7 版改指第 8 版。官方 API 回讀確認 HEAD、第 8 版來源摘要一致，皆為 09b5f0ac386d9ecbc1d467765019436d7b170383072cb7a926ac38433e0bcd2e，原部署 ID、網址及 ACL 符合原發布契約。
 - Turnstile 設定接續仍受阻：Cloudflare 尚停在 Google 帳戶選擇流程，自動審查拒絕觀察 accounts.google.com，理由為當前授權涵蓋已登入 Cloudflare，未明確涵蓋 Google 登入／重新驗證。未改換入口規避。待使用者完成 Cloudflare 登入或明確授權所需 Google 登入流程後再續；BOT_PROTECTION_PROVIDER_NOT_READY 及線上有效／過期／重用驗收未確認解除。
 - SYNC_STATUS=V8_ORIGINAL_DEPLOYMENT_API_READBACK_VERIFIED；本輪未重新驗收匿名／OWNER／TEST 真 UI。發布不啟用現有內部正式資料候選，不代表正式核准或歷史錨點 provider／接線完成。原正式資料、權限、PI/REC、容量與 Turnstile 既有未解阻塞保留；未開真人收件、未寫正式研究資料、未碰 V1。
+
+### 2026-11-19｜Turnstile 真實 token 三項線上驗收完成
+
+- Cloudflare 研究室帳戶已正常登入。建立 Study1 V2 OWNER TEST widget，採 Managed 模式、pre-clearance 關閉，hostname 僅允許原 V2 專用 n-bikgjwfitkyw6qa57cqln5w25u6mtbj6hlndpdy-0lu-script.googleusercontent.com；sitekey/secret/hostname 已保存於原 V2 Script Properties，未將 secret 寫入 GitHub、聊天紀錄或日誌。
+- 第 8 版原 provider config 只接受 Google 主網域，無法接受實際 V2 iframe 完整 hostname。僅於隔離 TEST 的 config 增加精確 V2 iframe hostname 分支，拒絕其他兄弟網域與 Cloudflare 固定測試金鑰；原正式 config 驗證維持原契約。10 項本機 trust 測試通過，並提交原 V2。因需程式修正，本次原部署由第 8 版更新至第 9 版。
+- [發布與回讀 44436978562](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44436978562) completed/success，同工作流發布前測試通過，確認原 HEAD、第 9 版來源摘要均為 8c523aded043f2d61cdc26692f5d7f8f5117d6e841ac2945e5b6ecd9e9c7b25e，原部署 ID/URL/ACL 契約核實。
+- 線上 OWNER 驗收使用原部署、只登入研究室 OWNER 的既有無痕工作階段（Cloudflare/GAS 設定及 GitHub 提交均用內建瀏覽器）。Cloudflare 元件自動完成挑戰，取得真實 token，Siteverify 回覆面板「Siteverify 已通過」。同一 token 再送出，回覆原始錯誤 timeout-or-duplicate。
+- 另重新產生獨立且未使用的 token，等待 314 秒（超過 300 秒），頁面顯示「Token 已過期」。首次提交此過期 token，Siteverify 回覆原始錯誤 timeout-or-duplicate，與已使用 token 重送分別驗收。
+- COMPLETED=REAL_TURNSTILE_VALID_REPLAY_EXPIRED_TEST_VERIFIED；SYNC_STATUS=V9_ORIGINAL_DEPLOYMENT_AND_OWNER_TURNSTILE_RUNTIME_VERIFIED。解除本隔離 TEST 的 BOT_PROTECTION_PROVIDER_NOT_READY 阻塞。正式報名路徑尚未啟用，不能把本結果當作正式收件核准或正式 hostname/config 契約驗收。本輪無報名/預約/PDF 建立、無清除或真人信件；未開真人收件、未動正式資料、V1、REC 或正式核准旗標。其他正式資料、PI/REC、容量、歷史錨點 provider/接線等既有阻塞仍保留。
