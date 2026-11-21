@@ -1,6 +1,14 @@
-# Study1 V2 建置與發布進度（更新 2026-11-19，Asia/Taipei）
+# Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-19 原部署第 12 版，正式場次與 72 小時已保存
+## 最新接續點｜2026-11-21 原部署第 13 版，私人預簽 PDF／雙日期設定已回讀
+
+- 使用者已決定「依報名者簽署日期壓上一致的日期」，正式規格 §70-S.53；不再追問固定預簽日期。新版在同一次參與者完成簽署時，以同一伺服器完成時間填第 4、5 頁的日期欄，保留研究者既有預簽筆跡，另記完成時間與日期政策；不虛構研究者當日重新簽署。原五頁來源獨立複製至私人資料夾，owner-only、5 頁、432368 bytes，原件／副本 SHA 一致；未改來源原件或 ACL，未對外揭露私人 IDs、筆跡或密鑰。
+- 原 V2 Script Properties 上次尚未保存的 23 個新草稿已撤回：重新載入確認原 14 項。這次只限定保存 `STUDY1_E1_SAME_DATE_POLICY_V1`、`STUDY1_ECONSENT_APPROVED_PDF_LAYOUT_V1`、`STUDY1_CONSENT_DOCUMENT_INDEX_V1` 及更新 `STUDY1_E1_LAUNCH_AUTHORIZATION_V1`；重新載入逐值一致，計 17 項。文件為私人 current.E1 選用，published.E1 保持 null，尚未對外發布；未寫入缺核驗的 VERIFIED／正式開關，既有三場／72h／使用者核准保留。
+- 雙日期程式 main `391a6bf3cc7988cae7fb4d69c09074138692724c`。唯讀預檢 [Run 44487593247](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44487593247) 證明原第 12 版／HEAD `e371798746b1e6548a816375d641859f591a2d2491c29a874c6ad04a58f609f4`。單次發布 [Run 44859941645](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44859941645/job/136710788041#step:7:11) 在更新後的最後檢查回報 `V2_FINAL_READBACK_MISMATCH`、exit code 1；沒有盲目重送。其後原官方 client 純唯讀 [Run 44860176284](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44860176284/job/136711508181#step:7:10) 成功，`deployedVersion=13`，candidateSha／headSha／deployedSourceSha 皆 `c9a81ccef0e58f52062cc32ede85509dfb744e0dc989177b13b02a6e6a772ee9`、`mutationPerformed=false`；原部署已實際指向新版本，結果由重新讀取釐清，不需再發布。
+- 剩餘正式設定阻擋：上次整批正式屬性儲存被自動審查拒絕，原文「此動作會持久寫入多個正式金鑰、REC／PDF／slot 綁定及十項 VERIFIED 閘門；雖保持四個收件旗標為 false，使用者未明確授權以未完成 OWNER 驗證與未驗收證據宣告這些核驗已完成。」該批未保存；本輪只完成獨立私人 PDF 與日期政策，不重送或分拆被拒的 HMAC／OTP key、REC、slot registry 或缺乏證據的 gate 設定。OWNER 原專案先前 Google 400 仍未有解除證據。剩餘設定依有效來源、實際 OWNER 核驗與適用平台限制完成，不將「一律核准」等同 VERIFIED。
+- LAST_VERIFIED_STEP=PRIVATE_PDF_DATE_CONFIG_READBACK_AND_ORIGINAL_V13_SOURCE_READBACK；SYNC_STATUS=V13_DEPLOYED_PRIVATE_PDF_DATE_CONFIGURED_INTAKE_CLOSED；BLOCKERS=OWNER_EDITOR_HTTP_400、FORMAL_GATE_EVIDENCE_AND_CONFIG_BLOCKED；NEXT_ACTION=恢復研究室 OWNER 正常進入唯一 V2，依實際證據完成正式來源／REC 範圍、slot registry、正式 OTP/HMAC、其他適用 gate 與正式文件公開指標，最終依具體啟用條件和平台當次確認開放。已核准的場次、13:00–14:00 休息、72h、日期政策不重問。未執行手動功能測試、未寄信或簽署、未新增預約；既有發布工作流內建自動檢查照常執行。未開真人收件、未重建 OAuth、未碰 V1。
+
+## 前次接續點｜2026-11-19 原部署第 12 版，正式場次與 72 小時已保存（歷史）
 
 - 使用者已提供正式場次、預簽 PDF 資料夾、明確確認「依建議，確認一律核准」、副本 72 小時，並補充 13:00–14:00 休息；不得再沿用下方歷史「四項全缺」或重問一般核准／期限。
 - 已在原 Slots!A2:H4 寫入並回讀三場：2026-12-07 臺灣時間 09:00–11:00、11:00–13:00、14:00–16:00，各 1 人、828 研究室。13:00–14:00 未建立場次，未建立測試或參與者預約。
