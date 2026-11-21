@@ -1,6 +1,16 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 E1 正式報名、原 OTP 過期續作、簽署前預約核對已提交
+## 最新接續點｜2026-11-21 E1 已確認預約限時 Email 管理與改期／取消工程已提交
+
+- 依本輪使用者要求接續 main `bd2aa2dd2fdaf7bbfc240cfaeaeeb33c7a99f497`（既有 CI 摘要 success），完成可獨立施工的正式 E1 預約管理來源。不做功能測試、不開真人收件、不部署、不重試被拒預檢日誌、不碰 V1。
+- TASK_DOMAIN=Study1_V2_E1_CONFIRMED_BOOKING_MANAGEMENT；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=[4d2bfcf4d70ba95bd3d7f1bc9c546d254739817b](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/4d2bfcf4d70ba95bd3d7f1bc9c546d254739817b)。原確認通知同案核實後附限時 HMAC 管理 URL（原 V2 fragment、原可信信箱、新用途，不包含 PDF 或簽署權限；管理頁不載入第三方驗證腳本，清除網址片段並只在記憶體保留憑證）。遺失／過期可由原報名頁以原信箱與一次性 Turnstile 請求新連結，統一 ACK、不揭露帳號存在、以原 Notifications 在寄送前記錄、同一請求不重送、時間窗限流。未核定管理政策仍可保留原確認通知及人工協助，不阻擋既有報名。
+- 管理頁只核對原已簽 E1 案件與原已確認預約、原固定 PDF／簽署事件、原持久 OTP F:G、自陳資格與 email/consent binding、核定場次；伺服器獨立檢查金鑰用途、期限、當期政策、原資料及共鎖，過期／資料矛盾不可取得操作權。管理連結不是 recovery OTP、簽署憑證、PDF 存取或一般報名身分。新公開 RPC 僅此管理讀取、提交、原信箱重申；不修改既有 HELD／WAITLISTED 異動或解除原同意 fence。
+- 參與者可查原預約與地點、查可選核定目標場次、明確勾選後提交一次改期或取消；同案私人 HMAC 存證先寫並回讀、原 OWNER 正式唯讀工作區可列待辦，不披露 token、私人檔案 ID 或 email。改期仍屬 `REQUEST_REVIEW`：未經研究權責方核定「已簽 PDF 與新場次」的歷史關聯，不刪原席位、不另建未有同意綁定的 CONFIRMED 預約。取消在獨立核准 `DIRECT_APPROVED`、已確認未取消、未達政策截止、原交易證據閘門皆成立時，按原共鎖 CAS 更新同一 Reservations 列至 CANCELLED，保留原 confirmed timestamp、同意與完整 PDF、寫後再核對；其他可受理情境僅記取消申請、待團隊處理。取消不等於撤回同意或刪除研究資料。失敗／因果不明只能唯讀核對，不重送；原列狀態不是特定請求因果證明。
+- 尚待核定之私有設定契約：`STUDY1_E1_BOOKING_MANAGEMENT_POLICY_APPROVED=true` 與 `STUDY1_E1_BOOKING_MANAGEMENT_POLICY_V1`（schema=`version:1,linkMinutes:10..4320,cancelBeforeMinutes:1..10080,cancelMode:REQUEST_REVIEW 或 DIRECT_APPROVED,moveMode:REQUEST_REVIEW`；區間是程式合法範圍，非研究核准值）。直接取消另依現行 `STUDY1_E1_TXN_EVIDENCE_APPROVED`／原正式 gate。不填寫或假定 PI 已核准期限、不默認自動改期、不改私人屬性。自助立即改期若需開放，仍須核定適用政策、新舊預約與原簽署不可變證據的關聯及驗收；目前不是已實際改期。原 OWNER 工作區獨立唯讀權限、既有 live 四旗標、TEST／E2不變。
+- 本機僅既有來源組裝及可逆 guard、靜態 JavaScript 語法解析（未執行應用邏輯），30 檔；合併候選 SHA-256 `887b0cfd90a2a5255084e7f19bcf6c187df91a68b84dde21e913025dbbbbd095`。未手動執行功能／UAT、寄信、簽署、改期或取消，既有自動 CI 不變；不將舊 CI／舊預檢冒稱本候選已驗。最後原 V2 部署仍是已核驗 V14，未操作 GAS。
+- LAST_VERIFIED_STEP=CONFIRMED_E1_MANAGEMENT_LINK_AND_SCOPED_CHANGE_SOURCE_COMMITTED；COMPLETED=本輪管理來源及 GitHub 提交；WRITE_OWNER=V2 Repo；SYNC_STATUS=SOURCE_COMMITTED_PENDING_CONSOLIDATED_RELEASE_V14_LAST_VERIFIED；BLOCKERS=RELEASE_PREFLIGHT_LOG_POLICY_BLOCKED、OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED、MANAGEMENT_POLICY_APPROVAL_AND_DIRECT_MOVE_CONSENT_ASSOCIATION_REQUIRED。NEXT_ACTION=發布條件實際解除後依唯一官方工作流對當時最新 main 做同版預檢、集中更新原部署並回讀；管理政策及正式啟用須另行核定並依實際證據配置。未寫正式資料／場次／PDF／設定，未重建 OAuth，未碰 V1。
+
+## 前次接續點｜2026-11-21 E1 正式報名、原 OTP 過期續作、簽署前預約核對已提交（歷史）
 
 - 接續已回讀 main `6331fff66441098d599f2a734d2465bdb9df41e5`（既有自動 CI 摘要 success），依本輪使用者要求完成不需 OWNER 的正式 E1 來源工程；不主動做功能測試、不開真人收件、不重試被拒原預檢日誌、暫不部署、不碰 V1。
 - TASK_DOMAIN=Study1_V2_E1_FORMAL_ENROLLMENT_COMPLETION；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=main [82ac7045ba549c015c614af7148c24275955e53c](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/82ac7045ba549c015c614af7148c24275955e53c)。OTP 原寄送與唯讀核對顯示實際臺灣期限；僅當同一原申請、原 requestId 的持久 Verification 明確 EXPIRED，才提供參與者主動申請新碼的選項（新的 requestId、原 pending application、原共鎖及 throttle）。結果 UNKNOWN／USED／LOCKED／SUPERSEDED 不開放補寄；一次性 OTP 核驗因果不明仍停用送出；不重新申請或自動補寄，不改原金鑰、TTL、限流及一次性消耗。已有本頁申請時禁止另送申請。
