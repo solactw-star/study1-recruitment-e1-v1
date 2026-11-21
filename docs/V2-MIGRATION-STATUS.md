@@ -1,6 +1,13 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 第 13 版正式安全證據逐項核對，沿用既有 TEST／CI
+## 最新接續點｜2026-11-21 原第 13 版正式唯讀入口實際拒絕 OWNER 身分
+
+- 本輪使用者授權必要的正式安全設定唯讀預檢，不重做已驗功能。直接開啟原同站 `/exec?view=admin&workspace=formal`（第 13 版）實際回傳原文 `Error: 研究室管理身分無法驗證，已拒絕存取。 (第 14 行，檔案名稱：AdminSandbox)`，不是 GitHub／OAuth／CI 錯誤。未重試寫入或使用其他執行身分繞過此 application guard。
+- OWNER 原 Apps Script 專案的部署管理唯讀回讀：唯一原 Script 與原部署 ID/URL、版本 13（2026-11-21 11:13 Asia/Taipei）、執行身分研究室 OWNER、誰可以存取「所有人」，均與原部署契約相符。已關閉管理視窗、不編輯部署。此編輯器存取能力不能代替 Web App 的 `Session.getActiveUser()`；程式要求 active user 和 effective user 同為研究室 OWNER，不能用 effective user 冒充。
+- 私人 Script Properties 回讀 17 項、`STUDY1_PARTICIPANT_DATA_USE_APPROVED`／`STUDY1_ECONSENT_LIVE_SHEETS_APPROVED` 為 true；專屬 `STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED` 與 `STUDY1_E1_CONSENT_RECORDS_PREFLIGHT_READ_APPROVED` 尚未配置為 true。前者為同站正式唯讀工作區独立門檻；後者為未公開 RPC 的原 ConsentRecords OWNER 候選預檢獨立門檻，不是已通過之技術核驗。程式另檢核正式 REC policy、來源 ACL、資料／registry 指標與 HMAC，不能補造或跳過。四個 live 開關均未為 true。
+- LAST_VERIFIED_STEP=V13_FORMAL_READONLY_ENTRY_ACTUAL_OWNER_DENIAL_AND_OWNER_DEPLOYMENT_READBACK；SYNC_STATUS=V13_DEPLOYED_PRECHECK_BLOCKED_WEBAPP_OWNER_IDENTITY；BLOCKERS=WEBAPP_ACTIVE_OWNER_NOT_VERIFIED、FORMAL_WORKSPACE_READ_APPROVAL_NOT_CONFIGURED、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=使用只登入研究室 OWNER 的獨立瀏覽器工作階段開同一既有正式入口，正常核實 active/effective OWNER；不得以其他帳戶或讀取替代接口繞過拒絕。其後按實際讀取範圍與安全審查允許配置獨立正式預檢權限，僅在核驗證據成立時接續 OTP/HMAC、時段與收件。未重做功能測試、未寄信、未改私人屬性／部署／正式資料、未碰 V1。
+
+## 前次接續點｜2026-11-21 第 13 版正式安全證據逐項核對，沿用既有 TEST／CI（歷史）
 
 - 本輪只讀既有驗證，不重跑功能測試、不發新 OTP、不重送部署。原部署 [唯讀 Run 44860176284](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44860176284/job/136711508181) 再核其成功日誌：version=13、HEAD／部署不可變來源／候選皆為 `c9a81ccef0e58f52062cc32ede85509dfb744e0dc989177b13b02a6e6a772ee9`。最新 main `a1dbd6ea1c6c952633a55ecb609ea2d7f8345074` 同一來源的[既有完整安全 CI Run 44864811961](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44864811961/job/136726003837) 成功；其工作流是 offline/mock/syntax/deny-all 測試，非真實正式資料交易。
 - 原第 10 版 [Run 44446556105](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44446556105) 與既有 OWNER 同案真實隔離 TEST：Turnstile、真實研究室收信、一次性 OTP、HELD／CONFIRMED、五頁合成簽署 PDF、清除後四項 0。證據保留並直接用於以下分類，不重做已通過項目：
