@@ -1,6 +1,14 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 原第 13 版正式唯讀入口實際拒絕 OWNER 身分
+## 最新接續點｜2026-11-21 原部署第 14 版，E1 完整流程開放前防呆已部署，OWNER 驗收暫待
+
+- 使用者目前無法登入研究室 OWNER，明確要求先繼續網站建置，日後登入再驗收；本輪不要求重新登入、不重做已通過功能、不啟用真人收件。
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_INTAKE_COMPLETENESS；程式 `scripts/study1-v2-formal-entry.cjs`，main [87a0b1b31b5e40aa19e9c1c407c1f14b5ccbc808](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/87a0b1b31b5e40aa19e9c1c407c1f14b5ccbc808)。修正實際產品缺口：先前首頁/新申請只核對部分收件條件及 E1 時段，後續 OTP、資料來源、電子同意或正式 PDF 缺件時仍可能先留下 PII。新版沿用現有核准與操作 gate，加上 OTP／身分 HMAC 獨立金鑰、原工作簿對應、正式遠端 REC／已選用且發布的研究者預簽 PDF 之來源／ACL／SHA／版面與雙日期／副本期限核對。正式 readiness、首次申請解析資料前及原共用鎖內首次寫入前皆 fail closed；對外只回通用未開放狀態，不暴露設定值。既有各步驟授權、共鎖、舊案回讀、OWNER、TEST 與 E2 邊界保留，不新增公開 RPC 或資料來源。修正正式簽署說明及下載標籤，區分已預簽原 PDF、本次本人筆跡、兩處完成日期、完整副本與獨立預約回讀。
+- 本機僅依既有發布組裝及恢復檢查得到 30 個候選檔、SHA-256 `31a17c3feee9a78968142a1547003d3e7961c047a998779f897c247e85e4c102`；不執行新的單元／功能／寄信／簽署／隔離 UAT。組裝起初因正式與 TEST 共用下載文字出現兩次回報 `V2_FORMAL_ENTRY_ANCHOR_CHANGED`，改為只在正式 `formalConsentWire_` 內更新文字並重新組裝成功，未更改 TEST。既有發布工作流內建自動檢查照常執行，非真實驗收。
+- [唯讀預檢 Run 44877982357](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44877982357/job/136766825358) 成功，候選 SHA 同上，原第 13 版 HEAD／部署來源 SHA `c9a81ccef0e58f52062cc32ede85509dfb744e0dc989177b13b02a6e6a772ee9`。單次[發布 Run 44878110541](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44878110541/job/136767238348) 回報 `V2_FINAL_READBACK_MISMATCH`／exit code 1；未重送發布。首次純唯讀回查表單未建立 Run，先用 GitHub 公開 API 確認 total_count=18 再送唯讀回查；[Run 44878411325](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44878411325/job/136768131546) 成功，`deployedVersion=14`、candidateSha／headSha／deployedSourceSha 皆上述 `31a17c...`，mutationPerformed=false，原 deployment ID/URL/ACL 由官方 client 核對相符。第 14 版已實際部署，不再重發。
+- LAST_VERIFIED_STEP=ORIGINAL_V14_HEAD_IMMUTABLE_DEPLOYMENT_SOURCE_MATCH；SYNC_STATUS=V14_DEPLOYED_CLOSED_NEW_INTAKE_READINESS_HARDENED；BLOCKERS=OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=待使用者可登入 OWNER 時，接續原正式唯讀預檢與必要權限、安全設定、真實驗收，再依適用條件開啟收件。PI 本人確認、既有三場、72h、私人 PDF／日期規則及前版隔離 TEST 證據保留，不重做。未寫入正式 OTP/HMAC/REC/VERIFIED、未改正式資料或四個收件旗標，未重建 OAuth、不碰 V1。
+
+## 前次接續點｜2026-11-21 原第 13 版正式唯讀入口實際拒絕 OWNER 身分（歷史）
 
 - 本輪使用者授權必要的正式安全設定唯讀預檢，不重做已驗功能。直接開啟原同站 `/exec?view=admin&workspace=formal`（第 13 版）實際回傳原文 `Error: 研究室管理身分無法驗證，已拒絕存取。 (第 14 行，檔案名稱：AdminSandbox)`，不是 GitHub／OAuth／CI 錯誤。未重試寫入或使用其他執行身分繞過此 application guard。
 - OWNER 原 Apps Script 專案的部署管理唯讀回讀：唯一原 Script 與原部署 ID/URL、版本 13（2026-11-21 11:13 Asia/Taipei）、執行身分研究室 OWNER、誰可以存取「所有人」，均與原部署契約相符。已關閉管理視窗、不編輯部署。此編輯器存取能力不能代替 Web App 的 `Session.getActiveUser()`；程式要求 active user 和 effective user 同為研究室 OWNER，不能用 effective user 冒充。
