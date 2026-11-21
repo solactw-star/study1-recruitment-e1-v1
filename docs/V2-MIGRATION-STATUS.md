@@ -1,6 +1,14 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 原部署第 13 版，私人預簽 PDF／雙日期設定已回讀
+## 最新接續點｜2026-11-21 OWNER 存取已恢復，原部署第 13 版維持收件關閉
+
+- OWNER 存取實際解除：在內建瀏覽器開啟 Apps Script 首頁，由 Google 帳戶選單的研究室帳戶首頁連結切換；「我的專案」中 V2 顯示擁有者為我。從該列開啟原 V2，正確研究室帳戶、Script ID 及編輯器／專案設定頁均成功顯示。先前含空 pageId 的原專案導覽 HTTP 400 不再是接續阻塞；沒有重送舊錯誤請求、改權限或重建 OAuth。
+- OWNER 私人設定頁實際回讀 17 項：預簽 PDF 私人索引、雙日期政策、版面、三場與 72h／既有使用者核准仍存在；未寫缺證據 VERIFIED、正式 OTP/HMAC 金鑰、slot registry、REC scope 或四收件開關。由 OWNER 原 Slots!A1:H4 唯讀取得完整八欄及三列，與核定 2026-12-07 09:00–11:00、11:00–13:00、14:00–16:00、各 1 人、828 研究室一致，未改正式場次或預約。
+- 正式 REC 證據查核：研究室 Google Drive 案號 202604EM033 搜尋取得原核可證書及已複製的私人參照。原倫理審查主資料夾有「變更申請」，其內為 2026-10-22 變更申請書及 2026-10-27 E1/E2 同意書修訂原稿，未見變更核可通知或核定版獨立證據。研究室 Gmail 以案號搜尋，畫面原文「找不到與你的搜尋條件相符的郵件。」未將申請書或舊一般核准證書誤認為遠端 PDF 電子同意、線上個資及電子流程之適用核准。需要研究團隊提供相應有效核准／PI 已核對適用範圍的具名可追溯正式證據。
+- 依第 13 版原來源確認入場需要 `REC_INTAKE_POLICY_NOT_CONFIGURED`／`REMOTE_CONSENT_REC_SCOPE_NOT_VERIFIED` 所對應的兩個獨立來源與核驗，另有正式 OTP/HMAC 與核定時段登錄的安全 gate；此處為程式契約的錯誤碼，不冒稱本輪已呼叫功能而實際拋錯。依前次自動審查拒絕，不寫入被拒的正式金鑰／slot registry／REC 或 VERIFIED。已撤回本輪尚未儲存的四項非啟用金鑰與 registry 草稿，重新載入確認屬性仍 17 項、沒有以上新鍵或收件開關。無新正式異動，不拆分規避先前拒絕。
+- LAST_VERIFIED_STEP=OWNER_EDITOR_RESTORED_AND_PRIVATE_SETTINGS_AND_ORIGINAL_SLOTS_READBACK；SYNC_STATUS=V13_DEPLOYED_OWNER_ACCESS_RESTORED_INTAKE_CLOSED；BLOCKERS=REC_WEB_AND_REMOTE_CONSENT_SCOPE_EVIDENCE_NOT_FOUND、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=取得真正有效的適用 REC／PI 具名核對證據與安全設定審查允許後，接續原 OWNER 設定（不重問既有場次、72 小時、預簽 PDF、雙日期或重新登入），依實際證據配置正式 OTP/HMAC、三個 E1 slot HMAC 綁定、適用 REC 與剩餘 gate、文件正式公開指標及真實收件；實際啟用另須當次確認。本輪沒有功能測試、沒有部署、沒有收件、沒有重建 OAuth、沒有碰 V1。
+
+## 前次接續點｜2026-11-21 原部署第 13 版，私人預簽 PDF／雙日期設定已回讀（歷史）
 
 - 使用者已決定「依報名者簽署日期壓上一致的日期」，正式規格 §70-S.53；不再追問固定預簽日期。新版在同一次參與者完成簽署時，以同一伺服器完成時間填第 4、5 頁的日期欄，保留研究者既有預簽筆跡，另記完成時間與日期政策；不虛構研究者當日重新簽署。原五頁來源獨立複製至私人資料夾，owner-only、5 頁、432368 bytes，原件／副本 SHA 一致；未改來源原件或 ACL，未對外揭露私人 IDs、筆跡或密鑰。
 - 原 V2 Script Properties 上次尚未保存的 23 個新草稿已撤回：重新載入確認原 14 項。這次只限定保存 `STUDY1_E1_SAME_DATE_POLICY_V1`、`STUDY1_ECONSENT_APPROVED_PDF_LAYOUT_V1`、`STUDY1_CONSENT_DOCUMENT_INDEX_V1` 及更新 `STUDY1_E1_LAUNCH_AUTHORIZATION_V1`；重新載入逐值一致，計 17 項。文件為私人 current.E1 選用，published.E1 保持 null，尚未對外發布；未寫入缺核驗的 VERIFIED／正式開關，既有三場／72h／使用者核准保留。
