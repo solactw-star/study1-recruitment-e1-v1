@@ -2,8 +2,187 @@
 
 // V2 formal booking receipt and notice integration. The original public RPCs,
 // OTP proof, gates, signed-PDF checks and once-only notification writer remain
-// the only entry points. This module never changes a live switch.
+// intact. Post-confirmation links have a separate, explicitly approved scope.
+// This module never changes a live switch or a private policy.
 const runtime=String.raw`
+
+/** Confirmed-booking capabilities are separate from enrollment, PDF and the
+ * read-only recovery OTP. Policy is PRIVATE and independently approved. */
+function study1V2ManagementPolicy_(){
+ study1V2FormalEntryRequired_();study1ParticipantMailGate_();study1FormalConsentGate_();study1FormalGate_();
+ const p=PropertiesService.getScriptProperties(),raw=p.getProperty('STUDY1_E1_BOOKING_MANAGEMENT_POLICY_V1');
+ if(p.getProperty('STUDY1_E1_BOOKING_MANAGEMENT_POLICY_APPROVED')!=='true'||typeof raw!=='string'||raw.length>300)throw Error('MANAGEMENT_UNAVAILABLE');
+ const q=JSON.parse(raw);
+ if(!q||Array.isArray(q)||Object.keys(q).sort().join(',')!=='cancelBeforeMinutes,cancelMode,linkMinutes,moveMode,version'||q.version!==1||
+    !Number.isSafeInteger(q.linkMinutes)||q.linkMinutes<10||q.linkMinutes>4320||!Number.isSafeInteger(q.cancelBeforeMinutes)||q.cancelBeforeMinutes<1||q.cancelBeforeMinutes>10080||
+    !['REQUEST_REVIEW','DIRECT_APPROVED'].includes(q.cancelMode)||q.moveMode!=='REQUEST_REVIEW')throw Error('MANAGEMENT_UNAVAILABLE');
+ return {...q,policyMac:study1BindingHmac_(['E1_BOOKING_MANAGEMENT_POLICY_V1',raw])};
+}
+function study1V2ManagementEqual_(a,b){
+ if(!/^[a-f0-9]{64}$/.test(a||'')||!/^([a-f0-9]{64})$/.test(b||''))return false;
+ let diff=0;for(let i=0;i<64;i++)diff|=a.charCodeAt(i)^b.charCodeAt(i);return diff===0;
+}
+function study1V2ManagementContext_(id,lock,policy){
+ if(!lock||lock.hasLock()!==true)throw Error('MANAGEMENT_UNAVAILABLE');
+ const registry=study1EConsentRegistry_(),entries=registry.records.filter(x=>x.id===id);
+ if(entries.length!==1)throw Error('MANAGEMENT_UNAVAILABLE');
+ const entry=entries[0],b=entry.binding;
+ if(entry.channel!=='FORMAL_E1'||entry.experiment!=='E1'||entry.state!=='CONFIRMED'||entry.withdrawal||!b||b.experiment!=='E1'||b.documentSha!==entry.documentSha||b.documentVersion!==entry.documentVersion||study1BindingDigest_(b)!==b.digest||
+    registry.records.filter(x=>x.binding&&x.binding.applicantId===b.applicantId).length!==1)throw Error('MANAGEMENT_UNAVAILABLE');
+ // Immutable signed evidence is independently validated. It is never returned.
+ study1OwnerE1SignedPdfVerified_(entry);
+ const book=SpreadsheetApp.openById(study1BindingSheetId_('applicants'));
+ const apps=study1WizardTable_(book,'Applicants',STUDY1_BINDING_SCHEMA_.applicants);
+ const matches=study1WizardLookup_(apps,1,b.applicantId,true);
+ if(matches.length!==1)throw Error('MANAGEMENT_UNAVAILABLE');
+ const a=study1BindingOtpRow_(apps.tab,matches[0],7),email=study1BindingEmail_(a[2]);
+ if(a[0]!==b.applicantId||a[6]!=='EMAIL_VERIFIED'||study1WizardLookup_(apps,3,email,false).length!==1)throw Error('MANAGEMENT_UNAVAILABLE');
+ const screen=study1BindingSheetRow_(book,'Screenings',STUDY1_BINDING_SCHEMA_.screenings,b.screeningId).rows[0];
+ const otp=study1BindingSheetRow_(book,'Verification',STUDY1_BINDING_SCHEMA_.verification,b.challengeId).rows[0];
+ const issued=study1BindingUtc_(otp[8]),used=study1BindingUtc_(otp[6]),expires=study1BindingUtc_(otp[4]);
+ if(screen[0]!==b.screeningId||screen[1]!==a[0]||screen[3]!=='ELIGIBLE'||screen[5]!=='PARTICIPANT_SELF_REPORT'||otp[0]!==b.challengeId||otp[1]!==a[0]||otp[2]!==OTP_RULES_.emailPurpose||
+    study1BindingEmail_(otp[7])!==email||!/^([a-f0-9]{64})$/.test(otp[3]||'')||!Number.isInteger(Number(otp[5]))||Number(otp[5])<1||Number(otp[5])>OTP_RULES_.maxAttempts||issued>used||used>=expires||expires-issued>OTP_RULES_.ttlMinutes*60000||used>Date.now())throw Error('MANAGEMENT_UNAVAILABLE');
+ const rec=study1ParticipantVerifiedPolicy_(study1ParticipantRecPolicy_());
+ if(rec.approved!==true||screen[2]!==rec.screeningVersion||study1BindingUtc_(screen[4])<study1BindingUtc_(a[4])||issued<study1BindingUtc_(screen[4])||b.otpUsedAtUtc!==otp[6]||b.verifiedAtUtc!==otp[6])throw Error('MANAGEMENT_UNAVAILABLE');
+ const eligibility=study1BindingHmac_(['E1_SELF_DECLARED_SCREENING_V1',a[0],b.screeningId,rec.screeningVersion,screen[4],rec.documentSha256]);
+ const identity=study1BindingHmac_(['E1_CONSUMED_EMAIL_OTP_V1',a[0],b.screeningId,b.challengeId,email,otp[6],eligibility]);
+ if(!study1V2ManagementEqual_(b.eligibilityEvidenceSha,eligibility)||!study1V2ManagementEqual_(b.identityEvidenceSha,identity))throw Error('MANAGEMENT_UNAVAILABLE');
+ const snapshot=study1FormalSnapshot_(),nowUtc=new Date().toISOString();study1FormalValidateSnapshot_(snapshot,nowUtc);
+ const rows=snapshot.reservations.rows.filter(r=>r[0]===b.reservationId);
+ if(rows.length!==1||rows[0][1]!==a[0]||rows[0][2]!==b.slotId||!['CONFIRMED','CANCELLED'].includes(rows[0][3])||!rows[0][7]||
+    (rows[0][3]==='CONFIRMED'&&rows[0][8])||(rows[0][3]==='CANCELLED'&&!rows[0][8])||study1BindingUtc_(rows[0][7])<used)throw Error('MANAGEMENT_UNAVAILABLE');
+ const row=rows[0],schedule=study1V2ReceiptSchedule_(snapshot,row[2],lock);
+ const scope=study1BindingHmac_(['E1_BOOKING_MANAGEMENT_SCOPE_V1',entry.id,b.digest,row[0],row[2],row[7],email]);
+ return {entry,b,email,row,schedule,snapshot,lock,nowUtc,policy,scope,identity:{applicantId:a[0]}};
+}
+function study1V2ManagementLink_(ctx){
+ const url=study1V2SelfWebUrl_();if(!url||!url.endsWith('/exec')||ctx.row[3]!=='CONFIRMED')throw Error('MANAGEMENT_UNAVAILABLE');
+ const issued=Date.now(),signature=study1BindingHmac_(['E1_BOOKING_MANAGEMENT_LINK_V1',ctx.entry.id,issued,ctx.scope,ctx.policy.policyMac]);
+ // Never place the capability in a query string or return it in an RPC response.
+ return {url:url+'?view=apply#M1.'+ctx.entry.id+'.'+issued+'.'+ctx.scope+'.'+signature,
+  expiresAtUtc:new Date(issued+ctx.policy.linkMinutes*60000).toISOString()};
+}
+function study1V2ManagementWithLink_(token,fn){
+ const policy=study1V2ManagementPolicy_();
+ const t=typeof token==='string'&&token.match(/^M1\.([-a-f0-9]{30,40})\.([0-9]{13})\.([a-f0-9]{64})\.([a-f0-9]{64})$/i);
+ if(!t)throw Error('MANAGEMENT_UNAVAILABLE');
+ const issued=Number(t[2]),now=Date.now(),expires=issued+policy.linkMinutes*60000;
+ if(!Number.isSafeInteger(issued)||issued>now||now>=expires||!study1V2ManagementEqual_(t[4],study1BindingHmac_(['E1_BOOKING_MANAGEMENT_LINK_V1',t[1],issued,t[3],policy.policyMac])))throw Error('MANAGEMENT_UNAVAILABLE');
+ const lock=LockService.getScriptLock();if(!lock||lock.tryLock(5000)!==true)throw Error('MANAGEMENT_UNAVAILABLE');
+ try{
+  const again=study1V2ManagementPolicy_();if(again.policyMac!==policy.policyMac||Date.now()>=expires)throw Error('MANAGEMENT_UNAVAILABLE');
+  const ctx=study1V2ManagementContext_(t[1],lock,again);
+  if(!study1V2ManagementEqual_(ctx.scope,t[3])||Date.now()>=expires)throw Error('MANAGEMENT_UNAVAILABLE');
+  ctx.expiresAtUtc=new Date(expires).toISOString();return fn(ctx);
+ }finally{lock.releaseLock();}
+}
+function study1V2ManagementRequestName_(ctx){return 'Study1_E1_BookingChange_'+study1BindingHmac_(['E1_BOOKING_CHANGE_NAME_V1',ctx.row[0]])+'.json';}
+function study1V2ManagementRequestMac_(record){const e={...record};delete e.mac;return study1BindingHmac_(['E1_BOOKING_CHANGE_REQUEST_V1',JSON.stringify(e)]);}
+function study1V2ManagementRequestRead_(ctx){
+ const name=study1V2ManagementRequestName_(ctx),folder=study1EConsentFolder_(),it=folder.getFilesByName(name);
+ if(!it.hasNext())return null;
+ const f=it.next();if(it.hasNext()||f.getSharingAccess()!==DriveApp.Access.PRIVATE||f.getMimeType()!=='application/json'||f.getSize()>4000)throw Error('MANAGEMENT_UNAVAILABLE');
+ const raw=f.getBlob().getDataAsString(),r=JSON.parse(raw);
+ if(!r||JSON.stringify(r)!==raw||Object.keys(r).sort().join(',')!=='action,atUtc,mac,originalDigest,policyMac,requestId,reservationId,scope,slotId,targetSlotId,version'||r.version!==1||r.reservationId!==ctx.row[0]||r.slotId!==ctx.row[2]||r.scope!==ctx.scope||!['MOVE','CANCEL'].includes(r.action)||!study1V2ManagementEqual_(r.mac,study1V2ManagementRequestMac_(r))||study1BindingUtc_(r.atUtc)>Date.now())throw Error('MANAGEMENT_UNAVAILABLE');
+ return r;
+}
+function study1V2ManagementProject_(ctx){
+ const pending=study1V2ManagementRequestRead_(ctx),options=[];
+ if(!pending&&ctx.row[3]==='CONFIRMED'&&study1BindingUtc_(ctx.schedule.startAtUtc)>Date.now())for(const r of ctx.snapshot.slots.rows){
+  if(r[0]===ctx.row[2]||r[5]!=='OPEN'||study1BindingUtc_(r[1])<=Date.now()||study1FormalQueue_(ctx.snapshot,r[0]).length||study1FormalRemaining_(ctx,r)<1)continue;
+  try{options.push({slotId:r[0],...study1V2ReceiptSchedule_(ctx.snapshot,r[0],ctx.lock)});}catch(_){}
+ }
+ const cutoff=study1BindingUtc_(ctx.schedule.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000;
+ return {scope:'CONFIRMED_E1_BOOKING_ONLY',reservationId:ctx.row[0],status:ctx.row[3],schedule:ctx.schedule,expiresAtUtc:ctx.expiresAtUtc,
+  revision:study1BindingHmac_(['E1_BOOKING_MANAGEMENT_REVISION_V1',ctx.scope,ctx.policy.policyMac,JSON.stringify(ctx.row),JSON.stringify(pending)]),
+  pending:pending?{action:pending.action,targetSlotId:pending.targetSlotId,submittedAtUtc:pending.atUtc,state:ctx.row[3]==='CANCELLED'?'CANCELLED_ORIGINAL_ROW':'OWNER_REVIEW_REQUIRED'}:null,
+  cancellationMode:ctx.policy.cancelMode==='DIRECT_APPROVED'&&study1FormalTxnEnabled_()&&Date.now()<cutoff?'DIRECT_APPROVED':'REQUEST_REVIEW',
+  canRequest:!pending&&ctx.row[3]==='CONFIRMED'&&study1BindingUtc_(ctx.schedule.startAtUtc)>Date.now(),options};
+}
+function study1E1BookingManagementRead(token){
+ try{return study1V2ManagementWithLink_(token,study1V2ManagementProject_);}catch(_){return {scope:'UNAVAILABLE'};}
+}
+function study1E1BookingManagementChange(input){
+ if(!input||Array.isArray(input)||Object.keys(input).sort().join(',')!=='action,requestId,revision,targetSlotId,token'||!['CANCEL','MOVE'].includes(input.action)||!/^REQ_[a-f0-9]{40}$/.test(input.requestId||'')||!/^([a-f0-9]{64})$/.test(input.revision||'')||typeof input.targetSlotId!=='string'||(input.action==='CANCEL'&&input.targetSlotId!==''))return {scope:'UNAVAILABLE'};
+ try{return study1V2ManagementWithLink_(input.token,ctx=>{
+  const view=study1V2ManagementProject_(ctx);
+  if(!view.canRequest||view.revision!==input.revision||input.action==='MOVE'&&!view.options.some(o=>o.slotId===input.targetSlotId))return {scope:'UNAVAILABLE'};
+  if(study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac||ctx.lock.hasLock()!==true||Date.parse(ctx.expiresAtUtc)<=Date.now())return {scope:'UNAVAILABLE'};
+  // Preserve the signed reservation/slot forever. One durable change request
+  // per original booking. A failed/unknown write is not safe to retry.
+  const request={version:1,reservationId:ctx.row[0],slotId:ctx.row[2],scope:ctx.scope,requestId:input.requestId,
+   action:input.action,targetSlotId:input.targetSlotId,atUtc:ctx.nowUtc,policyMac:ctx.policy.policyMac,
+   originalDigest:study1FormalTxnDigest_(ctx.row)};
+  request.mac=study1V2ManagementRequestMac_(request);
+  const name=study1V2ManagementRequestName_(ctx),folder=study1EConsentFolder_();
+  if(folder.getFilesByName(name).hasNext())return {scope:'UNAVAILABLE'};
+  const f=folder.createFile(Utilities.newBlob(JSON.stringify(request),'application/json',name));
+  f.setSharing(DriveApp.Access.PRIVATE,DriveApp.Permission.VIEW);
+  if(JSON.stringify(study1V2ManagementRequestRead_(ctx))!==JSON.stringify(request)||ctx.lock.hasLock()!==true)throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
+  if(input.action==='CANCEL'&&view.cancellationMode==='DIRECT_APPROVED'){
+   // Separate explicit policy. Never withdraw consent or erase signed evidence.
+   if(study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac||Date.now()>=study1BindingUtc_(ctx.schedule.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000||!study1FormalTxnEnabled_())throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
+   const after=ctx.row.slice();after[3]='CANCELLED';after[8]=new Date().toISOString();after[9]=after[8];
+   const evidence=[study1FormalTxnSubject_('RESERVATION',ctx.row[0],ctx.row,after)];
+   const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'CANCEL',request.requestId,evidence,ctx.lock);
+   study1FormalWriteExisting_(ctx,ctx.row,after);study1FormalAfterMutation_(ctx.snapshot,[[ctx.row[0],after]]);
+   study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
+  }
+  // Return a fresh independent projection. The request is not a new booking.
+  const fresh=study1V2ManagementContext_(ctx.entry.id,ctx.lock,ctx.policy);fresh.expiresAtUtc=ctx.expiresAtUtc;
+  return study1V2ManagementProject_(fresh);
+ });}catch(_){return {scope:'OUTCOME_UNKNOWN'};}
+}
+
+/** Link reissue: same existing human verification, private original mailbox,
+ * generic acknowledgment, durable at-most-once outbox and rate limit. */
+function study1E1BookingManagementRequestLink(input){
+ const ack={accepted:true,delivery:'UNVERIFIED'};
+ try{
+  const policy=study1V2ManagementPolicy_();
+  if(!input||Array.isArray(input)||Object.keys(input).sort().join(',')!=='email,humanToken,requestId'||!/^REQ_[a-f0-9]{40}$/.test(input.requestId||''))return ack;
+  const email=study1BindingEmail_(input.email),grant=study1ParticipantAbuseProtection_(input);
+  const lock=LockService.getScriptLock();if(!lock||lock.tryLock(5000)!==true)return ack;
+  try{
+   study1ParticipantAbuseRecheck_(grant,input);if(study1V2ManagementPolicy_().policyMac!==policy.policyMac)return ack;
+   const book=SpreadsheetApp.openById(study1BindingSheetId_('applicants')),apps=study1WizardTable_(book,'Applicants',STUDY1_BINDING_SCHEMA_.applicants);
+   const match=study1WizardLookup_(apps,3,email,false);if(match.length!==1)return ack;
+   const a=study1BindingOtpRow_(apps.tab,match[0],7),cs=study1EConsentRegistry_().records.filter(x=>x.binding&&x.binding.applicantId===a[0]&&x.channel==='FORMAL_E1'&&x.experiment==='E1'&&x.state==='CONFIRMED');
+   if(cs.length!==1)return ack;
+   const ctx=study1V2ManagementContext_(cs[0].id,lock,policy);if(ctx.email!==email||ctx.row[3]!=='CONFIRMED'||Date.parse(ctx.schedule.startAtUtc)<=Date.now())return ack;
+   const source=study1WizardTable_(SpreadsheetApp.openById(study1BindingSheetId_('reservations')),'Notifications',STUDY1_E1_NOTIFICATION_HEADERS_);
+   const id='NTF_'+study1BindingHmac_(['E1_BOOKING_MANAGEMENT_LINK_REQUEST_V1',ctx.row[0],input.requestId]).slice(0,28);
+   if(study1WizardLookup_(source,1,id,true).length)return ack;
+   const now=Date.now(),history=study1WizardLookup_(source,3,ctx.row[0],true).map(n=>source.tab.getRange(n,1,1,9).getValues()[0]).filter(r=>r[3]==='E1_BOOKING_MANAGEMENT_LINK');
+   if(history.some(r=>r[1]!==a[0]||!['DISPATCHING','PROVIDER_ACCEPTED','UNKNOWN'].includes(r[4])||r[5]!==1))return ack;
+   const last=history.map(r=>study1BindingUtc_(r[6]));if(last.some(t=>t>now||now-t<3600000)||last.filter(t=>now-t<86400000).length>=3)return ack;
+   const link=study1V2ManagementLink_(ctx),row=[id,a[0],ctx.row[0],'E1_BOOKING_MANAGEMENT_LINK','DISPATCHING',1,new Date(now).toISOString(),'',''];
+   study1WizardAppend_(source,row);
+   if(lock.hasLock()!==true||study1V2ManagementPolicy_().policyMac!==policy.policyMac)return ack;
+   let accepted=false;try{MailApp.sendEmail({to:ctx.email,subject:'Study1｜限時預約管理連結',body:'請在期限內使用原網站管理實驗一預約：\n'+link.url+'\n本連結只限原預約，不可轉寄，也不授權簽署或下載 PDF。有效至（臺灣）：'+Utilities.formatDate(new Date(link.expiresAtUtc),'Asia/Taipei','yyyy/MM/dd HH:mm')+'。'});accepted=true;}catch(_){}
+   const range=source.tab.getRange(source.n+1,1,1,9);if(lock.hasLock()!==true||JSON.stringify(range.getValues()[0])!==JSON.stringify(row))return ack;
+   const updated=row.slice();updated[4]=accepted?'PROVIDER_ACCEPTED':'UNKNOWN';updated[7]=accepted?new Date().toISOString():'';updated[8]=accepted?'':'MAIL_PROVIDER_OUTCOME_UNKNOWN';range.setValues([updated]);SpreadsheetApp.flush();
+   if(JSON.stringify(range.getValues()[0])!==JSON.stringify(updated))return ack;
+  }finally{lock.releaseLock();}
+ }catch(_){}return ack;
+}
+
+/** OWNER-only projection of requests. No mutation, links, emails or PDF bytes. */
+function study1OwnerE1BookingChangeRequests(){
+ study1SiteFormalWorkspaceReadGate_();const lock=LockService.getScriptLock();if(!lock||lock.tryLock(5000)!==true)throw Error('MANAGEMENT_UNAVAILABLE');
+ try{
+  study1SiteFormalWorkspaceReadGate_();const registry=study1EConsentRegistry_(),snapshot=study1FormalSnapshot_(),rows=[];
+  for(const e of registry.records){if(e.channel!=='FORMAL_E1'||e.experiment!=='E1'||!e.binding)continue;
+   const b=e.binding,r=snapshot.reservations.rows.filter(x=>x[0]===b.reservationId&&x[1]===b.applicantId&&x[2]===b.slotId);if(r.length!==1)continue;
+   const name=study1V2ManagementRequestName_({row:r[0]}),it=study1EConsentFolder_().getFilesByName(name);if(!it.hasNext())continue;
+   const file=it.next();if(it.hasNext()||file.getSharingAccess()!==DriveApp.Access.PRIVATE||file.getMimeType()!=='application/json'||file.getSize()>4000)throw Error('MANAGEMENT_UNAVAILABLE');
+   const raw=file.getBlob().getDataAsString(),q=JSON.parse(raw);
+   if(!q||JSON.stringify(q)!==raw||q.version!==1||q.reservationId!==r[0][0]||q.slotId!==r[0][2]||!['MOVE','CANCEL'].includes(q.action)||!study1V2ManagementEqual_(q.mac,study1V2ManagementRequestMac_(q)))throw Error('MANAGEMENT_UNAVAILABLE');
+   rows.push({reservationId:q.reservationId,slotId:q.slotId,action:q.action,targetSlotId:q.targetSlotId,submittedAtUtc:q.atUtc,bookingStatus:r[0][3],consentState:e.state});
+  }
+  study1SiteFormalWorkspaceReadGate_();if(lock.hasLock()!==true)throw Error('MANAGEMENT_UNAVAILABLE');return {readOnly:true,experiment:'E1',rows};
+ }finally{lock.releaseLock();}
+}
 
 /** Only the exact approved original slot may be displayed or mailed. */
 function study1V2ReceiptSchedule_(snapshot,slotId,lock){
@@ -88,6 +267,8 @@ const edits={
  }));`]
  ],
  Study1ParticipantIntake:[
+  ["  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey,\n   recoveryReady:",
+   "  let managementReady=false;try{study1V2ManagementPolicy_();managementReady=true;}catch(_){}\n  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey,managementReady,\n   recoveryReady:"],
   ["   delivery:'UNVERIFIED'};",
    "   delivery:'UNVERIFIED',expiresAtUtc:new Date(expires).toISOString()};"],
   ["   throw Error('E1_NOTICE_ORIGINAL_BOOKING_CHRONOLOGY_INVALID');\n  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));",
@@ -97,6 +278,13 @@ const edits={
   if(!Number.isSafeInteger(entry.expires))throw Error('E1_NOTICE_COPY_EXPIRY_INVALID');
   const copyUntil=new Date(entry.expires);
   if(!Number.isFinite(copyUntil.getTime()))throw Error('E1_NOTICE_COPY_EXPIRY_INVALID');
+  let managementLine='如需改期、取消或重新取得管理連結，請聯絡研究團隊。';
+  try{
+   const managed=study1V2ManagementContext_(entry.id,lock,study1V2ManagementPolicy_());
+   if(managed.email!==to)throw Error('MANAGEMENT_UNAVAILABLE');
+   const link=study1V2ManagementLink_(managed);
+   managementLine='原預約專用限時管理連結（勿轉寄）：\n'+link.url+'\n有效至（臺灣）：'+local(link.expiresAtUtc)+'。只限此預約，不授權簽署或下載 PDF。';
+  }catch(_){} // Management policy must not suppress a valid original confirmation notice.
   // Prepare before creating the existing at-most-once DISPATCHING row.
   const confirmationBody=[
    '您的 Study1 實驗一報名與預約已確認。',
@@ -105,7 +293,8 @@ const edits={
    '地點：'+schedule.locationCode,
    '預約編號：'+binding.reservationId,
    '您已完成研究者預簽知情同意書的本人簽署。請於原報名頁有效驗證期間下載完整副本；副本存取期限至（臺灣）：'+local(copyUntil)+ '。',
-   '本信不附私人 PDF 或存取憑證。若有疑問、需改期或取消，請與研究團隊聯絡；不要重新報名。'
+   managementLine,
+   '本信不附私人 PDF 或簽署憑證。若有疑問請聯絡研究團隊；不要重新報名。'
   ].join('\n');
   const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));`],
   ["    body:'您的Study1實驗一報名與時段預約已確認。研究者事先簽署的知情同意書已由您於報名網站完成簽名。完整簽署PDF已存入研究團隊私人資料庫；您可在原報名頁面的有效驗證期間下載副本。如需協助請聯絡研究團隊。'});",
@@ -126,6 +315,41 @@ const edits={
    '  sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),\n  serverNowUtc:new Date().toISOString(),']
  ],
  Study1Visitor:[
+  ['<p id="formalRecoveryRef" class="help" hidden></p>',
+   String.raw`<section class="step" id="step-manage" hidden>
+<h2>實驗一｜已確認預約管理</h2><p class="help">只核對原預約。改期須由研究團隊確認；取消預約不等同撤回研究同意或刪除已簽同意書。請勿轉寄限時連結。</p>
+<p id="managementSummary" class="box" role="status" aria-live="polite">正在核對連結及原預約…</p>
+<p id="managementExpiry" class="help"></p>
+<div id="managementControls" hidden><label for="managementAction" class="field">選擇操作</label><select id="managementAction"><option value="CANCEL">取消預約</option><option value="MOVE">申請改期（待研究團隊確認）</option></select>
+<label for="managementTarget" id="managementTargetLabel" class="field" hidden>希望改至的場次（非保留名額）</label><select id="managementTarget" hidden></select>
+<label class="check"><input id="managementConfirm" type="checkbox">我已核對本人原預約，並確認提交上述操作。</label><button id="managementSubmit" type="button" disabled>提交一次</button></div>
+<button id="managementRefresh" type="button" class="ghost" hidden>唯讀重新核對原預約與申請</button>
+<p class="help">連結逾期或遺失時，請回到原報名頁，使用原信箱及人機驗證重新申請管理連結，或聯絡研究團隊。</p>
+</section>
+<p id="formalRecoveryRef" class="help" hidden></p>`],
+  [" for(const name of ['choose','screen','ineligible','otp','slots','confirm','consent','done']){",
+   " for(const name of ['choose','screen','ineligible','otp','slots','confirm','consent','done','manage']){"],
+  ["({choose:'研究選擇',screen:'資格初篩',otp:'電子郵件驗證',slots:'時段與資格確認'}[step]||step);",
+   "({choose:'研究選擇',screen:'資格初篩',otp:'電子郵件驗證',slots:'時段與資格確認',manage:'已確認預約管理'}[step]||step);"],
+  ['<div id="formalExistingCase" class="box" hidden>',
+   '<div class="box" id="formalManageLinkBox" hidden><strong>已完成預約？重新取得限時管理連結</strong><p class="help">只填上方原電子郵件並完成人機驗證。回應不顯示帳號是否存在；不要重新申請研究。</p><button type="button" id="formalManageLinkSend" disabled>請求一次給原信箱的管理連結</button></div>\n<div id="formalExistingCase" class="box" hidden>'],
+  ["   state.recoveryReady=state.ready&&result.recoveryReady===true;",
+   "   state.recoveryReady=state.ready&&result.recoveryReady===true;\n   state.managementReady=state.ready&&result.managementReady===true;\n   el('formalManageLinkBox').hidden=!state.managementReady;el('formalManageLinkSend').disabled=!state.managementReady;"],
+  ["el('formalRecoverySend').addEventListener('click',()=>{",
+   String.raw`el('formalManageLinkSend').addEventListener('click',()=>{
+ if(!state.managementReady||state.busy||state.app||state.beginUnknown||state.recoveryCase||!state.humanToken)return;
+ const email=el('formalEmail').value.trim();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254){status('請填原報名信箱。');return;}
+ const requestId=genRequest(),humanToken=state.humanToken;state.humanToken='';state.beginUnknown=true;
+ if(window.turnstile&&state.captchaWidget!==null)window.turnstile.reset(state.captchaWidget);
+ for(const id of ['formalManageLinkSend','screenNext','formalRecoverySend','formalEmail'])el(id).disabled=true;
+ const done=()=>status('如符合管理連結核發條件，原信箱將收到郵件。實際送達未核實，請勿連續送出；若未收到請聯絡研究團隊。');
+ rpc('study1E1BookingManagementRequestLink',{email,humanToken,requestId},done,done);
+});
+el('formalRecoverySend').addEventListener('click',()=>{`],
+  ["if(typeof google!=='undefined'&&google.script&&google.script.run){\n google.script.run.withFailureHandler(()=>{",
+   "function formalInitialReadiness_(){\nif(typeof google!=='undefined'&&google.script&&google.script.run){\n google.script.run.withFailureHandler(()=>{"],
+  [" status('目前尚未開放線上報名。');\n}\n\n// V05 + V08 formal UI",
+   " status('目前尚未開放線上報名。');\n}\n}\n\n// V05 + V08 formal UI"],
   ['<div id="otpInputWrap" hidden>',
    '<button id="formalOtpLookup" type="button" class="ghost" hidden disabled>唯讀核對本次驗證碼狀態</button>\n<div id="otpInputWrap" hidden>'],
   ['function reconcileOtpIssue_(payload){',
@@ -350,7 +574,65 @@ function formalConsentRender_(){
   ["     !el('readPdf').checked||!el('agree').checked)return;\n  const canvas=el('visitorSignaturePreview');",
    "     !el('readPdf').checked||!el('agree').checked)return;\n  if(!formalConsentDeadlineOpen_(formalConsent)){formalConsentRender_();status('期限已到或無法核對；未提交簽署。請聯絡研究團隊，勿重送。');return;}\n  const canvas=el('visitorSignaturePreview');"],
   ['formalConsentWire_();\n\n\nfunction formalV08PendingPanel_',
-   "formalConsentWire_();\nif(typeof window!=='undefined'&&typeof window.setInterval==='function')window.setInterval(formalConsentDeadlineTick_,1000);\n\n\nfunction formalV08PendingPanel_"]
+   String.raw`formalConsentWire_();
+if(typeof window!=='undefined'&&typeof window.setInterval==='function')window.setInterval(formalConsentDeadlineTick_,1000);
+
+// Read an opaque capability only from the original GAS location fragment,
+// strip it from browser history and retain it only in this page's memory.
+function formalManagementStart_(){
+ let token=null,view=null,submitted=false;
+ const summary=el('managementSummary'),controls=el('managementControls'),submit=el('managementSubmit'),refresh=el('managementRefresh'),action=el('managementAction'),target=el('managementTarget'),confirm=el('managementConfirm');
+ const unavailable=()=>{view=null;controls.hidden=true;summary.textContent='管理連結無法核實、已過期或目前不適用。請重新取得連結或聯絡研究團隊；不要重複報名。';};
+ const update=()=>{
+  const moving=action.value==='MOVE';target.hidden=!moving;el('managementTargetLabel').hidden=!moving;
+  submit.disabled=state.busy||submitted||!view||!view.canRequest||!confirm.checked||(moving&&!target.value);
+  submit.textContent=moving?'提交改期申請（待審核）':view&&view.cancellationMode==='DIRECT_APPROVED'?'確認取消原預約':'提交取消申請（待審核）';
+ };
+ const render=r=>{
+  if(!r||r.scope!=='CONFIRMED_E1_BOOKING_ONLY'||!r.schedule||!Array.isArray(r.options)||!/^([a-f0-9]{64})$/.test(r.revision||'')||!['CONFIRMED','CANCELLED'].includes(r.status)){unavailable();return;}
+  view=r;formalClear_(target);for(const s of r.options){const option=document.createElement('option');option.value=s.slotId;option.textContent=formalTime_(s.startAtUtc)+' – '+formalTime_(s.endAtUtc)+'｜'+s.locationCode;target.appendChild(option);}
+  summary.textContent='原預約：'+r.reservationId+'｜'+formalTime_(r.schedule.startAtUtc)+' – '+formalTime_(r.schedule.endAtUtc)+'｜'+r.schedule.locationCode+'｜'+(r.status==='CONFIRMED'?'已確認':'已取消')+
+   (r.pending?'｜'+(r.pending.action==='MOVE'?'改期':'取消')+'請求已保存：'+(r.pending.state==='CANCELLED_ORIGINAL_ROW'?'原預約目前已取消':'待研究團隊審核，勿視作已改期或取消'):'');
+  el('managementExpiry').textContent='連結有效至（臺灣）：'+formalTime_(r.expiresAtUtc)+'。';
+  confirm.checked=false;controls.hidden=submitted||!r.canRequest;update();
+ };
+ const read=()=>{if(!token||state.busy)return;controls.hidden=true;rpc('study1E1BookingManagementRead',token,render,unavailable);};
+ refresh.addEventListener('click',read);action.addEventListener('change',()=>{confirm.checked=false;update();});target.addEventListener('change',()=>{confirm.checked=false;update();});confirm.addEventListener('change',update);
+ submit.addEventListener('click',()=>{
+  if(submitted||state.busy||!token||!view||!view.canRequest||!confirm.checked||submit.disabled)return;
+  submitted=true;controls.hidden=true;submit.disabled=true;
+  const q={token,revision:view.revision,action:action.value,targetSlotId:action.value==='MOVE'?target.value:'',requestId:genRequest()};
+  const unknown=()=>{summary.textContent='提交結果未知；只能唯讀核對原紀錄，不得重送或另建預約。';refresh.hidden=false;};
+  rpc('study1E1BookingManagementChange',q,r=>{if(r&&r.scope==='CONFIRMED_E1_BOOKING_ONLY')render(r);else unknown();},unknown);
+ });
+ if(typeof google==='undefined'||!google.script||!google.script.url||typeof google.script.url.getLocation!=='function'){formalInitialReadiness_();return;}
+ google.script.url.getLocation(location=>{
+  const hash=String(location?.hash||'');if(!hash.startsWith('M1.')){formalInitialReadiness_();return;}
+  show('manage');document.title='Study1｜原預約管理';
+  if(!google.script.history||typeof google.script.history.replace!=='function'){unavailable();return;}
+  try{google.script.history.replace({}, {view:'apply'},'');}catch(_){unavailable();return;}
+  if(!/^M1\.([-a-f0-9]{30,40})\.([0-9]{13})\.([a-f0-9]{64})\.([a-f0-9]{64})$/.test(hash)){unavailable();return;}
+  token=hash;refresh.hidden=false;read();
+ });
+ if(typeof window!=='undefined'&&window.addEventListener)window.addEventListener('pagehide',()=>{token=null;view=null;submitted=true;controls.hidden=true;});
+}
+formalManagementStart_();
+
+
+function formalV08PendingPanel_`]
+ ],
+ AdminConsole:[
+  ['<section id="e1FormalOperations"',
+   '<section id="e1FormalBookingChangeRequests"><h2>E1｜已確認預約的改期／取消申請</h2><p>只讀原私人申請存證及預約狀態；不等同已改期或取消、不得由此寫資料。</p><button id="formalChangeLoad" type="button">重新核對已提交申請</button><pre id="formalChangeResult" role="status" aria-live="polite"></pre></section><section id="e1FormalOperations"'],
+  ['</script></body></html>',
+   String.raw`(function(){const button=document.getElementById('formalChangeLoad'),output=document.getElementById('formalChangeResult');if(!button||!output)return;let epoch=0;
+    window.addEventListener('pagehide',()=>{epoch++;output.textContent='';button.disabled=true;});
+    button.addEventListener('click',()=>{const e=++epoch;button.disabled=true;output.textContent='正在核對原申請…';
+     const fail=()=>{if(e!==epoch)return;button.disabled=false;output.textContent='無法完整核對正式來源或 OWNER 權限。';};
+     google.script.run.withFailureHandler(fail).withSuccessHandler(r=>{if(e!==epoch)return;if(!r||r.readOnly!==true||r.experiment!=='E1'||!Array.isArray(r.rows)){fail();return;}
+      button.disabled=false;output.textContent=r.rows.length?r.rows.map(q=>[q.reservationId,q.slotId,q.action,q.targetSlotId||'—',q.submittedAtUtc,q.bookingStatus,q.consentState].join('｜')).join('\n'):'目前無已核對的改期／取消申請。';}).study1OwnerE1BookingChangeRequests();
+    });})();
+</script></body></html>`]
  ]
 };
 function once(source,from,to,label){
