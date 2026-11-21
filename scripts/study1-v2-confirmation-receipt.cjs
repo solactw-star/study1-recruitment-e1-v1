@@ -79,9 +79,17 @@ const edits={
   ['    capacity:row[3],remaining,waitlistCount:queue.length,',
    '    capacity:row[3],locationCode:row[4],remaining,waitlistCount:queue.length,'],
   ["  experiment:'E1',asOfUtc:ctx.nowUtc,reservations:study1FormalRowsFor_(ctx)\n }));",
-   "  experiment:'E1',asOfUtc:ctx.nowUtc,reservations:study1FormalRowsFor_(ctx),\n  confirmationReceipts:study1V2ConfirmationReceipts_(ctx)\n }));"]
+   String.raw`  experiment:'E1',asOfUtc:ctx.nowUtc,reservations:study1FormalRowsFor_(ctx).map(row=>{
+   let schedule=null;
+   if(['HELD','WAITLISTED'].includes(row.status))try{schedule=study1V2ReceiptSchedule_(ctx.snapshot,row.slotId,ctx.lock);}catch(_){}
+   return {...row,schedule};
+  }),
+  confirmationReceipts:study1V2ConfirmationReceipts_(ctx)
+ }));`]
  ],
  Study1ParticipantIntake:[
+  ["   delivery:'UNVERIFIED'};",
+   "   delivery:'UNVERIFIED',expiresAtUtc:new Date(expires).toISOString()};"],
   ["   throw Error('E1_NOTICE_ORIGINAL_BOOKING_CHRONOLOGY_INVALID');\n  const book=SpreadsheetApp.openById(study1BindingSheetId_('reservations'));",
    String.raw`   throw Error('E1_NOTICE_ORIGINAL_BOOKING_CHRONOLOGY_INVALID');
   const schedule=study1V2ReceiptSchedule_(snapshot,binding.slotId,lock);
@@ -118,12 +126,116 @@ const edits={
    '  sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),\n  serverNowUtc:new Date().toISOString(),']
  ],
  Study1Visitor:[
+  ['<div id="otpInputWrap" hidden>',
+   '<button id="formalOtpLookup" type="button" class="ghost" hidden disabled>唯讀核對本次驗證碼狀態</button>\n<div id="otpInputWrap" hidden>'],
+  ['function reconcileOtpIssue_(payload){',
+   String.raw`let formalOtpExpiredRequestId=null;
+function formalOtpLookupControl_(available){
+ const button=el('formalOtpLookup');if(button){button.hidden=!available;button.disabled=!available;}
+}
+function formalOtpLookup_(){
+ if(!state.app||state.busy||state.otpVerifyUnknown||!state.otpRequestId)return;
+ reconcileOtpIssue_({...state.app,requestId:state.otpRequestId});
+}
+el('formalOtpLookup').addEventListener('click',formalOtpLookup_);
+function reconcileOtpIssue_(payload){
+ if(!state.app||state.app.applicantId!==payload.applicantId||state.otpRequestId!==payload.requestId||state.otpVerifyUnknown)return;
+ formalOtpExpiredRequestId=null;el('otpSend').disabled=true;el('otpVerify').disabled=true;
+ formalOtpLookupControl_(true);`],
+  ["  if(!result||result.found!==true){\n   status('OTP 原始紀錄尚未核實；寄送因果未知，請勿重複送出，聯絡研究團隊。');",
+   "  if(state.otpRequestId!==payload.requestId||state.otpVerifyUnknown)return;\n  if(!result||result.found!==true){\n   status('OTP 原始紀錄尚未核實；寄送因果未知，請勿重複送出，聯絡研究團隊。');"],
+  ["   status('已唯讀核對原 Verification 有尚未使用的驗證碼；郵件是否送達仍未知，僅在確實收到郵件時輸入。');",
+   String.raw`   el('otpInput').disabled=false;el('otpVerify').disabled=false;
+   const until=typeof result.expiresAtUtc==='string'&&Number.isFinite(Date.parse(result.expiresAtUtc))?formalTime_(result.expiresAtUtc):'尚未核對';
+   status('已唯讀核對原驗證碼仍有效（臺灣期限：'+until+'）；郵件是否送達仍未知，僅在收到時輸入。');`],
+  ["  if(result.status==='USED'){\n   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;",
+   String.raw`  if(result.status==='EXPIRED'){
+   // This is a fresh user-initiated issue for the same pending application,
+   // never a replay of the old request. Original lock/throttle remain authoritative.
+   formalOtpExpiredRequestId=payload.requestId;state.mail=null;
+   el('otpInput').value='';el('otpInputWrap').hidden=true;el('otpVerify').disabled=true;
+   el('otpSend').textContent='原碼已過期，申請新驗證碼';el('otpSend').disabled=false;
+   status('已由原驗證紀錄確認過期，舊碼不可使用。若仍要繼續同一申請，可自行要求新碼；仍受伺服器寄送頻率限制。');return;
+  }
+  if(result.status==='USED'){
+   formalOtpLookupControl_(false);state.otpVerifyUnknown=true;el('otpVerify').disabled=true;`],
+  ["  status('原 OTP 狀態為過期、受限或已被新挑戰取代；請勿自動補寄，聯絡研究團隊核對。');",
+   "  el('otpVerify').disabled=true;state.mail=null;\n  status('原 OTP 狀態受限、被取代或未知；請勿補寄或重驗，聯絡研究團隊核對。');"],
+  [" if(!state.ready||state.busy||!state.app||state.otpRequestId)return;",
+   String.raw` if(!state.ready||state.busy||!state.app||state.otpVerifyUnknown)return;
+ if(state.otpRequestId&&formalOtpExpiredRequestId!==state.otpRequestId)return;
+ formalOtpExpiredRequestId=null;state.mail=null;
+ el('otpInput').value='';el('otpInputWrap').hidden=true;el('otpVerify').disabled=true;
+ el('otpSend').textContent='寄送電子郵件驗證碼';`],
+  [" state.otpRequestId=payload.requestId;\n el('otpSend').disabled=true;",
+   " state.otpRequestId=payload.requestId;\n el('otpSend').disabled=true;formalOtpLookupControl_(true);"],
+  ["   status('伺服器已接受驗證碼寄送要求，實際送達仍需由信箱確認；八位碼10分鐘內有效。');return;",
+   String.raw`   el('otpInput').disabled=false;el('otpVerify').disabled=false;
+   status('伺服器已接受驗證碼寄送要求，實際送達仍需由信箱確認；有效至（臺灣）'+
+    (typeof result.expiresAtUtc==='string'&&Number.isFinite(Date.parse(result.expiresAtUtc))?formalTime_(result.expiresAtUtc):'待唯讀核對')+'。');return;`],
+  ["  if(result.sent===false&&result.reason==='ALREADY_ISSUED'){\n   state.mail=result.challengeId;\n   el('otpInputWrap').hidden=false;\n   status('此申請已核發過驗證碼，系統不再寄送；若先前收到郵件，可輸入其中的八位碼。');return;",
+   "  if(result.sent===false&&result.reason==='ALREADY_ISSUED'){\n   reconcileOtpIssue_(payload);return;"],
+  ["  if(!result||result.verified!==true){status('驗證碼尚未通過核實，可能錯誤、逾期或已使用；未建立有效信箱證據。');return;}",
+   String.raw`  if(!result||result.verified!==true){
+   el('otpInput').value='';
+   if(result&&result.verified===false&&result.reason==='REJECTED'){
+    status('驗證碼未通過；正在唯讀核對原碼狀態。');formalOtpLookup_();return;
+   }
+   state.otpVerifyUnknown=true;el('otpVerify').disabled=true;formalOtpLookupControl_(false);
+   status('驗證結果未知，可能已使用；請勿重送或再次驗證。');return;
+  }
+  formalOtpLookupControl_(false);`],
+  ["  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;\n  status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');",
+   "  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;formalOtpLookupControl_(false);\n  status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');"],
+  [" if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase)return;",
+   " if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase||state.app)return;"],
   ["   o.textContent=formalTime_(slot.startAtUtc)+'｜剩餘 '+slot.remaining+",
    "   o.textContent=formalTime_(slot.startAtUtc)+' – '+formalTime_(slot.endAtUtc)+'｜'+(slot.locationCode||'地點待核對')+'｜剩餘 '+slot.remaining+"],
   ["   const btn=formalButton_(formalTime_(slot.startAtUtc)+\n    '｜'+(slot.bookable?'尚有名額':'已滿／候補'),()=>{",
    "   const btn=formalButton_(formalTime_(slot.startAtUtc)+' – '+formalTime_(slot.endAtUtc)+\n    '｜'+(slot.locationCode||'地點待核對')+'｜'+(slot.bookable?'尚有名額':'已滿／候補'),()=>{"],
   [" info.textContent='時段：'+(slot?formalTime_(slot.startAtUtc):reservation.slotId)+",
-   " info.textContent='時段：'+(slot?formalTime_(slot.startAtUtc)+' – '+formalTime_(slot.endAtUtc)+'｜'+(slot.locationCode||'地點待核對'):reservation.slotId)+"],
+   String.raw` const schedule=reservation.schedule;
+ const scheduleValid=!!(schedule&&typeof schedule.locationCode==='string'&&schedule.locationCode.trim()&&
+  Number.isFinite(Date.parse(schedule.startAtUtc))&&Number.isFinite(Date.parse(schedule.endAtUtc))&&
+  Date.parse(schedule.endAtUtc)>Date.parse(schedule.startAtUtc));
+ info.textContent='時段：'+(scheduleValid?formalTime_(schedule.startAtUtc)+' – '+formalTime_(schedule.endAtUtc)+'｜'+schedule.locationCode:'原場次尚未核對')+`],
+  [" root.appendChild(info);\n const controls=document.createElement('div');controls.className='actionrow';",
+   String.raw` root.appendChild(info);
+ const summary=document.createElement('dl');summary.className='box';
+ const field=(label,value)=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=label;dd.textContent=value;summary.appendChild(dt);summary.appendChild(dd);};
+ field('研究項目','實驗一（E1）');
+ field('原預約編號',reservation.reservationId);
+ field('已核對電子郵件',state.emailStatusConfirmed&&state.app?state.app.email:'尚未核對');
+ field('知情同意','尚未簽署完成；下一步須完整閱讀並本人簽名。');
+ root.appendChild(summary);
+ const controls=document.createElement('div');controls.className='actionrow';`],
+  ["  controls.appendChild(formalButton_('核對本人暫留並進入最後知情同意',()=>formalConsentStart_(reservation)));",
+   String.raw`  const next=formalButton_('資料正確，前往最後知情同意',()=>{
+   if(scheduleValid&&state.emailStatusConfirmed&&state.activeBooking===reservation)formalConsentStart_(reservation);
+  });
+  next.disabled=!scheduleValid||!state.emailStatusConfirmed;
+  controls.appendChild(next);
+  if(!scheduleValid){const note=document.createElement('p');note.className='help';note.textContent='請先唯讀重新核對原預約及已核定場次，不可使用未核對場次進行簽署。';root.appendChild(note);}`],
+  [" else{state.activeBooking=r.reservation;formalV08Panel_(r.reservation);}",
+   String.raw` else{
+  state.activeBooking=r.reservation;
+  const root=el('step-confirm');formalClear_(root);
+  const p=document.createElement('p');p.textContent='原異動已核對，正在取得同案的正式場次摘要。';root.appendChild(p);
+  root.appendChild(formalButton_('唯讀重新核對原預約',formalV08Read_));
+  formalV08Read_();
+ }`],
+  ["  const active=result.reservations.filter(r=>\n   r.status==='WAITLISTED'||(r.status==='HELD'&&",
+   String.raw`  if(result.reservations.some(r=>r.status==='CONFIRMED')){
+   // A confirmed application must never be shown as available for another hold.
+   el('hold').disabled=true;
+   formalClear_(el('step-confirm'));
+   const p=document.createElement('p');p.textContent='原紀錄已確認預約；請勿重新報名或另建預約。';el('step-confirm').appendChild(p);
+   if(formalConsent&&formalSignSubmitted)el('step-confirm').appendChild(formalButton_('回到原簽署結果唯讀核對',()=>{show('consent');formalConsentStatus_();}));
+   show('confirm');status('原紀錄已包含正式確認預約。不得重新暫留或簽署；請使用原簽署結果或聯絡研究團隊核對。');
+   return;
+  }
+  const active=result.reservations.filter(r=>
+   r.status==='WAITLISTED'||(r.status==='HELD'&&`],
   ['  <dt>原預約識別碼</dt><dd id="formalDoneReservation">待本人核對</dd>',
    '  <dt>原預約識別碼</dt><dd id="formalDoneReservation">待本人核對</dd>\n  <dt>預約日期及起訖時間（臺灣）</dt><dd id="formalDoneTime">待本人核對</dd>\n  <dt>實驗地點</dt><dd id="formalDoneLocation">待本人核對</dd>'],
   ['  <dt>郵件通知狀態</dt><dd>未由此頁驗證寄送；請以正式通知來源為準</dd>',
