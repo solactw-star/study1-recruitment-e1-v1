@@ -1,6 +1,14 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 原部署第 14 版，E1 完整流程開放前防呆已部署，OWNER 驗收暫待
+## 最新接續點｜2026-11-21 E1 正式預約確認、PDF 期限及通知回讀工程已提交，待發布日誌可讀
+
+- 依使用者指示，先完成不需 OWNER 登入的報名預約／簽署／確認通知功能，不重做功能驗收、不開真人收件、不碰 V1。原第 14 版仍為最後已完整回讀部署。
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_CONFIRMATION_RECEIPT；main [6ac4a7e349e701861682d7085ecd463b9c1bf671](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/6ac4a7e349e701861682d7085ecd463b9c1bf671)，兩份程式 `scripts/study1-v2-confirmation-receipt.cjs`、`scripts/study1-v2-formal-entry.cjs`。正式參與者 OTP 後的時段清單及暫留核對顯示經原核定場次登錄之起訖時間（臺灣）及地點；保留原預約名額、共鎖、暫留／候補及 HMAC 防護。完整已簽 PDF 副本增加實際存取期限，在既有本人 SHA 驗證後顯示。最終確認頁仍獨立核對 PDF 與本人原 Reservations；同一已驗證本人原 CONFIRMED 場次的時段／地點與通知投影由既有 `study1FormalStatus` 唯讀提供，不新增公開 RPC。依本人 applicant／reservation／slot、同案 E1 簽署證據及通知 job HMAC 雙回讀，狀態分為 NOT_QUEUED／DISPATCHING／PROVIDER_ACCEPTED／UNKNOWN，錯配、競寫或缺證據不聲稱已寄送或自動重送，不披露原通知列、聯絡資料、私人 ID 或金鑰。正式確認信在原 at-most-once 寄送前準備經核對的臺灣起訖、地點、預約編號及簽署副本到期時間，不附 PDF 或私有存取憑證。未改正式 OTP／OWNER／TEST／E2／啟用 gate；供應商接受不代表送達。
+- 本機只組裝現有發布候選／恢復既有來源 guard，30 檔、SHA-256 `77ff39eba3a2febc417aca2438418aee56b3c91e7f5bb83a43bb9f0f8af8ed03`；未手動執行功能測試、寄信、簽署或預約。首次組裝指出 `V2_CONFIRMATION_RECEIPT_SOURCE_ANCHOR_CHANGED:Study1Visitor:3`（合成與正式共用 HTML 標籤），已限定只在 FORMAL 分支更動後成功組裝，未改隔離 TEST。
+- [官方唯讀預檢 Run 44879468110 #20](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44879468110) 畫面顯示 completed/success 與 head=6ac4a7e；但開啟該 Job 的瀏覽器動作實際被拒，原文 `Browser Use rejected this action due to browser security policy. Reason: The browser URL policy blocks this action. Browser use could not acquire authority to trigger network egress. The URL policy gate did not grant access. The requested URL is invalid.` 未取得當次候選與遠端 SHA 日誌，因此未觸發 publish、不改換途徑繞過拒絕、不以 Run summary 冒稱發布。待平台正常允許讀取原預檢 job，再核對當期 main、候選 SHA、原 V14 HEAD／部署 SHA 後依既有唯一工作流更新，完整回讀。
+- LAST_VERIFIED_STEP=FORMAL_CONFIRMATION_RECEIPT_SOURCE_COMMITTED_AND_PREFLIGHT_SUMMARY_SUCCESS；SYNC_STATUS=SOURCE_READY_PREFLIGHT_JOB_READ_BLOCKED_V14_LAST_VERIFIED；BLOCKERS=PREFLIGHT_JOB_NAVIGATION_POLICY_BLOCKED、OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=合法取得原預檢日誌後發布並回讀；待使用者能登入 Owner 再辦必要正式驗收，不重做既有隔離流程。未寫正式 OTP/HMAC/REC/VERIFIED／收件旗標／資料，未寄真人通知、未碰 V1。
+
+## 前次接續點｜2026-11-21 原部署第 14 版，E1 完整流程開放前防呆已部署，OWNER 驗收暫待（歷史）
 
 - 使用者目前無法登入研究室 OWNER，明確要求先繼續網站建置，日後登入再驗收；本輪不要求重新登入、不重做已通過功能、不啟用真人收件。
 - TASK_DOMAIN=Study1_V2_E1_FORMAL_INTAKE_COMPLETENESS；程式 `scripts/study1-v2-formal-entry.cjs`，main [87a0b1b31b5e40aa19e9c1c407c1f14b5ccbc808](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/87a0b1b31b5e40aa19e9c1c407c1f14b5ccbc808)。修正實際產品缺口：先前首頁/新申請只核對部分收件條件及 E1 時段，後續 OTP、資料來源、電子同意或正式 PDF 缺件時仍可能先留下 PII。新版沿用現有核准與操作 gate，加上 OTP／身分 HMAC 獨立金鑰、原工作簿對應、正式遠端 REC／已選用且發布的研究者預簽 PDF 之來源／ACL／SHA／版面與雙日期／副本期限核對。正式 readiness、首次申請解析資料前及原共用鎖內首次寫入前皆 fail closed；對外只回通用未開放狀態，不暴露設定值。既有各步驟授權、共鎖、舊案回讀、OWNER、TEST 與 E2 邊界保留，不新增公開 RPC 或資料來源。修正正式簽署說明及下載標籤，區分已預簽原 PDF、本次本人筆跡、兩處完成日期、完整副本與獨立預約回讀。
