@@ -39,12 +39,81 @@ function study1V2FormalEntryRequired_(){
  if(!study1V2FormalEntryOpen_())throw Error('REGISTRATION_NOT_OPEN');
  study1ParticipantGate_();
 }
+/** New enrollment must not collect contact or screening data if a later
+ * required step is known to be unavailable. This is configuration-only:
+ * no participant records, email, token consumption, signature or writes.
+ * Keep the existing per-operation and per-person gates independently intact. */
+function study1V2NewE1IntakeRequired_(){
+ try{
+  study1V2FormalEntryRequired_();
+  study1ParticipantMailGate_();
+  study1WizardP0Gate_();
+  const p=PropertiesService.getScriptProperties();
+  study1BindingSheetId_('applicants');
+  study1BindingSheetId_('slots');
+  const otp=otpSecret_(p.getProperty('STUDY1_OTP_HMAC_SECRET'));
+  if(/SIMULATED|TEST_ONLY|EXAMPLE|DEFAULT/i.test(otp))throw Error('E1_OTP_KEY_INVALID');
+  const binding=p.getProperty('STUDY1_ECONSENT_BINDING_HMAC_KEY');
+  if(typeof binding!=='string'||binding.length<32||
+     /SIMULATED|TEST_ONLY|EXAMPLE|DEFAULT/i.test(binding))throw Error('E1_BINDING_KEY_INVALID');
+  if(otp===binding)throw Error('E1_INDEPENDENT_KEYS_REQUIRED');
+  const recRaw=p.getProperty('STUDY1_E1_REMOTE_CONSENT_POLICY_V1');
+  study1FormalConsentGate_();
+  study1FormalConsentCopyExpiry_();
+  const scope=JSON.parse(recRaw);
+  const document=study1EConsentReadyDocument_('E1');
+  if(p.getProperty('STUDY1_E1_REMOTE_CONSENT_POLICY_V1')!==recRaw||
+     document.id!==scope.consentDocumentId||document.sha256!==scope.consentDocumentSha256||
+     document.researcherPresigned!==true)throw Error('E1_CONSENT_SOURCE_NOT_READY');
+  const layout=study1PdfLayoutRead_('E1',document);
+  study1PdfSameDateRead_(document,layout);
+ }catch(_){
+  // The public caller must not learn which private setting or source failed.
+  throw Error('REGISTRATION_NOT_OPEN');
+ }
+ return true;
+}
 `;
 function replaceOnce(source,from,to){
  if(source.split(from).length!==2)throw Error('V2_FORMAL_ENTRY_ANCHOR_CHANGED');
  return source.replace(from,()=>to);
 }
 const presentationEdits=[
+  {
+    file:'Study1ParticipantIntake',
+    before:'function study1ParticipantBegin_(input){\n // Fail before parsing/using any personal data without real PI-pinned E1 slots.',
+    after:'function study1ParticipantBegin_(input){\n study1V2NewE1IntakeRequired_();\n // Fail before parsing/using any personal data without real PI-pinned E1 slots.'
+  },
+  {
+    file:'Study1ParticipantIntake',
+    before:'  // Recheck inside the existing intake lock before the first applicant write.',
+    after:'  study1V2NewE1IntakeRequired_();\n  // Recheck inside the existing intake lock before the first applicant write.'
+  },
+  {
+    file:'Study1ParticipantIntake',
+    before:'  // Readiness checks configuration only: a one-time Turnstile token is',
+    after:'  study1V2NewE1IntakeRequired_();\n  // Readiness checks configuration only: a one-time Turnstile token is'
+  },
+  {
+    file:'Study1Visitor',
+    before:"function formalConsentWire_(){\n el('pdf').hidden=true;",
+    after:"function formalConsentWire_(){\n el('pdf').hidden=true;\n const originalDownload=el('officialPdfDownload');\n if(originalDownload)originalDownload.textContent='下載已核對的研究者預簽版 PDF（尚未含本人簽名）';"
+  },
+  {
+    file:'Study1Visitor',
+    before:'原始PDF不包含此處的手寫簽名。正式提交須另生成完整簽署PDF及獨立SHA；目前尚未開放真人簽名及收件。',
+    after:'研究者預簽版不含本次參與者筆跡。只有文件、本人授權及正式服務核實後，才可生成含雙方簽名與獨立 SHA 的完整副本。'
+  },
+  {
+    file:'Study1Visitor',
+    before:'尚未簽名；正式簽署服務目前關閉。',
+    after:'尚未簽名；請先核實完整文件及本人簽署權限。'
+  },
+  {
+    file:'Study1Visitor',
+    before:'請閱讀研究者事先完成簽名並由後台上傳的正式PDF；確認理解後，在網站手寫受試者姓名，系統將簽名及臺灣日期加入同一份PDF，供研究者事先下載。',
+    after:'請完整閱讀研究者預簽的正式 PDF，理解後親自書寫簽名。系統保留研究者預簽筆跡，依本次完成時間填入兩處臺灣日期，生成完整本人副本；預約是否確認須另外核實。'
+  },
   {
     "file": "Index",
     "before": "withSuccessHandler(c=>{",
