@@ -1,6 +1,15 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 E1 正式簽署期限與筆跡隔離已提交，集中發布待解鎖
+## 最新接續點｜2026-11-21 E1 正式報名、原 OTP 過期續作、簽署前預約核對已提交
+
+- 接續已回讀 main `6331fff66441098d599f2a734d2465bdb9df41e5`（既有自動 CI 摘要 success），依本輪使用者要求完成不需 OWNER 的正式 E1 來源工程；不主動做功能測試、不開真人收件、不重試被拒原預檢日誌、暫不部署、不碰 V1。
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_ENROLLMENT_COMPLETION；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=main [82ac7045ba549c015c614af7148c24275955e53c](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/82ac7045ba549c015c614af7148c24275955e53c)。OTP 原寄送與唯讀核對顯示實際臺灣期限；僅當同一原申請、原 requestId 的持久 Verification 明確 EXPIRED，才提供參與者主動申請新碼的選項（新的 requestId、原 pending application、原共鎖及 throttle）。結果 UNKNOWN／USED／LOCKED／SUPERSEDED 不開放補寄；一次性 OTP 核驗因果不明仍停用送出；不重新申請或自動補寄，不改原金鑰、TTL、限流及一次性消耗。已有本頁申請時禁止另送申請。
+- 既有本人 `study1FormalStatus` 在原共鎖及核定場次來源檢查下回傳同案 HELD／WAITLISTED 的起訖／地點最小投影；簽署前核對頁顯示實驗、原預約編號、本人已驗證信箱、場次及知情同意狀態，場次未核實禁止進入簽署。候補領取或改期原交易結果後，重新唯讀取得同案摘要；已存在 CONFIRMED 時不回到可另建暫留的選擇畫面，保留原簽署唯讀回查。沿用既有原日期、名額、預簽五頁 PDF、簽署期限及筆跡隔離、雙日期、私人完整副本、通知及獨立預約確認；沒有新增公開 RPC、擴大存取範圍或放寬正式 gate。
+- 本機只完成既有來源組裝及可逆 guard，合併候選 30 檔、SHA-256 `9b540bf6f3da857df75b0b6442e575c59b486e9385c52226954f120e0f298e79`。手動功能測試／真人寄信／簽署／預約皆未執行；既有 CI 不變，新提交 CI 不冒稱已通過。原 V14 最後核驗 SHA `31a17c3feee9a78968142a1547003d3e7961c047a998779f897c247e85e4c102`，本輪未操作遠端 GAS、未執行新發布或預檢。
+- 源碼正常流程已具報名→Turnstile→OTP→核定時段→暫留／核對→最後完整 PDF 簽署→私人副本→預約確認與通知。現行 §13／§70-S.52 另定 Email 限時預約管理連結：原 `study1FormalCancel`／`study1FormalMove` 明確限制簽署前 HELD／WAITLISTED，不允許用唯讀 recovery OTP 當成異動授權；已確認案件的自助改期／取消、逾期規則、跨裝置及新連結須確認適用政策、獨立限時權限與同案正式驗收，不自行創設或擴權。現行確認郵件與畫面仍提供研究團隊人工協助，不把它宣稱成已完成正式限時管理連結。OWNER 專屬正式來源設定亦留待有權核對。
+- LAST_VERIFIED_STEP=FORMAL_E1_OTP_EXPIRY_AND_BOOKING_REVIEW_SOURCE_COMMITTED；COMPLETED=本輪正式來源及 GitHub 提交；WRITE_OWNER=V2 Repo；SYNC_STATUS=SOURCE_COMMITTED_PENDING_CONSOLIDATED_RELEASE_V14_LAST_VERIFIED；BLOCKERS=RELEASE_PREFLIGHT_LOG_POLICY_BLOCKED、OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED、POST_CONFIRMATION_MANAGEMENT_POLICY_AND_SCOPED_AUTHORITY_REQUIRED。NEXT_ACTION=待發布條件實際解除後，以當期最新 main 合併候選、原唯一工作流、當期預檢與防競寫條件集中部署及回讀；OWNER 正式設定、有效核准與真人收件另處理。未改原私人設定、正式資料、收件旗標、OAuth 或 V1。
+
+## 前次接續點｜2026-11-21 E1 正式簽署期限與筆跡隔離已提交，集中發布待解鎖（歷史）
 
 - 使用者目前無法提供預檢日誌，指示先繼續不需 OWNER 登入的正式功能，發布條件解除後集中部署及回讀；不重做功能測試、不開啟真人收件、不碰 V1。本輪不要求補交舊日誌、不重試被拒存取、不觸發 workflow_dispatch。
 - TASK_DOMAIN=Study1_V2_E1_FORMAL_CONSENT_DEADLINE；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=main [3ab68b3d7dfa33dfe2d7ae3244f9c224b79a03c1](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/3ab68b3d7dfa33dfe2d7ae3244f9c224b79a03c1)。正式簽署介面顯示同一暫留與原簽署憑證的臺灣時間期限、約剩時間及充分閱讀提醒；首次核發、冪等回應與唯讀找回均傳回原期限及伺服器時間。客端核對逾期或不符同案期限即停用送簽，不能因唯讀刷新延長期限；伺服器原共鎖、身分、憑證及期限限制未變更。切換／重置同意案時清空筆跡畫布及閱讀／同意勾選，繪圖綁定同一同意案，防止殘留筆跡交叉使用。簽署已送出但因果不明時只從原紀錄唯讀核對、勿重送；未新增公開 RPC、資料來源或額外簽署規則。之前預約起訖、地點、PDF 副本期限、確認通知及唯讀回查改良均保留。
