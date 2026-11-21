@@ -107,6 +107,16 @@ const edits={
   ['  participantSignedPdfSha256:x.signedPdf.sha,dualSigned:true,\n  base64:Utilities.base64Encode(bytes),mime:',
    '  participantSignedPdfSha256:x.signedPdf.sha,dualSigned:true,\n  copyExpiresAtUtc:new Date(x.expires).toISOString(),\n  base64:Utilities.base64Encode(bytes),mime:']
  ],
+ Study1FormalConsent:[
+  ["   documentSha256:document.sha256,researcherPresigned:true,\n   recovery:'ORIGINAL_REGISTRY_READ_ONLY'};",
+   "   documentSha256:document.sha256,researcherPresigned:true,\n   expiresAtUtc:new Date(entry.expires).toISOString(),serverNowUtc:new Date().toISOString(),\n   recovery:'ORIGINAL_REGISTRY_READ_ONLY'};"],
+  ['      token,expiresAtUtc:new Date(old.expires).toISOString(),',
+   '      token,expiresAtUtc:new Date(old.expires).toISOString(),serverNowUtc:new Date().toISOString(),'],
+  ['   token,expiresAtUtc:new Date(expires).toISOString(),',
+   '   token,expiresAtUtc:new Date(expires).toISOString(),serverNowUtc:new Date().toISOString(),'],
+  ['  sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),',
+   '  sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),\n  serverNowUtc:new Date().toISOString(),']
+ ],
  Study1Visitor:[
   ["   o.textContent=formalTime_(slot.startAtUtc)+'｜剩餘 '+slot.remaining+",
    "   o.textContent=formalTime_(slot.startAtUtc)+' – '+formalTime_(slot.endAtUtc)+'｜'+(slot.locationCode||'地點待核對')+'｜剩餘 '+slot.remaining+"],
@@ -152,7 +162,83 @@ const edits={
    const expiryVerified=typeof expiry==='string'&&Number.isFinite(Date.parse(expiry))&&
     new Date(expiry).toISOString()===expiry?expiry:null;
    formalReceiptVerified={token,sha:result.sha,taipeiDate:copy.taipeiDate,
-    reservationId:formalConsent.reservationId,slotId:formalConsent.slotId,copyExpiresAtUtc:expiryVerified};`]
+    reservationId:formalConsent.reservationId,slotId:formalConsent.slotId,copyExpiresAtUtc:expiryVerified};`],
+  ['<p class="help" id="consentStatus">請先核實完整 PDF 與本人簽署權限。</p></section>',
+   '<p class="help" id="formalConsentDeadline">尚未核對同一暫留及簽署憑證期限。</p>\n<p class="help" id="consentStatus">請先核實完整 PDF 與本人簽署權限。</p></section>'],
+  ['function formalConsentRender_(){\n const x=formalConsent,ready=!!(x&&x.originalVerified&&x.researcherPresigned===true);',
+   String.raw`function formalConsentClockNow_(){
+ return typeof performance!=='undefined'&&typeof performance.now==='function'?performance.now():Date.now();
+}
+function formalConsentIsoMs_(value){
+ if(typeof value!=='string'||!Number.isFinite(Date.parse(value)))return null;
+ const t=Date.parse(value);return new Date(t).toISOString()===value?t:null;
+}
+// Display/hard-disable only; the server continues to enforce the actual hold,
+// current token, consent binding, signature and one-use transaction authority.
+function formalConsentDeadlineBinding_(holdUntilUtc,result){
+ const hold=formalConsentIsoMs_(holdUntilUtc),expires=formalConsentIsoMs_(result?.expiresAtUtc),now=formalConsentIsoMs_(result?.serverNowUtc);
+ if(hold===null||expires===null||now===null||expires>hold||expires<=now)return null;
+ return {holdUntilUtc,expiresAtUtc:result.expiresAtUtc,deadlineClock:formalConsentClockNow_()+Math.max(0,expires-now)};
+}
+function formalConsentDeadlineOpen_(x){
+ return !!(x&&Number.isFinite(x.deadlineClock)&&formalConsentClockNow_()<x.deadlineClock);
+}
+function formalConsentDeadlineTick_(){
+ const x=formalConsent,node=el('formalConsentDeadline');
+ if(!node)return;
+ let text='尚未核對同一暫留及簽署憑證期限。';
+ if(x){
+  if(x.signed)text='簽署已保存；請另行核對預約與完整PDF副本。';
+  else if(formalSignSubmitted)text='簽署結果待原紀錄核對；請勿再次送件。';
+  else if(!formalConsentDeadlineOpen_(x)){
+   text='暫留或簽署憑證期限已到或無法核對。請勿重新提交或急著簽署；如時間不足，請聯絡研究團隊。';
+   const finish=el('finish');if(finish)finish.disabled=true;
+  }else{
+   const minutes=Math.ceil((x.deadlineClock-formalConsentClockNow_())/60000);
+   text='本次簽署憑證期限（臺灣）：'+formalTime_(x.expiresAtUtc)+'（約剩 '+minutes+' 分鐘）。請充分閱讀；如時間不足或有疑問，請先聯絡研究團隊。';
+  }
+ }
+ if(node.textContent!==text)node.textContent=text;
+}
+function formalConsentRender_(){
+ const x=formalConsent,ready=!!(x&&x.originalVerified&&x.researcherPresigned===true&&formalConsentDeadlineOpen_(x));
+ formalConsentDeadlineTick_();`],
+  ["  !x?'尚未核對E1本人有效預約。':\n  x.signed?'已在線上簽署；請核對完整PDF副本與原預約狀態。':",
+   "  !x?'尚未核對E1本人有效預約。':\n  x.signed?'已在線上簽署；請核對完整PDF副本與原預約狀態。':\n  formalSignSubmitted?'簽署已送出，請從原紀錄唯讀核對，勿重送。':\n  !formalConsentDeadlineOpen_(x)?'期限已到或尚未核對，不能提交簽署。':"],
+  ["  formalConsent.confirmed=result.staffConfirmed===true;\n  if(result.copyAvailable===true&&formalConsent.confirmed)",
+   String.raw`  formalConsent.confirmed=result.staffConfirmed===true;
+  if(!formalConsent.signed&&!formalSignSubmitted&&result.state==='ISSUED'){
+   const refreshed=formalConsentDeadlineBinding_(formalConsent.holdUntilUtc,result);
+   // A read-only refresh must never extend an existing issued credential.
+   if(!refreshed||refreshed.expiresAtUtc!==formalConsent.expiresAtUtc)formalConsent.deadlineClock=0;
+   else formalConsent.deadlineClock=Math.min(formalConsent.deadlineClock,refreshed.deadlineClock);
+  }
+  if(result.copyAvailable===true&&formalConsent.confirmed)`],
+  ['    result.researcherPresigned!==true)return false;\n formalConsentReset_();\n formalConsent={token:result.token,reservationId:reservation.reservationId,',
+   String.raw`    result.researcherPresigned!==true)return false;
+ const deadline=formalConsentDeadlineBinding_(reservation.holdUntilUtc,result);
+ if(!deadline)return false;
+ formalConsentReset_();
+ formalConsent={...deadline,token:result.token,reservationId:reservation.reservationId,`],
+  [" if(el('agree'))el('agree').checked=false;\n if(el('readPdf'))el('readPdf').checked=false;\n}",
+   String.raw` if(el('agree'))el('agree').checked=false;
+ if(el('readPdf'))el('readPdf').checked=false;
+ // Never reuse pixels from an earlier consent session, even after the ink flag was cleared.
+ const ink=el('visitorSignaturePreview');
+ if(ink&&typeof ink.getContext==='function')try{
+  const ctx=ink.getContext('2d');if(ctx){ctx.fillStyle='#ffffff';ctx.fillRect(0,0,ink.width,ink.height);}
+ }catch(_){}
+ formalConsentDeadlineTick_();
+}`],
+  [' let drawing=false;\n const coord=e=>{',' let drawing=false,drawingFor=null;\n const coord=e=>{'],
+  ["     !formalConsent.originalVerified||formalConsent.signed)return;\n  drawing=true;const p=coord(e);ctx.beginPath();ctx.moveTo(p.x,p.y);",
+   "     !formalConsent.originalVerified||formalConsent.signed||formalSignSubmitted||!formalConsentDeadlineOpen_(formalConsent))return;\n  drawing=true;drawingFor=formalConsent;const p=coord(e);ctx.beginPath();ctx.moveTo(p.x,p.y);"],
+  ['  if(!drawing)return;const p=coord(e);ctx.lineTo(p.x,p.y);ctx.stroke();',
+   '  if(!drawing||drawingFor!==formalConsent||!formalConsentDeadlineOpen_(formalConsent)||formalSignSubmitted){drawing=false;return;}const p=coord(e);ctx.lineTo(p.x,p.y);ctx.stroke();'],
+  ["     !el('readPdf').checked||!el('agree').checked)return;\n  const canvas=el('visitorSignaturePreview');",
+   "     !el('readPdf').checked||!el('agree').checked)return;\n  if(!formalConsentDeadlineOpen_(formalConsent)){formalConsentRender_();status('期限已到或無法核對；未提交簽署。請聯絡研究團隊，勿重送。');return;}\n  const canvas=el('visitorSignaturePreview');"],
+  ['formalConsentWire_();\n\n\nfunction formalV08PendingPanel_',
+   "formalConsentWire_();\nif(typeof window!=='undefined'&&typeof window.setInterval==='function')window.setInterval(formalConsentDeadlineTick_,1000);\n\n\nfunction formalV08PendingPanel_"]
  ]
 };
 function once(source,from,to,label){
