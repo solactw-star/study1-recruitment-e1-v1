@@ -139,11 +139,13 @@ function study1V2ManagementProject_(ctx){
   try{const schedule=study1V2ReceiptSchedule_(ctx.snapshot,r[0],ctx.lock);options.push({slotId:r[0],...schedule,direct:directMove&&study1V2ManagementEquivalentSchedules_(ctx.schedule,schedule)&&Date.now()<study1BindingUtc_(r[1])-ctx.policy.cancelBeforeMinutes*60000});}catch(_){}
  }
  const cutoff=study1BindingUtc_(ctx.schedule.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000;
+ const cancelCommitted=study1V2ManagementCancelCommitted_(ctx,pending);
  return {scope:'CONFIRMED_E1_BOOKING_ONLY',reservationId:ctx.row[0],status:ctx.row[3],schedule:ctx.schedule,expiresAtUtc:ctx.expiresAtUtc,
   revision:study1BindingHmac_(['E1_BOOKING_MANAGEMENT_REVISION_V1',ctx.scope,ctx.policy.policyMac,JSON.stringify(ctx.row),JSON.stringify(pending)]),
   originalReservationId:ctx.root[0],originalSlotId:ctx.root[2],lastChange:ctx.association.history.length?ctx.association.history[ctx.association.history.length-1]:null,
   selfServiceUntilUtc:new Date(cutoff).toISOString(),noticeStatus:ctx.row[3]==='CONFIRMED'?study1V2ReceiptNoticeStatus_(ctx,ctx.row,ctx.entry,ctx.association):'NOT_APPLICABLE',
-  pending:pending?{action:pending.action,targetSlotId:pending.targetSlotId,submittedAtUtc:pending.atUtc,state:ctx.row[3]==='CANCELLED'?'CANCELLED_ORIGINAL_ROW':'OWNER_REVIEW_REQUIRED'}:null,
+  cancellationCommitted:cancelCommitted,cancellationNoticeStatus:cancelCommitted?study1V2ManagementCancelNoticeStatus_(ctx):'NOT_APPLICABLE',
+  pending:pending?{action:pending.action,targetSlotId:pending.targetSlotId,submittedAtUtc:pending.atUtc,state:cancelCommitted?'CANCEL_COMMITTED':ctx.row[3]==='CANCELLED'?'CANCELLED_ORIGINAL_ROW':'OWNER_REVIEW_REQUIRED'}:null,
   cancellationMode:ctx.policy.cancelMode==='DIRECT_APPROVED'&&study1FormalTxnEnabled_()&&Date.now()<cutoff?'DIRECT_APPROVED':'REQUEST_REVIEW',
   canRequest:!pending&&ctx.row[3]==='CONFIRMED'&&study1BindingUtc_(ctx.schedule.startAtUtc)>Date.now(),options};
 }
@@ -191,7 +193,7 @@ function study1E1BookingManagementChange(input){
    // failure cannot authorize the new row; the resolver requires COMMITTED.
    const evidence=[study1FormalTxnSubject_('RESERVATION',ctx.row[0],ctx.row,moveAfter),study1FormalTxnSubject_('RESERVATION',moveNext[0],null,moveNext)];
    const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'MOVE',request.requestId,evidence,ctx.lock);
-   if(!prepared||study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac||!study1V2ManagementDirectMoveReady_(ctx)||Date.now()>=study1BindingUtc_(selected.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000||ctx.lock.hasLock()!==true)throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
+   if(!prepared||study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac||!study1V2ManagementDirectMoveReady_(ctx)||Date.now()>=study1BindingUtc_(selected.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000||Date.now()>=Date.parse(ctx.expiresAtUtc)||ctx.lock.hasLock()!==true)throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
    study1FormalWriteExisting_(ctx,ctx.row,moveAfter);ctx.txnMoveAfter=moveAfter;
    try{study1FormalAppend_(ctx,moveNext);}catch(_){throw Error('MANAGEMENT_OUTCOME_UNKNOWN');}
    study1FormalAfterMutation_(ctx.snapshot,[[ctx.row[0],moveAfter],[moveNext[0],moveNext]]);
@@ -202,6 +204,7 @@ function study1E1BookingManagementChange(input){
    const after=ctx.row.slice();after[3]='CANCELLED';after[8]=new Date().toISOString();after[9]=after[8];
    const evidence=[study1FormalTxnSubject_('RESERVATION',ctx.row[0],ctx.row,after)];
    const prepared=study1FormalTxnPrepare_(ctx.identity.applicantId,'CANCEL',request.requestId,evidence,ctx.lock);
+   if(!prepared||ctx.lock.hasLock()!==true||study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac||Date.now()>=study1BindingUtc_(ctx.schedule.startAtUtc)-ctx.policy.cancelBeforeMinutes*60000||Date.now()>=Date.parse(ctx.expiresAtUtc))throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
    study1FormalWriteExisting_(ctx,ctx.row,after);study1FormalAfterMutation_(ctx.snapshot,[[ctx.row[0],after]]);
    study1FormalTxnCommit_(ctx.identity.applicantId,prepared,evidence,ctx.lock);
   }
@@ -210,6 +213,10 @@ function study1E1BookingManagementChange(input){
   const fresh=study1V2ManagementContext_(ctx.entry.id,ctx.lock,ctx.policy);fresh.expiresAtUtc=ctx.expiresAtUtc;
   if(directMove&&fresh.row[0]!==moveNext[0])throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
   if(directMove)try{study1V2ManagementMoveNotice_(fresh);}catch(_){} // Booking evidence remains authoritative; never retry mail.
+  if(input.action==='CANCEL'&&view.cancellationMode==='DIRECT_APPROVED'){
+   if(!study1V2ManagementCancelCommitted_(fresh,study1V2ManagementRequestRead_(fresh)))throw Error('MANAGEMENT_OUTCOME_UNKNOWN');
+   try{study1V2ManagementCancelNotice_(fresh);}catch(_){} // Never replay a cancellation or email to resolve a provider timeout.
+  }
   return study1V2ManagementProject_(fresh);
  });}catch(_){return {scope:'OUTCOME_UNKNOWN'};}
 }
@@ -249,6 +256,45 @@ function study1E1BookingManagementRequestLink(input){
 }
 
 function study1V2ManagementMoveJobId_(entry,row){return 'NTF_'+study1BindingHmac_(['E1_BOOKING_MOVE_NOTICE_V1',entry.id,entry.binding.applicantId,row[0]]).slice(0,28);}
+/** A CANCELLED row alone does not prove the participant's particular request
+ * committed. Match the private request and committed original transaction. */
+function study1V2ManagementCancelCommitted_(ctx,pending){
+ try{
+  if(!pending||pending.version!==1||pending.action!=='CANCEL'||ctx.row[3]!=='CANCELLED'||!ctx.row[7]||!ctx.row[8]||ctx.lock.hasLock()!==true)return false;
+  const after=study1FormalTxnDigest_(ctx.row),scan=study1FormalTxnScan_(ctx.entry.binding.applicantId,ctx.lock);
+  const key=study1BindingHmac_(['E1_TXN_REQUEST_V1',ctx.entry.binding.applicantId,pending.requestId]);
+  const transaction=scan.map.get(key),subject={kind:'RESERVATION',id:ctx.row[0],before:pending.originalDigest,after};
+  return !!(transaction&&transaction.PREPARED&&transaction.COMMITTED&&transaction.COMMITTED.action==='CANCEL'&&JSON.stringify(transaction.COMMITTED.subjects)===JSON.stringify([subject])&&study1BindingUtc_(ctx.row[8])>=study1BindingUtc_(pending.atUtc));
+ }catch(_){return false;}
+}
+function study1V2ManagementCancelJobId_(entry,row){return 'NTF_'+study1BindingHmac_(['E1_BOOKING_CANCEL_NOTICE_V1',entry.id,entry.binding.applicantId,row[0]]).slice(0,28);}
+function study1V2ManagementCancelNoticeStatus_(ctx){
+ try{
+  if(!study1V2ManagementCancelCommitted_(ctx,study1V2ManagementRequestRead_(ctx)))return 'UNKNOWN';
+  const source=study1WizardTable_(SpreadsheetApp.openById(study1BindingSheetId_('reservations')),'Notifications',STUDY1_E1_NOTIFICATION_HEADERS_);
+  const id=study1V2ManagementCancelJobId_(ctx.entry,ctx.row),get=()=>study1WizardLookup_(source,3,ctx.row[0],true).map(n=>source.tab.getRange(n,1,1,9).getValues()[0]).filter(r=>r[3]==='E1_RESERVATION_CANCELLED');
+  const rows=get();if(JSON.stringify(rows)!==JSON.stringify(get())||ctx.lock.hasLock()!==true||source.tab.getLastRow()!==source.n)return 'UNKNOWN';
+  if(rows.length!==1)return rows.length===0&&study1WizardLookup_(source,1,id,true).length===0?'NOT_QUEUED':'UNKNOWN';
+  const n=rows[0];if(n[0]!==id||n[1]!==ctx.entry.binding.applicantId||n[2]!==ctx.row[0]||n[5]!==1||study1BindingUtc_(n[6])<study1BindingUtc_(ctx.row[8]))return 'UNKNOWN';
+  if(n[4]==='PROVIDER_ACCEPTED'&&n[7]&&!n[8]&&study1BindingUtc_(n[7])>=study1BindingUtc_(n[6]))return 'PROVIDER_ACCEPTED';
+  if(n[4]==='DISPATCHING'&&!n[7]&&!n[8])return 'DISPATCHING';return 'UNKNOWN';
+ }catch(_){return 'UNKNOWN';}
+}
+function study1V2ManagementCancelNotice_(ctx){
+ if(ctx.lock.hasLock()!==true||ctx.row[3]!=='CANCELLED'||!study1V2ManagementCancelCommitted_(ctx,study1V2ManagementRequestRead_(ctx))||study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac)throw Error('CANCEL_NOTICE_UNAVAILABLE');
+ const source=study1WizardTable_(SpreadsheetApp.openById(study1BindingSheetId_('reservations')),'Notifications',STUDY1_E1_NOTIFICATION_HEADERS_);
+ const job=study1V2ManagementCancelJobId_(ctx.entry,ctx.row);
+ if(study1WizardLookup_(source,1,job,true).length||study1WizardLookup_(source,3,ctx.row[0],true).some(n=>source.tab.getRange(n,4,1,1).getValues()[0][0]==='E1_RESERVATION_CANCELLED'))return;
+ const local=utc=>Utilities.formatDate(new Date(utc),'Asia/Taipei','yyyy/MM/dd HH:mm');
+ const body=['您的實驗一預約已確認取消。','取消預約編號：'+ctx.row[0],'取消場次（臺灣）：'+local(ctx.schedule.startAtUtc)+' – '+local(ctx.schedule.endAtUtc),'地點：'+ctx.schedule.locationCode,'取消時間（臺灣）：'+local(ctx.row[8]),'原簽署同意書及研究資料不會因取消預約而自動撤回或刪除。如需撤回研究同意或有疑問，請聯絡研究團隊。'].join('\n');
+ const original=[job,ctx.b.applicantId,ctx.row[0],'E1_RESERVATION_CANCELLED','DISPATCHING',1,new Date().toISOString(),'',''];
+ study1WizardAppend_(source,original);
+ if(ctx.lock.hasLock()!==true||study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac)throw Error('CANCEL_NOTICE_UNKNOWN');
+ let accepted=false;try{MailApp.sendEmail({to:ctx.email,subject:'Study1｜實驗一取消預約確認',body});accepted=true;}catch(_){}
+ const range=source.tab.getRange(source.n+1,1,1,9);if(ctx.lock.hasLock()!==true||JSON.stringify(range.getValues()[0])!==JSON.stringify(original))throw Error('CANCEL_NOTICE_UNKNOWN');
+ const after=original.slice();after[4]=accepted?'PROVIDER_ACCEPTED':'UNKNOWN';after[7]=accepted?new Date().toISOString():'';after[8]=accepted?'':'MAIL_PROVIDER_OUTCOME_UNKNOWN';range.setValues([after]);SpreadsheetApp.flush();
+ if(JSON.stringify(range.getValues()[0])!==JSON.stringify(after))throw Error('CANCEL_NOTICE_UNKNOWN');
+}
 function study1V2ManagementMoveNotice_(ctx){
  if(ctx.lock.hasLock()!==true||!ctx.association.history.length||ctx.row[3]!=='CONFIRMED')throw Error('MOVE_NOTICE_UNAVAILABLE');
  if(study1V2ManagementPolicy_().policyMac!==ctx.policy.policyMac)throw Error('MOVE_NOTICE_UNAVAILABLE');
@@ -277,8 +323,10 @@ function study1OwnerE1BookingChangeRequests(){
    const sameCase=snapshot.reservations.rows.filter(x=>x[1]===b.applicantId);
    for(const row of sameCase){const q=study1V2ManagementRequestRead_({row});if(!q)continue;
     const committed=association&&association.history.some(h=>h.fromReservationId===row[0]&&h.toReservationId===q.newReservationId);
+    const cancelCtx={entry:e,row,lock},cancelCommitted=association&&association.row[0]===row[0]&&study1V2ManagementCancelCommitted_(cancelCtx,q);
     rows.push({reservationId:q.reservationId,slotId:q.slotId,action:q.action,targetSlotId:q.targetSlotId,submittedAtUtc:q.atUtc,
-     bookingStatus:q.version===2?(committed?'RESCHEDULED_COMMITTED':'UNKNOWN_REQUIRES_OWNER'):row[3],consentState:e.state});
+     bookingStatus:q.version===2?(committed?'RESCHEDULED_COMMITTED':'UNKNOWN_REQUIRES_OWNER'):cancelCommitted?'CANCELLATION_COMMITTED':row[3],consentState:e.state,
+     cancellationNoticeStatus:cancelCommitted?study1V2ManagementCancelNoticeStatus_(cancelCtx):'NOT_APPLICABLE'});
    }
   }
   study1SiteFormalWorkspaceReadGate_();if(lock.hasLock()!==true)throw Error('MANAGEMENT_UNAVAILABLE');return {readOnly:true,experiment:'E1',rows};
@@ -346,10 +394,11 @@ function study1V2ConfirmationReceipts_(ctx){
   const entries=study1EConsentRegistry_().records.filter(e=>e.binding&&e.binding.applicantId===ctx.identity.applicantId&&e.state==='CONFIRMED'&&e.channel==='FORMAL_E1'&&e.experiment==='E1');
   if(entries.length!==1)return [];
   const entry=entries[0],association=study1V2ManagementResolve_(entry,ctx.snapshot,ctx.lock),row=association.row;
-  if(row[3]!=='CONFIRMED'||!row[7]||row[8])return [];
+  if(!['CONFIRMED','CANCELLED'].includes(row[3])||!row[7]||(row[3]==='CONFIRMED'&&row[8])||(row[3]==='CANCELLED'&&!row[8]))return [];
   const schedule=study1V2ReceiptSchedule_(ctx.snapshot,row[2],ctx.lock);
-  return [{reservationId:row[0],slotId:row[2],originalReservationId:association.root[0],originalSlotId:association.root[2],schedule,
-   noticeStatus:study1V2ReceiptNoticeStatus_(ctx,row,entry,association)}];
+  const cancelCtx={...ctx,entry,row},cancelCommitted=study1V2ManagementCancelCommitted_(cancelCtx,study1V2ManagementRequestRead_(cancelCtx));
+  return [{reservationId:row[0],slotId:row[2],originalReservationId:association.root[0],originalSlotId:association.root[2],schedule,bookingStatus:row[3],cancellationCommitted:cancelCommitted,
+   noticeStatus:row[3]==='CONFIRMED'?study1V2ReceiptNoticeStatus_(ctx,row,entry,association):cancelCommitted?study1V2ManagementCancelNoticeStatus_(cancelCtx):'UNKNOWN'}];
  }catch(_){return [];}
 }
 `;
@@ -386,6 +435,16 @@ const edits={
  }));`]
  ],
  Study1ParticipantIntake:[
+  [" }catch(_){\n  // Do not expose the presence or kind of private record / missing permission.\n  return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};\n }\n}\nfunction study1ParticipantBegin(request)",
+   String.raw` }catch(_){
+  // No new intake, but an already-confirmed participant may need their own
+  // management link. Never bypass any formal-entry or management gate.
+  try{study1V2ManagementPolicy_();const antiBot=study1ParticipantTurnstileConfig_();return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN',managementReady:true,siteKey:antiBot.siteKey};}catch(_){}
+  // Do not expose the presence or kind of private record / missing permission.
+  return {ready:false,experiment:'E1',reason:'REGISTRATION_NOT_OPEN'};
+ }
+}
+function study1ParticipantBegin(request)`],
   ["  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey,\n   recoveryReady:",
    "  let managementReady=false;try{study1V2ManagementPolicy_();managementReady=true;}catch(_){}\n  return {ready:true,experiment:'E1',siteKey:antiBot.siteKey,managementReady,\n   recoveryReady:"],
   ["   delivery:'UNVERIFIED'};",
@@ -434,9 +493,34 @@ const edits={
    '  sourceSha256:entry.documentSha,expiresAtUtc:new Date(entry.expires).toISOString(),\n  serverNowUtc:new Date().toISOString(),']
  ],
  Study1Visitor:[
+  ['<div class="box"><strong>報名前請先了解</strong>',
+   '<button id="formalManageFromChoose" type="button" class="ghost" hidden disabled>已有正式預約：重新取得管理連結</button>\n<div class="box"><strong>報名前請先了解</strong>'],
+  ["el('chooseE1').addEventListener('click',()=>{\n if(!state.ready||state.busy)return;\n show('screen');",
+   String.raw`function formalManagementOnly_(active){
+ state.managementOnly=active;
+ for(const id of ['formalName','formalPhone']){
+  const n=el(id),label=document.querySelector('label[for="'+id+'"]');if(n){n.hidden=active;n.disabled=active||!state.ready;}if(label)label.hidden=active;
+ }
+ el('formalContact').hidden=false;el('screenQuestions').hidden=active;el('screenNext').hidden=active;el('screenNext').disabled=active||!state.ready||state.beginUnknown;
+ el('formalEmail').disabled=(!state.ready&&!state.managementReady)||state.beginUnknown;
+ el('formalExistingCase').hidden=active||!state.recoveryReady;
+ el('formalManageLinkBox').hidden=!state.managementReady;
+ const h=document.querySelector('#step-screen h2'),p=document.querySelector('#step-screen > p.lead'),contactTitle=el('formalContact').querySelector('strong'),contactHelp=el('formalContact').querySelector('p.help');
+ if(h)h.textContent=active?'重新取得原預約管理連結':'確認參與條件';
+ if(p)p.textContent=active?'只填原信箱與人機驗證，不會建立新申請或蒐集資格答案。':'請依自身情況誠實回答，Email 僅確認信箱控制權。';
+ if(contactTitle)contactTitle.textContent=active?'原報名電子郵件':'正式申請聯絡資料';
+ if(contactHelp)contactHelp.textContent=active?'若符合核發條件，只會寄到原信箱；此頁不顯示原案件是否存在。':'只有正式招募開放，經核實研究資料使用與防濫用程序後才可輸入。';
+}
+el('formalManageFromChoose').addEventListener('click',()=>{
+ if(!state.managementReady||state.busy||state.app||state.beginUnknown||state.recoveryCase)return;
+ formalManagementOnly_(true);show('screen');status('請填原報名信箱及完成人機驗證。這不是重新報名。');
+});
+el('chooseE1').addEventListener('click',()=>{
+ if(!state.ready||state.busy||state.beginUnknown||state.app||state.recoveryCase)return;
+ formalManagementOnly_(false);show('screen');`],
   [" if(row.status==='CONFIRMED')return 'CONFIRMED';\n if(row.status==='HELD'&&typeof row.holdUntilUtc==='string'&&",
    String.raw` const linked=Array.isArray(booking.confirmationReceipts)?booking.confirmationReceipts.filter(r=>r&&r.originalReservationId===reservationId&&r.originalSlotId===slotId):[];
- if(linked.length===1&&booking.reservations.filter(r=>r&&r.reservationId===linked[0].reservationId&&r.slotId===linked[0].slotId&&r.status==='CONFIRMED').length===1)return 'CONFIRMED';
+ if(linked.length===1&&['CONFIRMED','CANCELLED'].includes(linked[0].bookingStatus)&&booking.reservations.filter(r=>r&&r.reservationId===linked[0].reservationId&&r.slotId===linked[0].slotId&&r.status===linked[0].bookingStatus).length===1)return linked[0].bookingStatus;
  if(row.status==='HELD'&&typeof row.holdUntilUtc==='string'&&`],
   ['<p id="formalRecoveryRef" class="help" hidden></p>',
    String.raw`<section class="step" id="step-manage" hidden>
@@ -457,7 +541,11 @@ const edits={
   ['<div id="formalExistingCase" class="box" hidden>',
    '<div class="box" id="formalManageLinkBox" hidden><strong>已完成預約？重新取得限時管理連結</strong><p class="help">只填上方原電子郵件並完成人機驗證。回應不顯示帳號是否存在；不要重新申請研究。</p><button type="button" id="formalManageLinkSend" disabled>請求一次給原信箱的管理連結</button></div>\n<div id="formalExistingCase" class="box" hidden>'],
   ["   state.recoveryReady=state.ready&&result.recoveryReady===true;",
-   "   state.recoveryReady=state.ready&&result.recoveryReady===true;\n   state.managementReady=state.ready&&result.managementReady===true;\n   el('formalManageLinkBox').hidden=!state.managementReady;el('formalManageLinkSend').disabled=!state.managementReady;"],
+   "   state.recoveryReady=state.ready&&result.recoveryReady===true;\n   state.managementReady=!!(result&&result.experiment==='E1'&&result.managementReady===true&&typeof result.siteKey==='string');\n   el('formalManageLinkBox').hidden=!state.managementReady;el('formalManageLinkSend').disabled=!state.managementReady;\n   el('formalManageFromChoose').hidden=!state.managementReady;el('formalManageFromChoose').disabled=!state.managementReady;"],
+  ["   if(state.ready)mountHumanCheck_(result.siteKey);",
+   "   if(state.ready||state.managementReady)mountHumanCheck_(result.siteKey);"],
+  ["   status(state.ready?'系統可受理實驗一待核申請，須再完成信箱與研究資格程序。':'目前尚未開放正式報名與簽署。');",
+   "   status(state.ready?'系統可受理實驗一待核申請，須再完成信箱與研究資格程序。':state.managementReady?'目前無法受理新申請；已有正式預約者可重新取得原管理連結。':'目前尚未開放線上報名與簽署。');"],
   ["el('formalRecoverySend').addEventListener('click',()=>{",
    String.raw`el('formalManageLinkSend').addEventListener('click',()=>{
  if(!state.managementReady||state.busy||state.app||state.beginUnknown||state.recoveryCase||!state.humanToken)return;
@@ -535,7 +623,7 @@ function reconcileOtpIssue_(payload){
   ["  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;\n  status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');",
    "  state.otpVerifyUnknown=true;el('otpVerify').disabled=true;formalOtpLookupControl_(false);\n  status('OTP 驗證結果未知，可能已一次性使用；請勿重複送出，聯絡研究團隊核對。');"],
   [" if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase)return;",
-   " if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase||state.app)return;"],
+   " if(!state.ready||state.busy||state.beginUnknown||state.recoveryCase||state.app||state.managementOnly)return;"],
   ["   o.textContent=formalTime_(slot.startAtUtc)+'｜剩餘 '+slot.remaining+",
    "   o.textContent=formalTime_(slot.startAtUtc)+' – '+formalTime_(slot.endAtUtc)+'｜'+(slot.locationCode||'地點待核對')+'｜剩餘 '+slot.remaining+"],
   ["   const btn=formalButton_(formalTime_(slot.startAtUtc)+\n    '｜'+(slot.bookable?'尚有名額':'已滿／候補'),()=>{",
@@ -589,10 +677,13 @@ function reconcileOtpIssue_(payload){
    '  <dt>副本存取有效期限（臺灣）</dt><dd id="formalDoneCopyExpiry">尚未核對</dd>\n  <dt>郵件通知狀態</dt><dd id="formalDoneEmailNotice">尚未核對原通知紀錄</dd>'],
   ['function formalDoneRender_(outcome,pdfSha,taipeiDate,reservationId){',
    'function formalDoneRender_(outcome,pdfSha,taipeiDate,reservationId,receipt,copyExpiresAtUtc){'],
+  ["    !['CONFIRMED','HELD','UNKNOWN'].includes(outcome)){",
+   "    !['CONFIRMED','HELD','CANCELLED','UNKNOWN'].includes(outcome)){"],
   [" el('formalDonePdfDate').textContent=taipeiDate;\n el('formalDoneNotice').textContent=confirmed?",
    String.raw` el('formalDonePdfDate').textContent=taipeiDate;
- const validReceipt=confirmed&&receipt&&receipt.originalReservationId===reservationId&&
-  receipt.originalSlotId===formalConsent.slotId;
+ const cancelled=outcome==='CANCELLED';
+ const validReceipt=(confirmed||cancelled)&&receipt&&receipt.originalReservationId===reservationId&&
+  receipt.originalSlotId===formalConsent.slotId&&receipt.bookingStatus===outcome;
  if(validReceipt&&receipt.reservationId!==reservationId)el('formalDoneReservation').textContent='目前：'+receipt.reservationId+'｜原簽署預約：'+reservationId+'（已核對改期關聯）';
  const s=validReceipt?receipt.schedule:null;
  const validSchedule=s&&typeof s.startAtUtc==='string'&&typeof s.endAtUtc==='string'&&
@@ -609,14 +700,24 @@ function reconcileOtpIssue_(payload){
   NOT_QUEUED:'原通知紀錄尚未建立；請聯絡研究團隊核對，不必重新報名。',
   UNKNOWN:'寄送結果待人工核對；請勿自行重送。'};
  const noticeKey=validReceipt?receipt.noticeStatus:'UNKNOWN';
- if(emailNotice)emailNotice.textContent=confirmed?
+ if(emailNotice)emailNotice.textContent=confirmed||(cancelled&&validReceipt&&receipt.cancellationCommitted===true)?
   (Object.prototype.hasOwnProperty.call(labels,noticeKey)?labels[noticeKey]:labels.UNKNOWN):
-  '預約尚未確認，不得視為已發送確認通知。';
+  cancelled?'已核對取消列；尚未證實特定取消請求及對應通知。':'預約尚未確認，不得視為已發送確認通知。';
  el('formalDoneNotice').textContent=confirmed?`],
   ["  formalDoneRender_(result,v.sha,v.taipeiDate,v.reservationId);",
    String.raw`  const receipts=Array.isArray(booking?.confirmationReceipts)?booking.confirmationReceipts.filter(x=>
    x&&x.originalReservationId===v.reservationId&&x.originalSlotId===v.slotId):[];
   formalDoneRender_(result,v.sha,v.taipeiDate,v.reservationId,receipts.length===1?receipts[0]:null,v.copyExpiresAtUtc);`],
+  ["  '請聯絡研究團隊確認原預約狀態；不要重新簽名、付款或重複申請。';\n show('done');",
+   String.raw`  '請聯絡研究團隊確認原預約狀態；不要重新簽名、付款或重複申請。';
+ if(cancelled&&validReceipt){
+  el('formalDoneHeading').textContent='實驗一預約目前已取消';
+  el('formalDoneMessage').textContent='已唯讀核對目前預約取消狀態。完整簽署 PDF 仍保留；取消預約不等同撤回研究同意。';
+  el('formalDoneBooking').textContent='CANCELLED｜'+(receipt.cancellationCommitted===true?'原取消交易已核對':'目前原列已取消，特定請求因果未核實');
+  el('formalDoneNotice').textContent='如需重新安排或撤回研究同意，請聯絡研究團隊。';
+  show('done');status('目前預約已取消，原同意及已簽 PDF 保留。');return;
+ }
+ show('done');`],
   ['   formalReceiptVerified={token,sha:result.sha,taipeiDate:copy.taipeiDate,\n    reservationId:formalConsent.reservationId,slotId:formalConsent.slotId};',
    String.raw`   const expiry=copy.copyExpiresAtUtc;
    const expiryVerified=typeof expiry==='string'&&Number.isFinite(Date.parse(expiry))&&
@@ -717,7 +818,7 @@ function formalManagementStart_(){
   view=r;formalClear_(target);for(const s of r.options){const option=document.createElement('option');option.value=s.slotId;option.textContent=formalTime_(s.startAtUtc)+' – '+formalTime_(s.endAtUtc)+'｜'+s.locationCode+'｜'+(s.direct===true?'可立即改期':'須研究團隊審核');target.appendChild(option);}
   summary.textContent='目前預約：'+r.reservationId+'｜'+formalTime_(r.schedule.startAtUtc)+' – '+formalTime_(r.schedule.endAtUtc)+'｜'+r.schedule.locationCode+'｜'+(r.status==='CONFIRMED'?'已確認':'已取消')+
    (r.lastChange?'｜改期關聯已核對，原簽署預約 '+r.originalReservationId+' 及原 PDF 保留。最新改期確認郵件：'+(r.noticeStatus==='PROVIDER_ACCEPTED'?'服務商已接受（非送達）':'尚未核實，勿重送'):'')+
-   (r.pending?'｜'+(r.pending.action==='MOVE'?'改期':'取消')+'請求已保存：'+(r.pending.state==='CANCELLED_ORIGINAL_ROW'?'原預約目前已取消':'待研究團隊審核，勿視作已改期或取消'):'');
+   (r.pending?'｜'+(r.pending.action==='MOVE'?'改期':'取消')+'請求已保存：'+(r.pending.state==='CANCEL_COMMITTED'?'本次取消交易已獨立核對，通知：'+(r.cancellationNoticeStatus==='PROVIDER_ACCEPTED'?'郵件服務接受（非送達）':r.cancellationNoticeStatus==='NOT_QUEUED'?'尚未建立通知，請聯絡團隊':'寄送結果尚待核對，勿重送'):r.pending.state==='CANCELLED_ORIGINAL_ROW'?'原預約目前已取消（此次請求因果未核實）':'待研究團隊審核，勿視作已改期或取消'):'');
   el('managementExpiry').textContent='連結有效至（臺灣）：'+formalTime_(r.expiresAtUtc)+'；目前場次自助截止：'+formalTime_(r.selfServiceUntilUtc)+'。';
   confirm.checked=false;controls.hidden=submitted||!r.canRequest;update();
  };
@@ -756,7 +857,7 @@ function formalV08PendingPanel_`]
     button.addEventListener('click',()=>{const e=++epoch;button.disabled=true;output.textContent='正在核對原申請…';
      const fail=()=>{if(e!==epoch)return;button.disabled=false;output.textContent='無法完整核對正式來源或 OWNER 權限。';};
      google.script.run.withFailureHandler(fail).withSuccessHandler(r=>{if(e!==epoch)return;if(!r||r.readOnly!==true||r.experiment!=='E1'||!Array.isArray(r.rows)){fail();return;}
-      button.disabled=false;output.textContent=r.rows.length?r.rows.map(q=>[q.reservationId,q.slotId,q.action,q.targetSlotId||'—',q.submittedAtUtc,q.bookingStatus,q.consentState].join('｜')).join('\n'):'目前無已核對的改期／取消申請。';}).study1OwnerE1BookingChangeRequests();
+      button.disabled=false;output.textContent=r.rows.length?r.rows.map(q=>[q.reservationId,q.slotId,q.action,q.targetSlotId||'—',q.submittedAtUtc,q.bookingStatus,q.consentState,q.cancellationNoticeStatus||'NOT_APPLICABLE'].join('｜')).join('\n'):'目前無已核對的改期／取消申請。';}).study1OwnerE1BookingChangeRequests();
     });})();
 </script></body></html>`]
  ]
