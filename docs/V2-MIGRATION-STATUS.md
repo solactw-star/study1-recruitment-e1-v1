@@ -1,6 +1,16 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 E1 自助立即改期、原已簽同意書安全關聯工程已提交
+## 最新接續點｜2026-11-21 E1 取消通知與獨立管理連結續作缺口已補齊
+
+- 依本輪使用者要求接續 main `5ef5ebf5e7b8a2268acd4a97eb0b0dc9331e9a34`（GitHub 頁面既有自動 CI 摘要 success），核對 §13、§16、§70-S.52–54 與正式報名／OTP／時段／簽署／副本／確認通知／管理連結程式。未重做已完成工程或功能測試、未開真人收件、不部署、不碰 V1。
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_CORE_GAP_CLOSURE；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=[217396c5e34a23ccdfa224aa57465f7abc8dde6a](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/217396c5e34a23ccdfa224aa57465f7abc8dde6a)。補齊正式取消確認通知：原 signed case 與原共鎖核對同一已確認預約、原請求私有 HMAC 及 PREPARED／COMMITTED 同一列摘要；唯有已獨立回讀本次取消交易，才依原 Notifications A:I 先記唯一 DISPATCHING 再一次寄送原已核實信箱。顯示臺灣場次及取消時間，不附 PDF／憑證，不把取消視為同意撤回。未知／未入列不重送、不把供應商接受當送達、不逆轉已確認取消，保留舊狀態及同意。
+- 原簽署結果頁與限時管理頁現在可區分同一關聯鏈的目前 CONFIRMED／CANCELLED、原列取消與確切取消請求已提交、獨立取消通知狀態；OWNER 管理待辦亦可唯讀核對。同一原簽署 PDF／歷史保留，不另建正式資料來源。異動實際寫前再次檢查管理連結有效期、截止及政策；不改 24h／2h 核定值、既有 HMAC、共鎖、名額或正式啟用閘門。
+- 補發管理連結獨立於新申請名額：原報名首頁在正式管理政策及原安全／live gate 已成立時，顯示「已有正式預約：重新取得管理連結」，只在專用畫面收原 email 及 Turnstile，不蒐集新資格、姓名或電話；伺服器仍只向同一已確認原案信箱發連結、統一回覆不揭露帳號是否存在、原限流及不重送。即使沒有可供新報名的場次，也不無故阻擋符合管理政策的既有預約；如四旗標或管理／正式核准不成立仍關閉，不新增繞過入口。
+- 本機僅既有來源組裝／可逆 guard 及靜態語法解析，30 檔合併候選 SHA-256 `eef5c46f9297500b0c1f7c0c84d18a3e5ebd1bef703271239c67fa70f263d539`；未執行應用邏輯、功能測試／UAT／真人通知／預約異動，保留既有自動 CI；本輪新 CI 尚不冒稱通過。原 V2 GAS 最後完整核驗 V14（來源 `31a17c3feee9a78968142a1547003d3e7961c047a998779f897c247e85e4c102`），未執行新發布或遠端預檢。
+- P0 E1 核心一般參與者需求以源碼層已具備：開放前資訊、資格自陳／Turnstile／原 Email OTP、核定時段／暫留／候補、完整預簽五頁 PDF 本人最後簽署／雙日期與私人副本、獨立預約確認及通知、原案件限時 Email 管理、重申、即時取消／改期、同意關聯及相應通知、異常唯讀回查。本次受檢核心流程未辨識其他須在發布前新增的獨立來源缺口；不等於線上實測或正式營運完成。P2 定時提醒／自動候補通知、個別行政與完整後台異動非本階段核心，依適用政策、OWNER 權責及獨立核准後續，不為形式增建。已核定管理政策、72h PDF 副本與原場次留待 OWNER 私有設定及技術核驗，不重問已提供值、不假填 VERIFIED。
+- LAST_VERIFIED_STEP=E1_CANCELLATION_NOTIFICATION_AND_EXISTING_BOOKING_LINK_RECOVERY_SOURCE_COMMITTED；COMPLETED=本輪剩餘核心程式及 GitHub main 提交；WRITE_OWNER=V2 Repo；SYNC_STATUS=CORE_SOURCE_READY_PENDING_CONSOLIDATED_RELEASE_V14_LAST_VERIFIED；BLOCKERS=RELEASE_PREFLIGHT_LOG_POLICY_BLOCKED、OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=待平台發布條件實際解除，以當期最新 main、原唯一官方工作流及同版預檢證據集中部署及回讀原 V2；OWNER 恢復後接續正式安全設定、既有管理政策以及適用核准及後續驗收，維持收件關閉直至獨立啟用條件成立。未重試被拒日誌、未寫正式資料／私人設定、未重建 OAuth、不碰 V1。
+
+## 前次接續點｜2026-11-21 E1 自助立即改期、原已簽同意書安全關聯工程已提交（歷史）
 
 - 本輪使用者已明確核定管理連結有效時間與取消期限依建議、要求完成自助立即改期。最新正式規格 §70-S.54 紀錄本次採 24h 管理連結、目前場次開始前 2 小時自助改期／取消截止，新場次也須距開始逾 2 小時。原 72h PDF 副本及其他研究程序不變；本次為產品政策決策及程式施工，不是未核實技術項目之 VERIFIED 或真人啟用。
 - TASK_DOMAIN=Study1_V2_E1_CONFIRMED_SELF_SERVICE_RESCHEDULE；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=[41a774bcf3a1dd3bc8dca48bd7e28b1461834ab1](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/41a774bcf3a1dd3bc8dca48bd7e28b1461834ab1)，前 main `11dc479ab70a04fa420f7c7b1bbfe5c2b66249f1`（原既有 CI 摘要 success）。原限時連結仍只授權同一已簽 E1 案件；直接改期只在當期 approved policy、原已簽文件與現行核定版本／SHA 同一、目標 E1 registry、相同地點及時長、兩場均超過截止、容量、FIFO、原獨立交易存證與共鎖成立時開放。參與者明確核對即時或人工模式、目標、原 revision 後送出一次，不默默切換操作類型。政策缺失或未核准不擴權；不同程序／逾期交團隊審核。
