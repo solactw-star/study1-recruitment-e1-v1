@@ -1,6 +1,13 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 E1 正式預約確認、PDF 期限及通知回讀工程已提交，待發布日誌可讀
+## 最新接續點｜2026-11-21 E1 正式簽署期限與筆跡隔離已提交，集中發布待解鎖
+
+- 使用者目前無法提供預檢日誌，指示先繼續不需 OWNER 登入的正式功能，發布條件解除後集中部署及回讀；不重做功能測試、不開啟真人收件、不碰 V1。本輪不要求補交舊日誌、不重試被拒存取、不觸發 workflow_dispatch。
+- TASK_DOMAIN=Study1_V2_E1_FORMAL_CONSENT_DEADLINE；SOURCE_ID/PATH=`scripts/study1-v2-confirmation-receipt.cjs`；SOURCE_VERSION/SHA=main [3ab68b3d7dfa33dfe2d7ae3244f9c224b79a03c1](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/3ab68b3d7dfa33dfe2d7ae3244f9c224b79a03c1)。正式簽署介面顯示同一暫留與原簽署憑證的臺灣時間期限、約剩時間及充分閱讀提醒；首次核發、冪等回應與唯讀找回均傳回原期限及伺服器時間。客端核對逾期或不符同案期限即停用送簽，不能因唯讀刷新延長期限；伺服器原共鎖、身分、憑證及期限限制未變更。切換／重置同意案時清空筆跡畫布及閱讀／同意勾選，繪圖綁定同一同意案，防止殘留筆跡交叉使用。簽署已送出但因果不明時只從原紀錄唯讀核對、勿重送；未新增公開 RPC、資料來源或額外簽署規則。之前預約起訖、地點、PDF 副本期限、確認通知及唯讀回查改良均保留。
+- 本機僅執行既有發布來源組裝與可逆來源 guard，30 檔，合併候選 SHA-256 `af6dfba3327158376465cd44c5a908d601d8237a5c4e6868bcc6f9d5f89debd8`。未執行手動單元／功能／UAT／寄信／預約／簽署；未改既有自動 CI。未取得本候選遠端預檢證據，不以先前 Run #20 的 success 或舊候選 SHA 冒充本版預檢。最後已核驗原部署仍為 V14、SHA `31a17c3feee9a78968142a1547003d3e7961c047a998779f897c247e85e4c102`（[原 V14 唯讀回查](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44878411325)；本輪未查遠端）。
+- LAST_VERIFIED_STEP=FORMAL_CONSENT_DEADLINE_AND_SIGNATURE_ISOLATION_SOURCE_COMMITTED；COMPLETED=本輪來源改善、GitHub main 提交；WRITE_OWNER=V2 Repo；SYNC_STATUS=SOURCE_COMMITTED_PENDING_CONSOLIDATED_RELEASE_V14_LAST_VERIFIED；BLOCKERS=RELEASE_PREFLIGHT_LOG_POLICY_BLOCKED、OWNER_WEBAPP_SESSION_WAITING_USER、FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED。NEXT_ACTION=等待實際平台解除發布條件後，以屆時 main 及原唯一工作流合法取得當期合併候選／HEAD／原部署預檢證據，一次集中發布至原 V2 並回讀 HEAD、不可變版本、原 deployment、ACL 與 SHA；尚未解除前可續做獨立來源功能，不重試被拒路徑。未重新部署、未更改私人設定／資料／正式旗標、未發真人通知、未碰 V1。
+
+## 前次接續點｜2026-11-21 E1 正式預約確認、PDF 期限及通知回讀工程已提交，待發布日誌可讀（歷史）
 
 - 依使用者指示，先完成不需 OWNER 登入的報名預約／簽署／確認通知功能，不重做功能驗收、不開真人收件、不碰 V1。原第 14 版仍為最後已完整回讀部署。
 - TASK_DOMAIN=Study1_V2_E1_FORMAL_CONFIRMATION_RECEIPT；main [6ac4a7e349e701861682d7085ecd463b9c1bf671](https://github.com/solactw-star/study1-recruitment-e1-v1/commit/6ac4a7e349e701861682d7085ecd463b9c1bf671)，兩份程式 `scripts/study1-v2-confirmation-receipt.cjs`、`scripts/study1-v2-formal-entry.cjs`。正式參與者 OTP 後的時段清單及暫留核對顯示經原核定場次登錄之起訖時間（臺灣）及地點；保留原預約名額、共鎖、暫留／候補及 HMAC 防護。完整已簽 PDF 副本增加實際存取期限，在既有本人 SHA 驗證後顯示。最終確認頁仍獨立核對 PDF 與本人原 Reservations；同一已驗證本人原 CONFIRMED 場次的時段／地點與通知投影由既有 `study1FormalStatus` 唯讀提供，不新增公開 RPC。依本人 applicant／reservation／slot、同案 E1 簽署證據及通知 job HMAC 雙回讀，狀態分為 NOT_QUEUED／DISPATCHING／PROVIDER_ACCEPTED／UNKNOWN，錯配、競寫或缺證據不聲稱已寄送或自動重送，不披露原通知列、聯絡資料、私人 ID 或金鑰。正式確認信在原 at-most-once 寄送前準備經核對的臺灣起訖、地點、預約編號及簽署副本到期時間，不附 PDF 或私有存取憑證。未改正式 OTP／OWNER／TEST／E2／啟用 gate；供應商接受不代表送達。
