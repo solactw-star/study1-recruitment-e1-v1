@@ -1,6 +1,25 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 PI 本人 REC 適用性聲明已私人記錄，收件仍未開啟
+## 最新接續點｜2026-11-21 第 13 版正式安全證據逐項核對，沿用既有 TEST／CI
+
+- 本輪只讀既有驗證，不重跑功能測試、不發新 OTP、不重送部署。原部署 [唯讀 Run 44860176284](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44860176284/job/136711508181) 再核其成功日誌：version=13、HEAD／部署不可變來源／候選皆為 `c9a81ccef0e58f52062cc32ede85509dfb744e0dc989177b13b02a6e6a772ee9`。最新 main `a1dbd6ea1c6c952633a55ecb609ea2d7f8345074` 同一來源的[既有完整安全 CI Run 44864811961](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44864811961/job/136726003837) 成功；其工作流是 offline/mock/syntax/deny-all 測試，非真實正式資料交易。
+- 原第 10 版 [Run 44446556105](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44446556105) 與既有 OWNER 同案真實隔離 TEST：Turnstile、真實研究室收信、一次性 OTP、HELD／CONFIRMED、五頁合成簽署 PDF、清除後四項 0。證據保留並直接用於以下分類，不重做已通過項目：
+
+| 正式設定／安全閘門 | 既有證據及本輪實際唯讀結果 | 判定 |
+|---|---|---|
+| OWNER、PI 核准、資料及 Email OTP 核准 | OWNER 編輯器已恢復，PI 本人聲明已回讀，七個既有 `_APPROVED=true` 保留 | 權責／核准記錄已配置；不等於技術驗收 |
+| `STUDY1_PARTICIPANT_ABUSE_PROTECTION_VERIFIED` | V9/V10 真實 Siteverify、過期／重用拒絕；本輪私有 sitekey、secret 存在且格式／hostname 符合現行 V13 guard；隔離 action 為 `study1_e1_owner_test`，正式 action=`study1_e1_apply` 且使用正式 participant adapter | 供應商與配置證據可用；不同正式 action 未驗，不設 VERIFIED |
+| `STUDY1_E1_SELF_REPORT_OTP_SOURCE_VERIFIED`、正式 OTP/HMAC | V6/V10 研究室測試信與單次驗證、CI mock 原 Applicants／Screenings／Verification F:G、一次性及重送拒絕；隔離以 TEST case hash／固定 OWNER 收件，原正式 OTP key／binding key 至今不存在 | 既有核心行為已驗；正式原表與私有 key 配置未完成 |
+| `STUDY1_WIZARD_P0_SHEET_HOLD_VERIFIED`、`STUDY1_E1_SLOT_REGISTRY_APPROVED` | V10 合成暫留與預約，CI mock 原 HELD／HMAC／競寫；上次 OWNER 唯讀原 Slots 三列完全一致。正式 slot registry 與 HMAC 仍不存在 | 三場排程已核准、來源已讀；未核實實際 registry，不冒稱已綁定或已驗真實表交易 |
+| `STUDY1_ECONSENT_PROVIDER_VERIFIED`、`STUDY1_ECONSENT_PDF_PROVIDER_VERIFIED`、`STUDY1_ECONSENT_WIZARD_LINK_VERIFIED` | V10 完整五頁合成同案簽署；CI 合成正式 binding、stamp、registry、readback；本輪私人 PDF 選用、layout、同日期政策的 SHA／version／5 頁數一致，published.E1 仍 null；V13 雙日期程式已發布但未驗正式簽署 | 來源／版面配置已具備，未把合成資料當正式簽署或公開文件 |
+| `STUDY1_E1_REMOTE_CONSENT_REC_SCOPE_VERIFIED` 與兩個 REC policy | PI 自述已確認適用範圍且已私人記錄；私有 REC web/remote policy 屬性仍不存在；程式要求獨立有效來源及實際綁定 | 已有 PI 本人聲明；正式機械綁定與技術 gate 不冒稱完成 |
+| `STUDY1_E1_FORMAL_WORKSPACE_READ_APPROVED`／`STUDY1_E1_TXN_EVIDENCE_APPROVED` | CI 測 mock OWNER／事件／交易；未擴大正式個資存取或假定真實獨立交易證據 | 保留原核准邊界，不新增未核驗權限 |
+| OPEN／CONSENT_READY／FORMAL_READY／LIVE_INTAKE_ENABLED | OWNER 實際設定四項均未為 true | 保持關閉，未宣稱營運完成 |
+
+- 原 V2 私人屬性 `STUDY1_E1_LAUNCH_AUTHORIZATION_V1` 增量保存 `gateEvidenceReviewV1`，記錄來源 Run／SHA、各項已驗與尚未驗之範圍，不作收件許可或 gate 替代。重新載入逐值回讀一致，屬性仍 17 項、未增任何 VERIFIED 或 live gate。上次實際平台拒絕的正式 HMAC／REC／slot／VERIFIED 整批寫入不能用隔離或 CI 假作正式驗收後分拆、重送或繞過；本輪沒有新的被拒寫入（不重試已拒操作）。原第 13 版不變，無新功能測試、無真人收件、不碰 V1。
+- LAST_VERIFIED_STEP=EXISTING_TEST_CI_AND_V13_GATE_EVIDENCE_MATRIX_READBACK；SYNC_STATUS=V13_DEPLOYED_SCOPE_AND_EVIDENCE_RECORDED_INTAKE_CLOSED；BLOCKERS=FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED、FORMAL_GATES_NOT_EVIDENCED_BY_ISOLATED_AND_OFFLINE_CI。NEXT_ACTION=以已存在可追溯且適用正式路徑的技術證據與平台允許的正式配置程序解鎖，不重查先前已完成的 OWNER、PI、時段、PDF、Turnstile 供應者、隔離 TEST 或 CI；若仍無正式路徑證據且使用者不允許新功能驗收，保持關閉。
+
+## 前次接續點｜2026-11-21 PI 本人 REC 適用性聲明已私人記錄，收件仍未開啟（歷史）
 
 - 本輪使用者確認現行 REC 核准範圍適用本次 E1 線上報名與電子同意，並補充本人為 PI、已審閱現行 REC。此為本輪本人自述確認，不是代理人代填研究者姓名、重新簽署 REC、主管機關新核准或獨立身份查核。既有 2026-11-19 使用者就線上報名、Email OTP、遠端電子同意及 Google Sheets／Drive 保存方式的確認一併追溯，不再單以先前未找到額外文件阻擋後續工程。
 - 已用恢復後的研究室 OWNER 帳戶，於唯一原 V2 之 `STUDY1_E1_LAUNCH_AUTHORIZATION_V1` 增量保存 `recScopeUserConfirmation`：案號、E1、兩次本人聲明、實際 UTC 記錄時間、來源、本輪確認身分（自述 PI、未另提供姓名）、既有核准及未執行功能驗收狀態。重新載入逐值比對一致；私人紀錄保留原有時段、休息、72 小時與雙日期規則。未將 PI 個人身分／私人檔案或金鑰輸出到公開 repo。
