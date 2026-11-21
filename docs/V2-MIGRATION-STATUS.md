@@ -1,6 +1,13 @@
 # Study1 V2 建置與發布進度（更新 2026-11-21，Asia/Taipei）
 
-## 最新接續點｜2026-11-21 OWNER 存取已恢復，原部署第 13 版維持收件關閉
+## 最新接續點｜2026-11-21 PI 本人 REC 適用性聲明已私人記錄，收件仍未開啟
+
+- 本輪使用者確認現行 REC 核准範圍適用本次 E1 線上報名與電子同意，並補充本人為 PI、已審閱現行 REC。此為本輪本人自述確認，不是代理人代填研究者姓名、重新簽署 REC、主管機關新核准或獨立身份查核。既有 2026-11-19 使用者就線上報名、Email OTP、遠端電子同意及 Google Sheets／Drive 保存方式的確認一併追溯，不再單以先前未找到額外文件阻擋後續工程。
+- 已用恢復後的研究室 OWNER 帳戶，於唯一原 V2 之 `STUDY1_E1_LAUNCH_AUTHORIZATION_V1` 增量保存 `recScopeUserConfirmation`：案號、E1、兩次本人聲明、實際 UTC 記錄時間、來源、本輪確認身分（自述 PI、未另提供姓名）、既有核准及未執行功能驗收狀態。重新載入逐值比對一致；私人紀錄保留原有時段、休息、72 小時與雙日期規則。未將 PI 個人身分／私人檔案或金鑰輸出到公開 repo。
+- 回讀原 17 項屬性，沒有新增 `VERIFIED`、`OPEN`、`CONSENT_READY`、`FORMAL_READY` 或 `LIVE_INTAKE_ENABLED`。先前實際自動審查拒絕的理由是「此動作會持久寫入多個正式金鑰、REC／PDF／slot 綁定及十項 VERIFIED 閘門；雖保持四個收件旗標為 false，使用者未明確授權以未完成 OWNER 驗證與未驗收證據宣告這些核驗已完成。」OWNER 已恢復、PI 本人聲明已記錄，但沒有成立正式技術驗收證據，也未得到解除該特定安全配置拒絕的實際平台證據；不得透過分拆、另入口或假填 VERIFIED 達成被拒寫入。既有第 13 版保持，沒有發送 OTP、執行功能測試、重發部署或開啟真人收件。
+- LAST_VERIFIED_STEP=PI_SELF_ATTESTATION_PRIVATE_PROPERTY_READBACK；SYNC_STATUS=V13_DEPLOYED_PI_CONFIRMATION_RECORDED_INTAKE_CLOSED；BLOCKERS=FORMAL_SECURITY_CONFIGURATION_REVIEW_REQUIRED_AND_TECHNICAL_GATES_NOT_VERIFIED。NEXT_ACTION=以實際可追溯技術核驗依據及平台允許的正式安全設定程序接續 OTP/HMAC、三場時段綁定與其他正式 gate；收件須在全部條件實際成立並符合當次啟用確認後完成。無須再重問 OWNER 登入、PI 本人聲明、場次、PDF、72h 或雙日期。沒有碰 V1。
+
+## 前次接續點｜2026-11-21 OWNER 存取已恢復，原部署第 13 版維持收件關閉（歷史）
 
 - OWNER 存取實際解除：在內建瀏覽器開啟 Apps Script 首頁，由 Google 帳戶選單的研究室帳戶首頁連結切換；「我的專案」中 V2 顯示擁有者為我。從該列開啟原 V2，正確研究室帳戶、Script ID 及編輯器／專案設定頁均成功顯示。先前含空 pageId 的原專案導覽 HTTP 400 不再是接續阻塞；沒有重送舊錯誤請求、改權限或重建 OAuth。
 - OWNER 私人設定頁實際回讀 17 項：預簽 PDF 私人索引、雙日期政策、版面、三場與 72h／既有使用者核准仍存在；未寫缺證據 VERIFIED、正式 OTP/HMAC 金鑰、slot registry、REC scope 或四收件開關。由 OWNER 原 Slots!A1:H4 唯讀取得完整八欄及三列，與核定 2026-12-07 09:00–11:00、11:00–13:00、14:00–16:00、各 1 人、828 研究室一致，未改正式場次或預約。
