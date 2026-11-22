@@ -1,6 +1,26 @@
 # Study1 V2 建置與發布進度（更新 2026-11-22，Asia/Taipei）
 
-## 最新接續點｜2026-11-22 V15 正式後台實際拒絕 OWNER 身分；原部署已成功，真人收件未啟用
+## 最新接續點｜2026-11-22 AI-Team-Camp 方法比對與六步交付流程改善
+
+- TASK_DOMAIN=Study1_V2_DELIVERY_WORKFLOW_IMPROVEMENT；SOURCE_ID/PATH=使用者本輪要求、AI-Team-Camp v1.9.1 本機教材、README.md、AGENTS.md、docs/study1-system-spec.md §70-S.52、當期正式接線／發布 client／OWNER guard；SOURCE_VERSION/SHA=審閱起點 `dd7cdc575526089778206071b98b549f86995d65`；WRITE_OWNER=唯一 V2 Repo。本次文件提交以其父提交及 GitHub 回讀為準，不把審閱基準當永久門檻。
+- COMPLETED=完整比較見原 README；重寫原 AGENTS 的當期執行方法並移除已過期發布全域阻塞；在原 §70-S.52 同步六步交付、集中設定、管理身分根因與條件式重建界線。沒有新增主規格／進度檔、發布器、測試工具或平行產品。教材程式未複製到公開 repo。
+- 比較結論：教材以現成試算表綁定產品、設定選單、Sites 靜態網站＋GAS 預約元件交付；Study1 是原 GAS 同站客製 E1／OTP／知情同意產品。差異不只功能，也包括產品先成形、管理入口、設定清單、來源組裝與完成定義。先前多個本機落後副本、過時 README、歷史／當期阻塞混用、字串轉換與驗證工具擴張造成接續負擔；本輪已修正導航及流程文件，未聲稱程式架構已重構。
+- 當期工作副本為本輪由遠端 main 建立的 `study1-active`；它仍是同一 V2 Repo，不是新招募專案。其他既有副本與其未提交修改均未覆寫或刪除。一般 shell clone 首次因沙盒 DNS 失敗，受支援的網路權限審查允許後完成；這不是舊 Job 或正式寫入拒絕的解除證據。
+
+| 交付步驟 | 本輪對照結果 | 下一必要動作 |
+| --- | --- | --- |
+| 1. 固定來源 | 遠端 main 與新工作副本核對相同 | 後續增量接續，不再以舊本機名稱當最新 |
+| 2. 整段產品 | 既有紀錄核心已集中到 V15；本輪未重測 | 依具體功能回饋修正，不重建已完成核心 |
+| 3. 集中發布 | 既有 V15 官方發布／回讀成功紀錄保留 | 本輪純文件，不再部署相同產品 |
+| 4. 管理身分 | 最新使用者回報仍為 OWNER 拒絕 | 取得可靠可驗證身分／處理必要認證修正；不放寬 guard |
+| 5. 私人設定 | 最新紀錄仍未全部完成技術核驗 | 按 README 五組必要設定及原程式契約集中補缺 |
+| 6. 啟用交付 | 真人最後所知未啟用；當期私人值未重讀 | 適用條件全部成立後再處理，功能驗收待使用者回饋 |
+
+- 保留既有已核定三場、72h 副本、私人預簽 PDF/current.E1、雙日期、PI 自述與 24h／2h 管理政策的紀錄，不重問、不推定全部正式 gate 已成立。剩餘設定包括正式 OTP／binding key、場次登錄綁定、兩項 policy／published.E1／來源ACL與版面、必要交易與管理政策；詳原程式與前次接續證據。本輪沒有讀寫私人值或真人資料。
+- LAST_VERIFIED_STEP=LATEST_MAIN_SOURCE_AND_CAMP_METHOD_REVIEW_WITH_DOCUMENT_DIFF；SYNC_STATUS=DELIVERY_WORKFLOW_DOCUMENTS_UPDATED_V15_RUNTIME_UNCHANGED；FUNCTIONAL_ACCEPTANCE=NOT_RUN_PER_USER_REQUEST。BLOCKERS=OWNER_IDENTITY_NOT_RELIABLY_VERIFIED、FORMAL_SECURITY_CONFIGURATION_NOT_VERIFIED；NEXT_ACTION=優先處理原管理身分的可靠驗證，再依當期合法 OWNER 入口與已有授權完成必要私人設定回讀；如模式確實不可用，處理有完整伺服器驗證的認證修正，不以一般工程或重建借道寫入被拒設定。
+- 本輪能改善原案，因此未啟動「無法改善才重建並廢除舊案」備案。沒有改應用程式、OWNER guard、正式設定／場次／文件／ACL、部署、真人旗標、V1 或排程；沒有新增或主動執行測試／UAT／寄信。GitHub 自動 CI 若觸發，須另依該次結果判定，不能當本輪功能驗收。
+
+## 前次接續點｜2026-11-22 V15 正式後台實際拒絕 OWNER 身分；原部署已成功，真人收件未啟用（歷史）
 
 - 使用者本人開啟原 V15 `/exec?view=admin&workspace=formal` 後回報實際錯誤原文：`Error: 研究室管理身分無法驗證，已拒絕存取。 (第 14 行，檔案名稱：AdminSandbox)`。原 main（前次文件 commit e1b0578）`gas/AdminSandbox.js` 的 `study1AdminOwnerRequired_()` 同時要求 Google Session.getActiveUser() 與 getEffectiveUser() 的 email 等於研究室 OWNER；兩者任一不符即拒絕，不得只取 effective user。
 - 依 [Google Apps Script Session 官方文件](https://developers.google.com/apps-script/reference/base/session)，以部署者執行的匿名 Web App 可能不提供 active email；本次訊息不足以判斷 active 空白、其他登入帳戶或 effective 不符，不能宣稱已查明特定值。第 5–10 版既有獨立 OWNER 瀏覽器工作階段同站驗收成功；應先正常登入僅研究室 OWNER 的獨立工作階段再開同一正式後台（僅身分確認，不做功能測試）。若仍拒絕，需檢討經正式核定的獨立管理身分驗證架構，不放寬現有伺服器 guard、不以其他帳戶或替代入口繞過拒絕。
