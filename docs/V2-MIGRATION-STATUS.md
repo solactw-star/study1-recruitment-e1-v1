@@ -1,6 +1,12 @@
 # Study1 V2 建置與發布進度（更新 2026-11-22，Asia/Taipei）
 
-## 最新接續點｜2026-11-22 V15 正式啟用授權已收到，OWNER 安全配置待實際存取與核驗
+## 最新接續點｜2026-11-22 V15 正式後台實際拒絕 OWNER 身分；原部署已成功，真人收件未啟用
+
+- 使用者本人開啟原 V15 `/exec?view=admin&workspace=formal` 後回報實際錯誤原文：`Error: 研究室管理身分無法驗證，已拒絕存取。 (第 14 行，檔案名稱：AdminSandbox)`。原 main（前次文件 commit e1b0578）`gas/AdminSandbox.js` 的 `study1AdminOwnerRequired_()` 同時要求 Google Session.getActiveUser() 與 getEffectiveUser() 的 email 等於研究室 OWNER；兩者任一不符即拒絕，不得只取 effective user。
+- 依 [Google Apps Script Session 官方文件](https://developers.google.com/apps-script/reference/base/session)，以部署者執行的匿名 Web App 可能不提供 active email；本次訊息不足以判斷 active 空白、其他登入帳戶或 effective 不符，不能宣稱已查明特定值。第 5–10 版既有獨立 OWNER 瀏覽器工作階段同站驗收成功；應先正常登入僅研究室 OWNER 的獨立工作階段再開同一正式後台（僅身分確認，不做功能測試）。若仍拒絕，需檢討經正式核定的獨立管理身分驗證架構，不放寬現有伺服器 guard、不以其他帳戶或替代入口繞過拒絕。
+- TASK_DOMAIN=Study1_V2_V15_OWNER_IDENTITY；LAST_VERIFIED_STEP=USER_REPORTED_ACTUAL_V15_OWNER_DENIAL_AND_SOURCE_CONDITION_REVIEW；SYNC_STATUS=V15_DEPLOYED_OWNER_IDENTITY_DENIED_INTAKE_NOT_ENABLED；BLOCKERS=WEBAPP_ACTIVE_EFFECTIVE_OWNER_NOT_CONFIRMED、FORMAL_SECURITY_CONFIGURATION_NOT_VERIFIED；NEXT_ACTION=在合法研究室 OWNER 工作階段確認後台身分後，按當次正式授權與可追溯證據處理剩餘安全配置；未重新部署、未做功能測試、未開真人收件、未讀寫正式資料、未碰 V1。先前已核定場次、PDF、72h、雙日期與 PI 確認保留，不重問。  
+
+## 前次接續點｜2026-11-22 V15 正式啟用授權已收到，OWNER 安全配置待實際存取與核驗（歷史）
 
 - TASK_DOMAIN=Study1_V2_V15_E1_FORMAL_ACTIVATION；SOURCE_ID/PATH=`AGENTS.md`、`docs/study1-system-spec.md` §70-S.52–54、`scripts/study1-v2-formal-entry.cjs`、`gas/AdminSandbox.js`、`gas/Study1FormalBooking.js`；SOURCE_VERSION/SHA=`2b98f1dcb32a3a3f4d925a95aecd84162e70ef4f`（main，前次 V15 發布程式未變）／最後核驗 V15 candidate `eef5c46f9297500b0c1f7c0c84d18a3e5ebd1bef703271239c67fa70f263d539`；WRITE_OWNER=唯一 V2 Repo、原 V2 OWNER 才能完成私有安全配置。
 - 使用者本輪明確要求完成實際 OWNER 正式安全配置、OTP、時段綁定、同意文件，**符合上線條件後**啟用真人收件；這是當次條件式啟用授權，不等於私有配置已保存、技術 VERIFIED 或收件已開啟，不再重問相同一般授權。沿用先前 OWNER 已回讀的三場 2026-12-07 正式 Slots、72h 副本、私人五頁預簽 PDF/current.E1、雙日期規則、PI 自述已審閱 REC 的私人可追溯紀錄、既有隔離 TEST/CI，不重做功能測試或重新盤點 OAuth。
