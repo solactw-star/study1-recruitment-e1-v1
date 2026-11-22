@@ -1,6 +1,14 @@
 # Study1 V2 建置與發布進度（更新 2026-11-22，Asia/Taipei）
 
-## 最新接續點｜2026-11-22 原 V2 第 15 版集中部署成功，原部署與來源回讀一致
+## 最新接續點｜2026-11-22 V15 正式啟用授權已收到，OWNER 安全配置待實際存取與核驗
+
+- TASK_DOMAIN=Study1_V2_V15_E1_FORMAL_ACTIVATION；SOURCE_ID/PATH=`AGENTS.md`、`docs/study1-system-spec.md` §70-S.52–54、`scripts/study1-v2-formal-entry.cjs`、`gas/AdminSandbox.js`、`gas/Study1FormalBooking.js`；SOURCE_VERSION/SHA=`2b98f1dcb32a3a3f4d925a95aecd84162e70ef4f`（main，前次 V15 發布程式未變）／最後核驗 V15 candidate `eef5c46f9297500b0c1f7c0c84d18a3e5ebd1bef703271239c67fa70f263d539`；WRITE_OWNER=唯一 V2 Repo、原 V2 OWNER 才能完成私有安全配置。
+- 使用者本輪明確要求完成實際 OWNER 正式安全配置、OTP、時段綁定、同意文件，**符合上線條件後**啟用真人收件；這是當次條件式啟用授權，不等於私有配置已保存、技術 VERIFIED 或收件已開啟，不再重問相同一般授權。沿用先前 OWNER 已回讀的三場 2026-12-07 正式 Slots、72h 副本、私人五頁預簽 PDF/current.E1、雙日期規則、PI 自述已審閱 REC 的私人可追溯紀錄、既有隔離 TEST/CI，不重做功能測試或重新盤點 OAuth。
+- 未完成項目：當期 OWNER active/effective 身分與實際私有設定回讀；正式 OTP 及電子同意 binding HMAC 金鑰設定、已核定三場的 slot registry 與綁定證據；兩項正式 REC policy、預簽文件正式 published.E1 指標／ACL／來源／日期布局與對應技術 gate；正式操作／交易及核定管理政策（24h／2h）配置與核驗。上述私有設定最後既有證據仍顯示未完成或未核驗，不把隔離 TEST／離線 CI 或一般批准當正式 VERIFIED。四個 live 開關維持最後所知的關閉狀態，本輪未直接回讀目前私有值。
+- 本輪可用工具實際盤點沒有內建瀏覽器控制或 Apps Script 私人屬性配置介面；只能讀 GitHub 原正式規格、進度及程式，不能核實當前 OWNER 授權或直接儲存原設定。並無新 OWNER 鍵值寫入或被拒操作；先前正式整批寫入曾因缺乏 OWNER/正式核驗而遭 Auto-review 拒絕，並非 V15 發布失敗，不分拆或借道重送被拒寫入，不假填 VERIFIED。
+- COMPLETED=V15_FORMAL_ACTIVATION_AUTHORIZATION_AND_REMAINING_CONFIGURATION_CONTRACT_REVIEWED；LAST_VERIFIED_STEP=MAIN_AND_FORMAL_SOURCE_GATES_READBACK；SYNC_STATUS=V15_DEPLOYED_FORMAL_CONFIGURATION_PENDING_OWNER_ACCESS_AND_EVIDENCE；BLOCKERS=OWNER_CONFIGURATION_TOOL_UNAVAILABLE、FORMAL_SAFETY_CONFIGURATION_NOT_VERIFIED；NEXT_ACTION=由 OWNER 正常進入原同站正式後台，確認 active/effective 身分及所允許的唯讀安全配置證據，再依當期證據完成安全配置及符合全部條件後的啟用；若仍有具體安全門檻未驗，維持收件關閉並逐項報實際原因。未改任何正式資料、私有設置、部署、收件開關、OAuth 或 V1；未重跑功能測試。
+
+## 前次接續點｜2026-11-22 原 V2 第 15 版集中部署成功，原部署與來源回讀一致（歷史）
 
 - TASK_DOMAIN=Study1_V2_CONSOLIDATED_ORIGINAL_RELEASE；SOURCE_ID/PATH=`.github/workflows/study1-v2-release.yml`、`scripts/study1-v2-apps-script.cjs`、原 V2 Script 與原 Web App deployment；SOURCE_VERSION/SHA=`8c34be83027fa17566f1e50430fa27ddfd322b9d`（當期 main）；WRITE_OWNER=使用者本人執行唯一 V2 工作流，Agent 核對發布證據並依授權更新本進度主檔。
 - 使用者本人於 [唯讀預檢 Run #21 / 44967461885](https://github.com/solactw-star/study1-recruitment-e1-v1/actions/runs/44967461885/job/137039619011) 選 main/preflight，提供成功且完整輸入／輸出畫面。main=8c34be8，candidateSha=`eef5c46f9297500b0c1f7c0c84d18a3e5ebd1bef703271239c67fa70f263d539`，headSha=deployedSourceSha=`31a17c3feee9a78968142a1547003d3e7961c047a998779f897c247e85e4c102`，deployedVersion=14，mutationPerformed=false；與已知候選及前版相符。使用者明確授權發布，依同版預檢輸入實際執行 publish。未重試先前遭拒的 Run #20 Job，不推定 Auto-review 原拒絕已撤銷或內建瀏覽器控制能力已恢復。
